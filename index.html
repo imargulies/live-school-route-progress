@@ -117,7 +117,7 @@
             <span id="rpBtnAutoRefresh">Start Live Refresh</span>
             <span id="rpAutoRefreshStatus"></span>
         </div>
-        <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpRouteChips"></span></div>
+        <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpChipSelectAll" title="Select all routes">All</span> <span id="rpChipDeselectAll" title="Deselect all routes">None</span> <span id="rpRouteChips"></span></div>
         <div id="progressStatus"></div>
         <div id="rpProgressCards"></div>
         <div id="rpProgressContent"></div>
@@ -1151,6 +1151,11 @@
     function styleRouteChips() {
         var wrap = document.getElementById('rpRouteChipsWrap');
         forceStyle(wrap, { 'padding': '8px 0', 'display': 'flex', 'align-items': 'center', 'gap': '8px', 'flex-wrap': 'wrap' });
+        var allBtn = document.getElementById('rpChipSelectAll');
+        var noneBtn = document.getElementById('rpChipDeselectAll');
+        var btnStyle = { 'padding': '4px 10px', 'border-radius': '4px', 'font-size': '11px', 'font-weight': '600', 'cursor': 'pointer', 'user-select': 'none', 'border': '1px solid #ccc', 'background': '#fff', 'color': '#555' };
+        forceStyle(allBtn, btnStyle);
+        forceStyle(noneBtn, btnStyle);
         var chips = document.querySelectorAll('.rpRouteChip');
         for (var i = 0; i < chips.length; i++) {
             var isActive = chips[i].classList.contains('rpRouteChipActive');
@@ -1172,6 +1177,18 @@
         var uid = chip.dataset.uid;
         if (selectedRouteChips[uid]) delete selectedRouteChips[uid];
         else selectedRouteChips[uid] = true;
+        renderRouteChips();
+        renderProgress();
+    });
+
+    document.getElementById('rpChipSelectAll').addEventListener('click', function () {
+        for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
+        renderRouteChips();
+        renderProgress();
+    });
+
+    document.getElementById('rpChipDeselectAll').addEventListener('click', function () {
+        selectedRouteChips = {};
         renderRouteChips();
         renderProgress();
     });
@@ -1893,7 +1910,7 @@
                 '<td class="rptd">' + escapeHtml(r.zoneName) + '</td>' +
                 '<td class="rptd">' + r.direction + '</td>' +
                 '<td class="rptd">' + r.window + '</td>' +
-                '<td class="rptd">' + r.durationMin + '</td>' +
+                '<td class="rptd">' + formatMinutesHM(r.durationMin) + '</td>' +
                 '<td class="rptd"><span class="rpStatusBadge ' + stClass + '">' + r.status + '</span></td>' +
                 '</tr>';
         }
