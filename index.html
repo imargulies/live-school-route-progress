@@ -104,7 +104,7 @@
 <div id="tab-progress">
     <div id="rpCard2">
         <div id="rpTitle2">Route Progress</div>
-        <div id="rpDesc2">View today's route status. Routes closest to the current time are shown first. See which vehicles have started, are in progress, or completed their routes.</div>
+        <div id="rpDesc2">View today's route status. See which buses have started their route, which are still out when they should have returned, and which are parked on time. Routes closest to the current time are shown first.</div>
         <div id="rpToolbar2">
             <span class="rpLbl">Date:</span>
             <input type="date" id="rpProgressDate">
@@ -1898,6 +1898,11 @@
             tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:#888;">No records found.</td></tr>';
             return;
         }
+        // Sort: Completed first, Incomplete second, Missed last
+        filtered.sort(function (a, b) {
+            var order = { 'Completed': 0, 'Incomplete': 1, 'Missed': 2 };
+            return (order[a.status] || 2) - (order[b.status] || 2);
+        });
         var html = '';
         for (var i = 0; i < filtered.length; i++) {
             var r = filtered[i];
