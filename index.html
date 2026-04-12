@@ -610,10 +610,10 @@
     var rpZoneDropEl = document.getElementById('rpZoneDropdown');
     var rpZoneSelEl = document.getElementById('rpZoneSelected');
 
-    rpZoneSearchEl.addEventListener('input', function () {
-        var q = this.value.toLowerCase();
-        if (!q) { forceStyle(rpZoneDropEl, { 'display': 'none' }); return; }
-        var matches = cachedZones.filter(function (z) { return z.name.toLowerCase().indexOf(q) !== -1; });
+    function showZoneDropdown(q) {
+        var matches = cachedZones.filter(function (z) {
+            return !q || z.name.toLowerCase().indexOf(q) !== -1;
+        });
         if (!matches.length) {
             rpZoneDropEl.innerHTML = '<div class="rpDropItem" style="color:#888;">No zones found</div>';
         } else {
@@ -625,10 +625,14 @@
         }
         forceStyle(rpZoneDropEl, { 'display': 'block' });
         styleDropdownItems(rpZoneDropEl);
+    }
+
+    rpZoneSearchEl.addEventListener('input', function () {
+        showZoneDropdown(this.value.toLowerCase());
     });
 
     rpZoneSearchEl.addEventListener('focus', function () {
-        if (this.value) this.dispatchEvent(new Event('input'));
+        showZoneDropdown(this.value.toLowerCase());
     });
 
     rpZoneDropEl.addEventListener('click', function (e) {
@@ -657,13 +661,12 @@
     var rpVehSearchEl = document.getElementById('rpVehicleSearch');
     var rpVehDropEl = document.getElementById('rpVehicleDropdown');
 
-    rpVehSearchEl.addEventListener('input', function () {
-        var q = this.value.toLowerCase();
-        if (!q) { forceStyle(rpVehDropEl, { 'display': 'none' }); return; }
+    function showVehicleDropdown(q) {
         var ids = Object.keys(cachedDevices);
         ids.sort(function (a, b) { return (cachedDevices[a] || '').localeCompare(cachedDevices[b] || ''); });
         var matches = ids.filter(function (id) {
-            return !selectedVehicles[id] && (cachedDevices[id] || '').toLowerCase().indexOf(q) !== -1;
+            if (selectedVehicles[id]) return false;
+            return !q || (cachedDevices[id] || '').toLowerCase().indexOf(q) !== -1;
         });
         if (!matches.length) {
             rpVehDropEl.innerHTML = '<div class="rpDropItem" style="color:#888;">No vehicles found</div>';
@@ -676,10 +679,14 @@
         }
         forceStyle(rpVehDropEl, { 'display': 'block' });
         styleDropdownItems(rpVehDropEl);
+    }
+
+    rpVehSearchEl.addEventListener('input', function () {
+        showVehicleDropdown(this.value.toLowerCase());
     });
 
     rpVehSearchEl.addEventListener('focus', function () {
-        if (this.value) this.dispatchEvent(new Event('input'));
+        showVehicleDropdown(this.value.toLowerCase());
     });
 
     rpVehDropEl.addEventListener('click', function (e) {
@@ -766,13 +773,14 @@
         savedRoutes = [];
         for (var i = 0; i < allData.length; i++) {
             var d = allData[i];
-            if (d.data && d.data.indexOf(ROUTE_PREFIX) === 0) {
+            if (d.data) {
                 try {
-                    var json = JSON.parse(d.data.substring(ROUTE_PREFIX.length));
+                    var decoded = atob(d.data);
+                    if (decoded.indexOf(ROUTE_PREFIX) !== 0) continue;
+                    var json = JSON.parse(decoded.substring(ROUTE_PREFIX.length));
                     json._id = d.id;
-                    json._dateTime = d.dateTime;
                     savedRoutes.push(json);
-                } catch (e) { /* skip bad data */ }
+                } catch (e) { /* skip non-route or bad data */ }
             }
         }
         renderRoutesTable();
@@ -893,23 +901,25 @@
 
         try {
             if (editingRouteId) {
+                var b64data = btoa(ROUTE_PREFIX + JSON.stringify(routeData));
                 await apiCall('Set', {
                     typeName: 'CustomData',
                     entity: {
                         id: editingRouteId,
-                        data: ROUTE_PREFIX + JSON.stringify(routeData),
+                        data: b64data,
                         dateTime: new Date().toISOString(),
-                        device: { id: 'NoDeviceId' }
+                        device: { id: vehicleIds[0] }
                     }
                 });
                 showStatus('routeStatus', 'Route updated.', 'success');
             } else {
+                var b64data = btoa(ROUTE_PREFIX + JSON.stringify(routeData));
                 await apiCall('Add', {
                     typeName: 'CustomData',
                     entity: {
-                        data: ROUTE_PREFIX + JSON.stringify(routeData),
+                        data: b64data,
                         dateTime: new Date().toISOString(),
-                        device: { id: 'NoDeviceId' }
+                        device: { id: vehicleIds[0] }
                     }
                 });
                 showStatus('routeStatus', 'Route created.', 'success');
