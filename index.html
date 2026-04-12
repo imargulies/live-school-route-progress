@@ -966,9 +966,10 @@
             showStatus('routeStatus', editingRouteId ? 'Route updated.' : 'Route created.', 'success');
             clearForm();
             showCreateButton();
-            await loadZones(); // Reload zones to get updated comments
+            await loadZones();
             await loadRoutes();
             populateFilters();
+            renderProgress(); // Refresh progress view
         } catch (err) {
             showStatus('routeStatus', 'Error saving route: ' + err.message, 'error');
         } finally {
@@ -1090,6 +1091,7 @@
             await loadZones();
             await loadRoutes();
             populateFilters();
+            renderProgress();
         } catch (err) {
             showStatus('routeStatus', 'Error deleting: ' + err.message, 'error');
         }
@@ -1138,21 +1140,40 @@
         }
     });
 
+    var lastProgressHash = '';
+
     function startAutoRefresh() {
-        stopAutoRefresh(); // clear any existing
+        stopAutoRefresh();
         autoRefreshActive = true;
         styleAutoRefreshBtn();
         renderProgress();
-        autoRefreshInterval = setInterval(function () {
-            // Stop at 8 PM
+        autoRefreshInterval = setInterval(async function () {
             var now = new Date();
             if (now.getHours() >= 20) {
                 stopAutoRefresh();
                 styleAutoRefreshBtn();
                 return;
             }
-            renderProgress();
+            // Silently check for changes before re-rendering
+            try {
+                await loadZones();
+                await loadRoutes();
+                var newHash = getProgressHash();
+                if (newHash !== lastProgressHash) {
+                    renderProgress();
+                }
+            } catch (e) { /* skip failed refresh */ }
         }, 5000);
+    }
+
+    function getProgressHash() {
+        // Simple hash of current route + vehicle state to detect changes
+        var parts = [];
+        for (var i = 0; i < savedRoutes.length; i++) {
+            var r = savedRoutes[i];
+            parts.push(r._uid + ':' + (r.vehicleIds || []).join(','));
+        }
+        return parts.join('|');
     }
 
     function stopAutoRefresh() {
@@ -1390,6 +1411,7 @@
             }
 
             container.innerHTML = html;
+            lastProgressHash = getProgressHash();
 
             // Summary cards
             var cardsHtml = '<div id="rpProgSummary">' +
