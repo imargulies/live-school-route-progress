@@ -1141,12 +1141,30 @@
     });
 
     var lastProgressHash = '';
+    var autoRefreshCountdown = 5;
+    var countdownInterval = null;
 
     function startAutoRefresh() {
         stopAutoRefresh();
         autoRefreshActive = true;
         styleAutoRefreshBtn();
         renderProgress();
+        autoRefreshCountdown = 5;
+
+        // Countdown ticker every second
+        countdownInterval = setInterval(function () {
+            autoRefreshCountdown--;
+            var statusEl = document.getElementById('rpAutoRefreshStatus');
+            if (autoRefreshCountdown > 0) {
+                statusEl.textContent = 'Live - refreshing in ' + autoRefreshCountdown + 's';
+                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#28a745' });
+            } else {
+                statusEl.textContent = 'Live - updating...';
+                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#e67e22' });
+            }
+        }, 1000);
+
+        // Data refresh every 5 seconds
         autoRefreshInterval = setInterval(async function () {
             var now = new Date();
             if (now.getHours() >= 20) {
@@ -1154,20 +1172,136 @@
                 styleAutoRefreshBtn();
                 return;
             }
-            // Silently check for changes before re-rendering
             try {
-                await loadZones();
-                await loadRoutes();
-                var newHash = getProgressHash();
-                if (newHash !== lastProgressHash) {
-                    renderProgress();
-                }
+                await refreshProgressInline();
             } catch (e) { /* skip failed refresh */ }
+            autoRefreshCountdown = 5;
         }, 5000);
     }
 
+    async function refreshProgressInline() {
+        // Fetch fresh trip data without rebuilding the whole table
+        var dateStr = document.getElementById('rpProgressDate').value;
+        if (!dateStr) return;
+        var dayStart = new Date(dateStr + 'T00:00:00');
+        var dayEnd = new Date(dateStr + 'T23:59:59');
+        var trips = await apiCall('Get', {
+            typeName: 'Trip',
+            search: { fromDate: dayStart.toISOString(), toDate: dayEnd.toISOString() }
+        });
+
+        var now = new Date();
+        var currentMinutes = now.getHours() * 60 + now.getMinutes();
+        var isToday = dateStr === formatDate(now);
+
+        // Check if routes changed (add/edit/delete)
+        await loadZones();
+        await loadRoutes();
+        var newHash = getProgressHash();
+        if (newHash !== lastProgressHash) {
+            // Routes changed — full re-render needed
+            renderProgress();
+            return;
+        }
+
+        // Update each vehicle row inline
+        var totalAssign = 0, completedCount = 0, missedCount = 0, notStartedCount = 0;
+
+        for (var ri = 0; ri < savedRoutes.length; ri++) {
+            var r = savedRoutes[ri];
+            var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+            var startMin = timeToMinutes(r.startTime);
+            var endMin = timeToMinutes(r.endTime);
+            var elapsedMin = 0;
+            if (isToday && currentMinutes >= startMin) {
+                elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
+            } else if (!isToday || currentMinutes > endMin) {
+                elapsedMin = endMin - startMin;
+            }
+
+            if (!r.vehicleIds) continue;
+            for (var vi = 0; vi < r.vehicleIds.length; vi++) {
+                var vId = r.vehicleIds[vi];
+                if (!cachedDevices[vId]) continue;
+                totalAssign++;
+
+                var zoneMinutes = 0, lastStopLat = null, lastStopLng = null, isCurrentlyInZone = false;
+                if (zone && zone.points && zone.points.length) {
+                    for (var ti = 0; ti < trips.length; ti++) {
+                        var trip = trips[ti];
+                        if (!trip.device || trip.device.id !== vId) continue;
+                        if (!trip.stopPoint || !trip.stopDuration) continue;
+                        var stopTime = new Date(trip.stop);
+                        var stopMin = stopTime.getHours() * 60 + stopTime.getMinutes();
+                        if (stopMin < startMin || stopMin > endMin) continue;
+                        var inZone = pointInPolygon(trip.stopPoint.y, trip.stopPoint.x, zone.points);
+                        if ((r.direction === 'inside' && inZone) || (r.direction === 'outside' && !inZone)) {
+                            var dur = durationToMinutes(trip.stopDuration);
+                            if (isToday && trip.nextTripStart === undefined) {
+                                dur = Math.min(dur, Math.max(0, currentMinutes - stopMin));
+                            }
+                            zoneMinutes += dur;
+                        }
+                        lastStopLat = trip.stopPoint.y;
+                        lastStopLng = trip.stopPoint.x;
+                        isCurrentlyInZone = inZone;
+                    }
+                }
+                zoneMinutes = Math.round(zoneMinutes * 10) / 10;
+
+                var pastWindow = isToday ? currentMinutes > endMin : true;
+                var beforeWindow = isToday && currentMinutes < startMin;
+
+                // Find the row by data attribute and update inline
+                var row = document.querySelector('[data-veh-uid="' + r._uid + '-' + vId + '"]');
+                if (!row) continue;
+
+                var statusCell = row.querySelector('.rpStatusCell');
+                var timeCell = row.querySelector('.rpTimeCell');
+                var distCell = row.querySelector('.rpDistCell');
+
+                // Compute new status
+                var vStatus, vStatusClass, statusTip;
+                if (beforeWindow) {
+                    vStatus = 'Waiting'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                    statusTip = 'Route has not started yet';
+                } else if (zoneMinutes === 0 && lastStopLat === null) {
+                    vStatus = 'No Data'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                    statusTip = 'No trip data found';
+                } else {
+                    var goodDir = (r.direction === 'inside' && isCurrentlyInZone) || (r.direction === 'outside' && !isCurrentlyInZone);
+                    vStatus = isCurrentlyInZone ? 'In Zone' : 'Out of Zone';
+                    vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
+                    statusTip = goodDir ? 'Vehicle is where it should be' : 'Vehicle is NOT where it should be';
+                    if (goodDir) completedCount++; else missedCount++;
+                }
+
+                if (statusCell) {
+                    statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>';
+                }
+                if (timeCell) {
+                    timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
+                }
+                if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
+                    distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
+                }
+            }
+        }
+
+        // Update summary cards inline
+        var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
+        if (svEls.length >= 4) {
+            svEls[0].textContent = totalAssign;
+            svEls[1].textContent = completedCount;
+            svEls[2].textContent = missedCount;
+            svEls[3].textContent = notStartedCount;
+        }
+
+        // Re-style badges
+        styleProgressContent();
+    }
+
     function getProgressHash() {
-        // Simple hash of current route + vehicle state to detect changes
         var parts = [];
         for (var i = 0; i < savedRoutes.length; i++) {
             var r = savedRoutes[i];
@@ -1178,6 +1312,7 @@
 
     function stopAutoRefresh() {
         if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
         autoRefreshActive = false;
         styleAutoRefreshBtn();
     }
@@ -1381,23 +1516,24 @@
                         }
 
                         var distCol = '';
-                        if (r.direction === 'outside') {
-                            if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
-                                var distKm = distanceToZone(lastStopLat, lastStopLng, zone.points);
-                                distCol = '<td class="rptd">' + distKm + ' km</td>';
-                            } else {
-                                distCol = '<td class="rptd" style="color:#aaa;">N/A</td>';
-                            }
-                        }
 
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
 
+                        var distCellClass = r.direction === 'outside' ? ' class="rptd rpDistCell"' : '';
+                        if (r.direction === 'outside') {
+                            if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
+                                distCol = '<td' + distCellClass + '>' + distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km</td>';
+                            } else {
+                                distCol = '<td' + distCellClass + ' style="color:#aaa;">N/A</td>';
+                            }
+                        }
+
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr>' +
+                            html: '<tr data-veh-uid="' + r._uid + '-' + vId + '">' +
                                 '<td class="rptd">' + escapeHtml(vName) + '</td>' +
-                                '<td class="rptd"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
-                                '<td class="rptd">' + timeDisplay + '</td>' +
+                                '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
+                                '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
                                 '</tr>'
                         });
