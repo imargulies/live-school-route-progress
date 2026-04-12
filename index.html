@@ -32,7 +32,7 @@
             <div id="rpFormGrid">
                 <div class="rpFormRow">
                     <span class="rpLbl">Route Name:</span>
-                    <input type="text" id="rpRouteName" placeholder="e.g. Morning Delivery Run">
+                    <input type="text" id="rpRouteName" placeholder="e.g. Morning 8-9am Route">
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Zone:</span>
@@ -481,11 +481,11 @@
     var cachedDrivers = {};
     var savedRoutes = [];
     var editingRouteId = null;
-    var deleteRouteId = null;
+    // deleteRouteId removed — using deleteRouteIdx in modal handler
     var reportData = [];
     var activeReportFilter = 'all';
     var reportExportEnabled = false;
-    var ROUTE_PREFIX = 'ROUTE_PROGRESS:';
+    var ROUTE_PREFIX = 'ROUTE:';
     var SYSTEM_ZONE_IDS = ['ZoneOfficeId', 'ZoneHomeId', 'ZoneCustomerId'];
     var selectedDirection = 'inside';
     var selectedVehicles = {};
@@ -635,7 +635,8 @@
         showZoneDropdown(this.value.toLowerCase());
     });
 
-    rpZoneDropEl.addEventListener('click', function (e) {
+    rpZoneDropEl.addEventListener('mousedown', function (e) {
+        e.preventDefault();
         var item = e.target.closest('.rpDropItem');
         if (item && item.dataset.zoneId) {
             selectZone(item.dataset.zoneId, item.dataset.zoneName);
@@ -689,14 +690,14 @@
         showVehicleDropdown(this.value.toLowerCase());
     });
 
-    rpVehDropEl.addEventListener('click', function (e) {
+    rpVehDropEl.addEventListener('mousedown', function (e) {
+        e.preventDefault(); // Prevent blur/focus loss
         var item = e.target.closest('.rpDropItem');
         if (item && item.dataset.vehId) {
             selectedVehicles[item.dataset.vehId] = true;
             renderVehicleChips();
-            rpVehSearchEl.value = '';
-            forceStyle(rpVehDropEl, { 'display': 'none' });
-            rpVehSearchEl.focus();
+            // Re-show dropdown with current filter (minus the just-added vehicle)
+            showVehicleDropdown(rpVehSearchEl.value.toLowerCase());
         }
     });
 
@@ -767,20 +768,46 @@
         forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
     });
 
-    // ========== ROUTE CRUD ==========
+    // ========== ROUTE CRUD (stored in zone comments) ==========
+    // Routes are stored as ROUTE:[{...},{...}] in each zone's comment field.
+    // Each route object: {name, direction, startTime, endTime, vehicleIds, activeDays, _uid}
+    // _uid is a simple unique ID for edit/delete.
+
+    function generateUid() {
+        return 'r' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
+    }
+
+    function parseRoutesFromComment(comment) {
+        if (!comment) return { routes: [], rest: '' };
+        var match = comment.match(/ROUTE:(\[.*\])/);
+        if (!match) return { routes: [], rest: comment };
+        try {
+            var routes = JSON.parse(match[1]);
+            var rest = comment.replace(/\s*ROUTE:\[.*\]/, '').trim();
+            return { routes: routes, rest: rest };
+        } catch (e) { return { routes: [], rest: comment }; }
+    }
+
+    function writeRoutesToComment(existingComment, routes) {
+        var parsed = parseRoutesFromComment(existingComment);
+        var rest = parsed.rest;
+        if (!routes.length) return rest;
+        var tag = 'ROUTE:' + JSON.stringify(routes);
+        return rest ? (rest + ' ' + tag) : tag;
+    }
+
     async function loadRoutes() {
-        var allData = await apiCall('Get', { typeName: 'CustomData' });
         savedRoutes = [];
-        for (var i = 0; i < allData.length; i++) {
-            var d = allData[i];
-            if (d.data) {
-                try {
-                    var decoded = base64ToUtf8(d.data);
-                    if (decoded.indexOf(ROUTE_PREFIX) !== 0) continue;
-                    var json = JSON.parse(decoded.substring(ROUTE_PREFIX.length));
-                    json._id = d.id;
-                    savedRoutes.push(json);
-                } catch (e) { /* skip non-route or bad data */ }
+        for (var i = 0; i < cachedZones.length; i++) {
+            var z = cachedZones[i];
+            var parsed = parseRoutesFromComment(z.comment);
+            for (var j = 0; j < parsed.routes.length; j++) {
+                var r = parsed.routes[j];
+                r.zoneId = z.id;
+                r.zoneName = z.name;
+                r._zoneIdx = i;
+                if (!r._uid) r._uid = generateUid();
+                savedRoutes.push(r);
             }
         }
         renderRoutesTable();
@@ -890,9 +917,10 @@
         if (!activeDays.length) { showStatus('routeStatus', 'Please select at least one active day.', 'error'); return; }
 
         var routeData = {
-            name: name, zoneId: zoneId, zoneName: zoneName,
-            direction: selectedDirection, startTime: startTime, endTime: endTime,
-            vehicleIds: vehicleIds, activeDays: activeDays
+            name: name, direction: selectedDirection,
+            startTime: startTime, endTime: endTime,
+            vehicleIds: vehicleIds, activeDays: activeDays,
+            _uid: editingRouteId || generateUid()
         };
 
         var btn = document.getElementById('rpBtnSaveRoute');
@@ -900,30 +928,33 @@
         btn.textContent = 'Saving...';
 
         try {
+            // Find the zone and update its comment
+            var zone = cachedZones.find(function (z) { return z.id === zoneId; });
+            if (!zone) throw new Error('Zone not found');
+
+            var parsed = parseRoutesFromComment(zone.comment);
             if (editingRouteId) {
-                var b64data = utf8ToBase64(ROUTE_PREFIX + JSON.stringify(routeData));
-                await apiCall('Set', {
-                    typeName: 'CustomData',
-                    entity: {
-                        id: editingRouteId,
-                        data: b64data,
-                        device: { id: vehicleIds[0] }
+                // Replace existing route by _uid
+                for (var ri = 0; ri < parsed.routes.length; ri++) {
+                    if (parsed.routes[ri]._uid === editingRouteId) {
+                        parsed.routes[ri] = routeData;
+                        break;
                     }
-                });
-                showStatus('routeStatus', 'Route updated.', 'success');
+                }
             } else {
-                var b64data = utf8ToBase64(ROUTE_PREFIX + JSON.stringify(routeData));
-                await apiCall('Add', {
-                    typeName: 'CustomData',
-                    entity: {
-                        data: b64data,
-                        device: { id: vehicleIds[0] }
-                    }
-                });
-                showStatus('routeStatus', 'Route created.', 'success');
+                parsed.routes.push(routeData);
             }
+
+            var updatedComment = writeRoutesToComment(zone.comment, parsed.routes);
+            await apiCall('Set', {
+                typeName: 'Zone',
+                entity: { id: zone.id, comment: updatedComment }
+            });
+
+            showStatus('routeStatus', editingRouteId ? 'Route updated.' : 'Route created.', 'success');
             clearForm();
             showCreateButton();
+            await loadZones(); // Reload zones to get updated comments
             await loadRoutes();
             populateFilters();
         } catch (err) {
@@ -949,7 +980,7 @@
     function editRoute(idx) {
         var r = savedRoutes[idx];
         if (!r) return;
-        editingRouteId = r._id;
+        editingRouteId = r._uid;
         document.getElementById('rpRouteName').value = r.name;
 
         // Set zone
@@ -1020,24 +1051,37 @@
     }
 
     // Delete with modal
+    var deleteRouteIdx = null;
     function confirmDeleteRoute(idx) {
-        deleteRouteId = savedRoutes[idx] ? savedRoutes[idx]._id : null;
-        if (!deleteRouteId) return;
-        document.getElementById('rpModalMsg').textContent = 'Are you sure you want to delete the route "' + savedRoutes[idx].name + '"? This cannot be undone.';
+        deleteRouteIdx = idx;
+        var r = savedRoutes[idx];
+        if (!r) return;
+        document.getElementById('rpModalMsg').textContent = 'Are you sure you want to delete the route "' + r.name + '"? This cannot be undone.';
         forceStyle(document.getElementById('rpModal'), { 'display': 'flex' });
     }
 
     document.getElementById('rpModalConfirm').addEventListener('click', async function () {
-        if (!deleteRouteId) return;
+        if (deleteRouteIdx === null) return;
+        var r = savedRoutes[deleteRouteIdx];
+        if (!r) return;
         try {
-            await apiCall('Remove', { typeName: 'CustomData', entity: { id: deleteRouteId } });
+            var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+            if (!zone) throw new Error('Zone not found');
+            var parsed = parseRoutesFromComment(zone.comment);
+            parsed.routes = parsed.routes.filter(function (rt) { return rt._uid !== r._uid; });
+            var updatedComment = writeRoutesToComment(zone.comment, parsed.routes);
+            await apiCall('Set', {
+                typeName: 'Zone',
+                entity: { id: zone.id, comment: updatedComment }
+            });
             showStatus('routeStatus', 'Route deleted.', 'success');
+            await loadZones();
             await loadRoutes();
             populateFilters();
         } catch (err) {
             showStatus('routeStatus', 'Error deleting: ' + err.message, 'error');
         }
-        deleteRouteId = null;
+        deleteRouteIdx = null;
         forceStyle(document.getElementById('rpModal'), { 'display': 'none' });
     });
 
@@ -1348,7 +1392,7 @@
         rf.innerHTML = '<option value="">All Routes</option>';
         for (var i = 0; i < savedRoutes.length; i++) {
             var opt = document.createElement('option');
-            opt.value = savedRoutes[i]._id;
+            opt.value = savedRoutes[i]._uid;
             opt.textContent = savedRoutes[i].name;
             rf.appendChild(opt);
         }
@@ -1394,7 +1438,7 @@
         try {
             await loadRoutes();
             var routes = savedRoutes;
-            if (routeFilterId) routes = routes.filter(function (r) { return r._id === routeFilterId; });
+            if (routeFilterId) routes = routes.filter(function (r) { return r._uid === routeFilterId; });
 
             if (!routes.length) {
                 showStatus('reportStatus', 'No routes found.', 'info');
@@ -1464,7 +1508,7 @@
                         else status = 'Missed';
 
                         reportData.push({
-                            routeName: r.name, routeId: r._id,
+                            routeName: r.name, routeId: r._uid,
                             vehicleId: vId, vehicleName: cachedDevices[vId] || vId,
                             driverId: driverId, driverName: driverId ? (cachedDrivers[driverId] || '') : '',
                             date: dayStr, zoneName: r.zoneName || '',
