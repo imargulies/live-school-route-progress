@@ -775,7 +775,7 @@
             var d = allData[i];
             if (d.data) {
                 try {
-                    var decoded = atob(d.data);
+                    var decoded = base64ToUtf8(d.data);
                     if (decoded.indexOf(ROUTE_PREFIX) !== 0) continue;
                     var json = JSON.parse(decoded.substring(ROUTE_PREFIX.length));
                     json._id = d.id;
@@ -901,24 +901,22 @@
 
         try {
             if (editingRouteId) {
-                var b64data = btoa(ROUTE_PREFIX + JSON.stringify(routeData));
+                var b64data = utf8ToBase64(ROUTE_PREFIX + JSON.stringify(routeData));
                 await apiCall('Set', {
                     typeName: 'CustomData',
                     entity: {
                         id: editingRouteId,
                         data: b64data,
-                        dateTime: new Date().toISOString(),
                         device: { id: vehicleIds[0] }
                     }
                 });
                 showStatus('routeStatus', 'Route updated.', 'success');
             } else {
-                var b64data = btoa(ROUTE_PREFIX + JSON.stringify(routeData));
+                var b64data = utf8ToBase64(ROUTE_PREFIX + JSON.stringify(routeData));
                 await apiCall('Add', {
                     typeName: 'CustomData',
                     entity: {
                         data: b64data,
-                        dateTime: new Date().toISOString(),
                         device: { id: vehicleIds[0] }
                     }
                 });
@@ -1893,6 +1891,21 @@
     }
 
     function escapeHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // Unicode-safe base64 encode/decode
+    function utf8ToBase64(str) {
+        var bytes = new TextEncoder().encode(str);
+        var binary = '';
+        for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+    }
+
+    function base64ToUtf8(b64) {
+        var binary = atob(b64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return new TextDecoder().decode(bytes);
+    }
 
     function showStatus(id, msg, type) {
         var el = document.getElementById(id);
