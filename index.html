@@ -113,11 +113,11 @@
             <input type="time" id="rpProgressTimeFrom" value="00:00">
             <span class="rpLbl">To:</span>
             <input type="time" id="rpProgressTimeTo" value="23:59">
-            <select id="rpProgressRouteFilter" multiple><option value="" selected>All Routes</option></select>
             <span id="rpBtnRefresh">Refresh</span>
             <span id="rpBtnAutoRefresh">Start Live Refresh</span>
             <span id="rpAutoRefreshStatus"></span>
         </div>
+        <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpRouteChips"></span></div>
         <div id="progressStatus"></div>
         <div id="rpProgressCards"></div>
         <div id="rpProgressContent"></div>
@@ -1114,6 +1114,68 @@
     // ========== ROUTE PROGRESS (Tab 2) ==========
     document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
 
+    var selectedRouteChips = {}; // _uid -> true (all selected by default)
+
+    function renderRouteChips() {
+        var container = document.getElementById('rpRouteChips');
+        if (!savedRoutes.length) {
+            container.innerHTML = '<span style="color:#888;font-size:13px;">No routes created</span>';
+            return;
+        }
+        // On first render, select all
+        var anySelected = false;
+        for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k)) { anySelected = true; break; } }
+        if (!anySelected) {
+            for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
+        }
+        var now = new Date();
+        var currentMin = now.getHours() * 60 + now.getMinutes();
+        var todayStr = formatDate(now);
+        var selDateStr = document.getElementById('rpProgressDate').value;
+        var isToday = selDateStr === todayStr;
+
+        var html = '';
+        for (var i = 0; i < savedRoutes.length; i++) {
+            var r = savedRoutes[i];
+            var active = selectedRouteChips[r._uid];
+            var startMin = timeToMinutes(r.startTime);
+            var endMin = timeToMinutes(r.endTime);
+            var isLive = isToday && currentMin >= startMin && currentMin <= endMin;
+            html += '<span class="rpRouteChip' + (active ? ' rpRouteChipActive' : '') + (isLive ? ' rpRouteChipLive' : '') + '" data-uid="' + r._uid + '">' +
+                escapeHtml(r.name) + ' <span style="opacity:0.7">(' + formatWindow(r.startTime, r.endTime) + ')</span></span>';
+        }
+        container.innerHTML = html;
+        styleRouteChips();
+    }
+
+    function styleRouteChips() {
+        var wrap = document.getElementById('rpRouteChipsWrap');
+        forceStyle(wrap, { 'padding': '8px 0', 'display': 'flex', 'align-items': 'center', 'gap': '8px', 'flex-wrap': 'wrap' });
+        var chips = document.querySelectorAll('.rpRouteChip');
+        for (var i = 0; i < chips.length; i++) {
+            var isActive = chips[i].classList.contains('rpRouteChipActive');
+            var isLive = chips[i].classList.contains('rpRouteChipLive');
+            forceStyle(chips[i], {
+                'display': 'inline-block', 'padding': '6px 14px', 'border-radius': '20px',
+                'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer', 'user-select': 'none',
+                'border': isLive && isActive ? '2px solid #28a745' : (isActive ? '2px solid #0078d4' : '2px solid #ccc'),
+                'background': isActive ? (isLive ? '#d4edda' : '#e8f0fe') : '#f0f0f0',
+                'color': isActive ? (isLive ? '#155724' : '#0078d4') : '#999',
+                'box-shadow': isLive && isActive ? '0 0 6px rgba(40,167,69,0.3)' : 'none'
+            });
+        }
+    }
+
+    document.getElementById('rpRouteChips').addEventListener('click', function (e) {
+        var chip = e.target.closest('.rpRouteChip');
+        if (!chip) return;
+        var uid = chip.dataset.uid;
+        if (selectedRouteChips[uid]) delete selectedRouteChips[uid];
+        else selectedRouteChips[uid] = true;
+        renderRouteChips();
+        renderProgress();
+    });
+
     var DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     function updateDateLabel() {
         var dateStr = document.getElementById('rpProgressDate').value;
@@ -1297,8 +1359,23 @@
             svEls[3].textContent = notStartedCount;
         }
 
+        // Re-sort rows within each route table: red first, green, then no data
+        var routeTables = document.querySelectorAll('.rpProgressTable tbody');
+        for (var rt = 0; rt < routeTables.length; rt++) {
+            var rows = Array.prototype.slice.call(routeTables[rt].querySelectorAll('tr[data-veh-uid]'));
+            rows.sort(function (a, b) {
+                var aStatus = a.querySelector('.rpStMissed') ? 0 : (a.querySelector('.rpStCompleted') ? 1 : 2);
+                var bStatus = b.querySelector('.rpStMissed') ? 0 : (b.querySelector('.rpStCompleted') ? 1 : 2);
+                return aStatus - bStatus;
+            });
+            for (var rr = 0; rr < rows.length; rr++) routeTables[rt].appendChild(rows[rr]);
+        }
+
         // Re-style badges
         styleProgressContent();
+
+        // Update route chips (live status may change)
+        renderRouteChips();
     }
 
     function getProgressHash() {
@@ -1354,15 +1431,9 @@
             var filterFrom = timeToMinutes(document.getElementById('rpProgressTimeFrom').value || '00:00');
             var filterTo = timeToMinutes(document.getElementById('rpProgressTimeTo').value || '23:59');
 
-            // Route name filter (multi-select)
-            var routeFilterEl = document.getElementById('rpProgressRouteFilter');
-            var selectedRouteUids = [];
-            for (var oi = 0; oi < routeFilterEl.options.length; oi++) {
-                if (routeFilterEl.options[oi].selected && routeFilterEl.options[oi].value) {
-                    selectedRouteUids.push(routeFilterEl.options[oi].value);
-                }
-            }
-            var filterAllRoutes = selectedRouteUids.length === 0 || routeFilterEl.options[0].selected;
+            // Route chip filter
+            var anyChipSelected = false;
+            for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k)) { anyChipSelected = true; break; } }
 
             var dayFilteredRoutes = savedRoutes.filter(function (r) {
                 var days = r.activeDays || [0,1,2,3,4,5];
@@ -1371,8 +1442,8 @@
                 var rStart = timeToMinutes(r.startTime);
                 var rEnd = timeToMinutes(r.endTime);
                 if (rEnd < filterFrom || rStart > filterTo) return false;
-                // Route name filter
-                if (!filterAllRoutes && selectedRouteUids.indexOf(r._uid) === -1) return false;
+                // Route chip filter
+                if (anyChipSelected && !selectedRouteChips[r._uid]) return false;
                 return true;
             });
 
@@ -1653,15 +1724,8 @@
             opt.textContent = savedRoutes[i].name;
             rf.appendChild(opt);
         }
-        // Route filter (Progress tab - multi-select)
-        var prf = document.getElementById('rpProgressRouteFilter');
-        prf.innerHTML = '<option value="" selected>All Routes</option>';
-        for (var i = 0; i < savedRoutes.length; i++) {
-            var opt = document.createElement('option');
-            opt.value = savedRoutes[i]._uid;
-            opt.textContent = savedRoutes[i].name + ' (' + formatWindow(savedRoutes[i].startTime, savedRoutes[i].endTime) + ')';
-            prf.appendChild(opt);
-        }
+        // Route filter (Progress tab - chips)
+        renderRouteChips();
         // Vehicle filter
         var vf = document.getElementById('rpVehicleFilter');
         vf.innerHTML = '<option value="">All Vehicles</option>';
@@ -2185,7 +2249,12 @@
         return 0;
     }
 
-    function formatDate(d) { return d.toISOString().split('T')[0]; }
+    function formatDate(d) {
+        var yyyy = d.getFullYear();
+        var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+        var dd = ('0' + d.getDate()).slice(-2);
+        return yyyy + '-' + mm + '-' + dd;
+    }
 
     function formatDateTime(dt) {
         if (!dt) return '-';
