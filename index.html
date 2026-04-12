@@ -1884,7 +1884,7 @@
     }
 
     function getFilteredReport() {
-        var filtered = reportData;
+        var filtered = reportData.slice(); // always copy
         if (activeReportFilter === 'completed') filtered = filtered.filter(function (r) { return r.status === 'Completed'; });
         else if (activeReportFilter === 'incomplete') filtered = filtered.filter(function (r) { return r.status === 'Incomplete'; });
         else if (activeReportFilter === 'missed') filtered = filtered.filter(function (r) { return r.status === 'Missed'; });
