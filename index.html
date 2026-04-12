@@ -1,0 +1,1917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Progress</title>
+</head>
+<body>
+<div id="rp-root">
+
+<!-- TABS -->
+<div id="rpTabs">
+    <span id="rpTabBtn-progress" data-tab="progress">Route Progress</span>
+    <span id="rpTabBtn-routes" data-tab="routes">Manage Routes</span>
+    <span id="rpTabBtn-report" data-tab="report">Route Report</span>
+</div>
+
+<!-- TAB: MANAGE ROUTES -->
+<div id="tab-routes">
+    <div id="rpCard1">
+        <div id="rpTitle1">Manage Routes</div>
+        <div id="rpDesc1">Create routes by assigning vehicles to a zone with a time window. Vehicles can be required to be inside or outside the zone during that window.</div>
+
+        <!-- Create Route Button (shown when form is hidden) -->
+        <div id="rpCreateBtnWrap">
+            <span id="rpBtnCreateNew">+ Create New Route</span>
+        </div>
+
+        <!-- Route Form (hidden by default) -->
+        <div id="rpFormWrap" style="display:none;">
+            <div id="rpFormTitle">Create New Route</div>
+            <div id="rpFormGrid">
+                <div class="rpFormRow">
+                    <span class="rpLbl">Route Name:</span>
+                    <input type="text" id="rpRouteName" placeholder="e.g. Morning Delivery Run">
+                </div>
+                <div class="rpFormRow">
+                    <span class="rpLbl">Zone:</span>
+                    <div id="rpZoneSearchWrap">
+                        <input type="text" id="rpZoneSearch" placeholder="Search and select a zone..." autocomplete="off">
+                        <div id="rpZoneDropdown"></div>
+                        <input type="hidden" id="rpZoneId" value="">
+                        <span id="rpZoneSelected"></span>
+                    </div>
+                </div>
+                <div class="rpFormRow">
+                    <span class="rpLbl">Direction:</span>
+                    <span id="rpDirInside" class="rpToggle rpToggleActive">Inside Zone</span>
+                    <span id="rpDirOutside" class="rpToggle">Outside Zone</span>
+                </div>
+                <div class="rpFormRow">
+                    <span class="rpLbl">Start Time:</span>
+                    <input type="time" id="rpStartTime" value="08:00">
+                    <span class="rpLbl" style="margin-left:16px;">End Time:</span>
+                    <input type="time" id="rpEndTime" value="17:00">
+                </div>
+                <div class="rpFormRow">
+                    <span class="rpLbl">Active Days:</span>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="0" checked> Sun</label>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="1" checked> Mon</label>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="2" checked> Tue</label>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="3" checked> Wed</label>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="4" checked> Thu</label>
+                    <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="5" checked> Fri</label>
+                </div>
+                <div class="rpFormRow">
+                    <span class="rpLbl">Assign Vehicles:</span>
+                    <div id="rpVehicleSelectWrap">
+                        <input type="text" id="rpVehicleSearch" placeholder="Search and add vehicles..." autocomplete="off">
+                        <div id="rpVehicleDropdown"></div>
+                    </div>
+                </div>
+                <div id="rpVehicleChips"></div>
+                <div id="rpFormBtns">
+                    <span id="rpBtnSaveRoute">Save Route</span>
+                    <span id="rpBtnCancelEdit">Cancel</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="routeStatus"></div>
+
+        <!-- Routes Table -->
+        <div id="rpRoutesTableWrap">
+            <table id="rpRoutesTable">
+                <thead><tr>
+                    <th class="rpth">Route Name</th>
+                    <th class="rpth">Zone</th>
+                    <th class="rpth">Direction</th>
+                    <th class="rpth">Window</th>
+                    <th class="rpth">Days</th>
+                    <th class="rpth">Vehicles</th>
+                    <th class="rpth">Actions</th>
+                </tr></thead>
+                <tbody id="rpRoutesBody">
+                    <tr><td colspan="7" id="rpLoading">Loading routes...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- TAB 2: ROUTE PROGRESS -->
+<div id="tab-progress">
+    <div id="rpCard2">
+        <div id="rpTitle2">Route Progress</div>
+        <div id="rpDesc2">View today's route status. Routes closest to the current time are shown first. See which vehicles have started, are in progress, or completed their routes.</div>
+        <div id="rpToolbar2">
+            <span class="rpLbl">Date:</span>
+            <input type="date" id="rpProgressDate">
+            <span id="rpBtnRefresh">Refresh</span>
+            <span id="rpBtnAutoRefresh">Start Live Refresh</span>
+            <span id="rpAutoRefreshStatus"></span>
+        </div>
+        <div id="progressStatus"></div>
+        <div id="rpProgressCards"></div>
+        <div id="rpProgressContent"></div>
+    </div>
+</div>
+
+<!-- TAB 3: ROUTE REPORT -->
+<div id="tab-report">
+    <div id="rpCard3">
+        <div id="rpTitle3">Route Report</div>
+        <div id="rpDesc3">Generate historical reports on route completion. Filter by date range, route, vehicle, or driver and export results to Excel.</div>
+        <div id="rpToolbar3">
+            <span class="rpLbl">From:</span>
+            <input type="date" id="rpReportFrom">
+            <span class="rpLbl">To:</span>
+            <input type="date" id="rpReportTo">
+            <select id="rpRouteFilter"><option value="">All Routes</option></select>
+            <select id="rpVehicleFilter"><option value="">All Vehicles</option></select>
+            <select id="rpDriverFilter"><option value="">All Drivers</option></select>
+            <span id="rpBtnGenReport">Generate Report</span>
+            <span id="rpBtnExport">Export Excel</span>
+        </div>
+        <div id="reportStatus"></div>
+        <div id="rpReportSummary"></div>
+        <div id="rpReportTableWrap">
+            <table id="rpReportTable">
+                <thead><tr>
+                    <th class="rpth">Route</th>
+                    <th class="rpth">Vehicle</th>
+                    <th class="rpth">Driver</th>
+                    <th class="rpth">Date</th>
+                    <th class="rpth">Zone</th>
+                    <th class="rpth">Direction</th>
+                    <th class="rpth">Window</th>
+                    <th class="rpth">Duration (min)</th>
+                    <th class="rpth">Status</th>
+                </tr></thead>
+                <tbody id="rpReportBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- DELETE MODAL -->
+<div id="rpModal">
+    <div id="rpModalBox">
+        <div id="rpModalTitle">Confirm Delete</div>
+        <div id="rpModalMsg">Are you sure you want to delete this route? This cannot be undone.</div>
+        <div id="rpModalBtns">
+            <span id="rpModalConfirm">Delete</span>
+            <span id="rpModalCancel">Cancel</span>
+        </div>
+    </div>
+</div>
+
+</div>
+
+<script>
+    // ========== FORCE STYLES VIA JS (beats Geotab !important) ==========
+    function forceStyle(el, styles) {
+        if (!el) return;
+        for (var prop in styles) {
+            if (styles.hasOwnProperty(prop)) el.style.setProperty(prop, styles[prop], 'important');
+        }
+    }
+
+    function applyBaseStyles() {
+        forceStyle(document.getElementById('rp-root'), {
+            'font-family': '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+            'background': '#f4f6f9', 'color': '#333', 'padding': '0 20px 20px', 'max-width': '100%'
+        });
+
+        // Tabs
+        var tabsEl = document.getElementById('rpTabs');
+        forceStyle(tabsEl, {
+            'display': 'flex', 'margin': '0', 'padding': '10px 20px 0',
+            'border-bottom': '2px solid #ddd', 'background': '#fff',
+            'position': 'sticky', 'top': '0', 'z-index': '100'
+        });
+
+        applyTabStyles('progress');
+
+        // Cards
+        var cards = ['rpCard1', 'rpCard2', 'rpCard3'];
+        for (var i = 0; i < cards.length; i++) {
+            forceStyle(document.getElementById(cards[i]), {
+                'background': '#fff', 'border-radius': '8px', 'box-shadow': '0 1px 4px rgba(0,0,0,0.1)',
+                'padding': '20px', 'margin-top': '20px'
+            });
+        }
+
+        // Titles
+        var titles = ['rpTitle1', 'rpTitle2', 'rpTitle3'];
+        for (var i = 0; i < titles.length; i++) {
+            forceStyle(document.getElementById(titles[i]), {
+                'font-size': '18px', 'font-weight': '700', 'color': '#1a1a1a', 'margin-bottom': '4px'
+            });
+        }
+
+        // Descriptions
+        var descs = ['rpDesc1', 'rpDesc2', 'rpDesc3'];
+        for (var i = 0; i < descs.length; i++) {
+            forceStyle(document.getElementById(descs[i]), {
+                'font-size': '13px', 'color': '#777', 'margin-bottom': '16px', 'line-height': '1.4'
+            });
+        }
+
+        // Hide inactive tabs (progress is default/first)
+        forceStyle(document.getElementById('tab-routes'), { 'display': 'none' });
+        forceStyle(document.getElementById('tab-report'), { 'display': 'none' });
+
+        // Toolbars
+        var toolbars = ['rpToolbar2', 'rpToolbar3'];
+        for (var i = 0; i < toolbars.length; i++) {
+            forceStyle(document.getElementById(toolbars[i]), {
+                'display': 'flex', 'gap': '12px', 'align-items': 'center', 'flex-wrap': 'wrap', 'margin-bottom': '16px'
+            });
+        }
+
+        // Style all labels
+        var lbls = document.querySelectorAll('.rpLbl');
+        for (var i = 0; i < lbls.length; i++) {
+            forceStyle(lbls[i], { 'font-weight': '600', 'font-size': '13px', 'color': '#555' });
+        }
+
+        // Style all th
+        var ths = document.querySelectorAll('.rpth');
+        for (var i = 0; i < ths.length; i++) {
+            forceStyle(ths[i], {
+                'background': '#f0f2f5', 'padding': '10px 12px', 'text-align': 'left',
+                'font-weight': '600', 'color': '#555', 'border-bottom': '2px solid #ddd',
+                'position': 'sticky', 'top': '0', 'font-size': '13px'
+            });
+        }
+
+        // Tables
+        var tables = ['rpRoutesTable', 'rpReportTable'];
+        for (var i = 0; i < tables.length; i++) {
+            forceStyle(document.getElementById(tables[i]), {
+                'width': '100%', 'border-collapse': 'collapse', 'font-size': '13px'
+            });
+        }
+
+        // Style inputs/selects
+        styleFormElements();
+
+        // Form area
+        styleForm();
+
+        // Modal
+        styleModal();
+
+        // Buttons
+        styleButtons();
+    }
+
+    function styleFormElements() {
+        var inputs = document.querySelectorAll('#rp-root input[type="text"], #rp-root input[type="date"], #rp-root input[type="time"], #rp-root select');
+        for (var i = 0; i < inputs.length; i++) {
+            forceStyle(inputs[i], {
+                'padding': '8px 12px', 'border': '1px solid #ccc', 'border-radius': '4px',
+                'font-size': '13px', 'background': '#fff', 'color': '#333',
+                'height': 'auto', 'box-sizing': 'border-box'
+            });
+        }
+    }
+
+    function styleForm() {
+        // Create button
+        forceStyle(document.getElementById('rpCreateBtnWrap'), {
+            'margin-bottom': '16px'
+        });
+        forceStyle(document.getElementById('rpBtnCreateNew'), {
+            'padding': '10px 24px', 'border': 'none', 'border-radius': '6px',
+            'font-size': '14px', 'font-weight': '600', 'cursor': 'pointer',
+            'background': '#0078d4', 'color': '#fff', 'display': 'inline-block',
+            'user-select': 'none'
+        });
+
+        forceStyle(document.getElementById('rpFormWrap'), {
+            'background': '#f8f9fa', 'border': '1px solid #e0e0e0', 'border-radius': '8px',
+            'padding': '16px', 'margin-bottom': '20px'
+        });
+        forceStyle(document.getElementById('rpFormTitle'), {
+            'font-size': '15px', 'font-weight': '700', 'color': '#333', 'margin-bottom': '12px'
+        });
+        forceStyle(document.getElementById('rpFormGrid'), {
+            'display': 'flex', 'flex-direction': 'column', 'gap': '10px'
+        });
+        var rows = document.querySelectorAll('.rpFormRow');
+        for (var i = 0; i < rows.length; i++) {
+            forceStyle(rows[i], {
+                'display': 'flex', 'align-items': 'center', 'gap': '10px', 'flex-wrap': 'wrap'
+            });
+        }
+        forceStyle(document.getElementById('rpFormBtns'), {
+            'display': 'flex', 'gap': '10px', 'margin-top': '8px'
+        });
+        forceStyle(document.getElementById('rpRouteName'), { 'width': '300px' });
+        forceStyle(document.getElementById('rpVehicleSearch'), { 'width': '300px' });
+
+        // Zone search
+        forceStyle(document.getElementById('rpZoneSearchWrap'), {
+            'position': 'relative', 'display': 'inline-block'
+        });
+        forceStyle(document.getElementById('rpZoneSearch'), { 'width': '300px' });
+        forceStyle(document.getElementById('rpZoneDropdown'), {
+            'display': 'none', 'position': 'absolute', 'top': '100%', 'left': '0',
+            'width': '300px', 'max-height': '200px', 'overflow-y': 'auto',
+            'background': '#fff', 'border': '1px solid #ccc', 'border-radius': '0 0 4px 4px',
+            'box-shadow': '0 4px 12px rgba(0,0,0,0.15)', 'z-index': '200'
+        });
+        forceStyle(document.getElementById('rpZoneSelected'), {
+            'display': 'none', 'padding': '4px 10px', 'background': '#e8f0fe',
+            'border-radius': '4px', 'font-size': '13px', 'color': '#0078d4',
+            'font-weight': '600', 'margin-left': '8px', 'cursor': 'pointer'
+        });
+
+        // Vehicle search
+        forceStyle(document.getElementById('rpVehicleSelectWrap'), {
+            'position': 'relative', 'display': 'inline-block'
+        });
+        forceStyle(document.getElementById('rpVehicleDropdown'), {
+            'display': 'none', 'position': 'absolute', 'top': '100%', 'left': '0',
+            'width': '300px', 'max-height': '200px', 'overflow-y': 'auto',
+            'background': '#fff', 'border': '1px solid #ccc', 'border-radius': '0 0 4px 4px',
+            'box-shadow': '0 4px 12px rgba(0,0,0,0.15)', 'z-index': '200'
+        });
+        forceStyle(document.getElementById('rpVehicleChips'), {
+            'display': 'flex', 'flex-wrap': 'wrap', 'gap': '6px', 'min-height': '10px'
+        });
+
+        // Direction toggles
+        var toggles = document.querySelectorAll('.rpToggle');
+        for (var i = 0; i < toggles.length; i++) {
+            forceStyle(toggles[i], {
+                'padding': '6px 16px', 'border-radius': '4px', 'cursor': 'pointer',
+                'font-size': '13px', 'font-weight': '600', 'border': '1px solid #ccc',
+                'background': '#fff', 'color': '#666', 'user-select': 'none'
+            });
+        }
+        var active = document.querySelectorAll('.rpToggleActive');
+        for (var i = 0; i < active.length; i++) {
+            forceStyle(active[i], {
+                'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4'
+            });
+        }
+    }
+
+    function styleButtons() {
+        var primary = ['rpBtnSaveRoute', 'rpBtnRefresh', 'rpBtnGenReport'];
+        for (var i = 0; i < primary.length; i++) {
+            forceStyle(document.getElementById(primary[i]), {
+                'padding': '8px 20px', 'border': 'none', 'border-radius': '4px',
+                'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer',
+                'background': '#0078d4', 'color': '#fff', 'display': 'inline-block',
+                'user-select': 'none'
+            });
+        }
+        forceStyle(document.getElementById('rpBtnExport'), {
+            'padding': '8px 20px', 'border': 'none', 'border-radius': '4px',
+            'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer',
+            'background': '#28a745', 'color': '#fff', 'display': 'inline-block',
+            'user-select': 'none'
+        });
+        forceStyle(document.getElementById('rpBtnCancelEdit'), {
+            'padding': '8px 20px', 'border': 'none', 'border-radius': '4px',
+            'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer',
+            'background': '#888', 'color': '#fff', 'display': 'inline-block',
+            'user-select': 'none'
+        });
+        styleAutoRefreshBtn();
+    }
+
+    function styleAutoRefreshBtn() {
+        var btn = document.getElementById('rpBtnAutoRefresh');
+        if (autoRefreshActive) {
+            forceStyle(btn, {
+                'padding': '8px 20px', 'border': 'none', 'border-radius': '4px',
+                'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer',
+                'background': '#dc3545', 'color': '#fff', 'display': 'inline-block',
+                'user-select': 'none'
+            });
+            btn.textContent = 'Stop Live Refresh';
+        } else {
+            var now = new Date();
+            var isPast8pm = now.getHours() >= 20;
+            forceStyle(btn, {
+                'padding': '8px 20px', 'border': 'none', 'border-radius': '4px',
+                'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer',
+                'background': isPast8pm ? '#dc3545' : '#28a745', 'color': '#fff',
+                'display': 'inline-block', 'user-select': 'none'
+            });
+            btn.textContent = isPast8pm ? 'Start Live Refresh' : 'Start Live Refresh';
+        }
+        var statusEl = document.getElementById('rpAutoRefreshStatus');
+        if (autoRefreshActive) {
+            statusEl.textContent = 'Live - refreshing every 5s';
+            forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#28a745' });
+        } else {
+            var now = new Date();
+            if (now.getHours() >= 20) {
+                statusEl.textContent = 'Auto-refresh stopped (after 8 PM)';
+                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#dc3545' });
+            } else {
+                statusEl.textContent = '';
+            }
+        }
+    }
+
+    function styleModal() {
+        forceStyle(document.getElementById('rpModal'), {
+            'display': 'none', 'position': 'fixed', 'top': '0', 'left': '0',
+            'width': '100%', 'height': '100%', 'background': 'rgba(0,0,0,0.5)',
+            'z-index': '9999', 'justify-content': 'center', 'align-items': 'center'
+        });
+        forceStyle(document.getElementById('rpModalBox'), {
+            'background': '#fff', 'border-radius': '12px', 'padding': '28px 32px',
+            'box-shadow': '0 8px 32px rgba(0,0,0,0.2)', 'max-width': '420px', 'width': '90%'
+        });
+        forceStyle(document.getElementById('rpModalTitle'), {
+            'font-size': '17px', 'font-weight': '700', 'color': '#1a1a1a', 'margin-bottom': '10px'
+        });
+        forceStyle(document.getElementById('rpModalMsg'), {
+            'font-size': '14px', 'color': '#555', 'margin-bottom': '20px', 'line-height': '1.5'
+        });
+        forceStyle(document.getElementById('rpModalBtns'), {
+            'display': 'flex', 'gap': '10px', 'justify-content': 'flex-end'
+        });
+        forceStyle(document.getElementById('rpModalConfirm'), {
+            'padding': '8px 20px', 'border-radius': '6px', 'font-size': '13px',
+            'font-weight': '600', 'cursor': 'pointer', 'background': '#dc3545', 'color': '#fff'
+        });
+        forceStyle(document.getElementById('rpModalCancel'), {
+            'padding': '8px 20px', 'border-radius': '6px', 'font-size': '13px',
+            'font-weight': '600', 'cursor': 'pointer', 'background': '#f0f0f0', 'color': '#333'
+        });
+    }
+
+    function applyTabStyles(activeTab) {
+        var tabs = ['routes', 'progress', 'report'];
+        for (var i = 0; i < tabs.length; i++) {
+            var btn = document.getElementById('rpTabBtn-' + tabs[i]);
+            if (tabs[i] === activeTab) {
+                forceStyle(btn, {
+                    'padding': '12px 24px', 'border': 'none', 'background': 'transparent',
+                    'font-size': '14px', 'font-weight': '600', 'cursor': 'pointer',
+                    'border-bottom': '3px solid #0078d4', 'color': '#0078d4', 'margin-bottom': '-2px'
+                });
+            } else {
+                forceStyle(btn, {
+                    'padding': '12px 24px', 'border': 'none', 'background': 'transparent',
+                    'font-size': '14px', 'font-weight': '600', 'cursor': 'pointer',
+                    'border-bottom': '3px solid transparent', 'color': '#666', 'margin-bottom': '-2px'
+                });
+            }
+        }
+    }
+
+    applyBaseStyles();
+
+    // ========== GLOBALS ==========
+    var api = null;
+    var state = null;
+    var cachedZones = [];
+    var cachedDevices = {};
+    var cachedDrivers = {};
+    var savedRoutes = [];
+    var editingRouteId = null;
+    var deleteRouteId = null;
+    var reportData = [];
+    var activeReportFilter = 'all';
+    var reportExportEnabled = false;
+    var ROUTE_PREFIX = 'ROUTE_PROGRESS:';
+    var SYSTEM_ZONE_IDS = ['ZoneOfficeId', 'ZoneHomeId', 'ZoneCustomerId'];
+    var selectedDirection = 'inside';
+    var selectedVehicles = {};
+    var statusCounter = 0;
+    var autoRefreshInterval = null;
+    var autoRefreshActive = false;
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    // ========== GEOTAB ADD-IN LIFECYCLE ==========
+    (function () {
+        if (!window.geotab) { window.geotab = {}; }
+        if (!window.geotab.addin) { window.geotab.addin = {}; }
+        window.geotab.addin.index = function () {
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    api = freshApi; state = freshState;
+                    applyBaseStyles();
+                    initAddin();
+                    callback();
+                },
+                focus: function (freshApi, freshState) {
+                    api = freshApi; state = freshState;
+                    applyBaseStyles();
+                },
+                blur: function () {}
+            };
+        };
+    })();
+
+    document.addEventListener('DOMContentLoaded', function () {
+        applyBaseStyles();
+        setTimeout(function () {
+            if (!api) showStatus('routeStatus', 'Running in standalone mode. Install as a Geotab Add-In to load real data.', 'info');
+        }, 1000);
+    });
+
+    // ========== INIT ==========
+    async function initAddin() {
+        try {
+            await loadZones();
+            await loadDevices();
+            await loadDrivers();
+            await loadRoutes();
+            setDefaultDates();
+            populateFilters();
+            renderVehicleChips();
+        } catch (err) {
+            showStatus('routeStatus', 'Error initializing: ' + err.message, 'error');
+        }
+    }
+
+    function setDefaultDates() {
+        var today = new Date();
+        var weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        document.getElementById('rpProgressDate').value = formatDate(today);
+        document.getElementById('rpReportFrom').value = formatDate(weekAgo);
+        document.getElementById('rpReportTo').value = formatDate(today);
+    }
+
+    // ========== TAB SWITCHING ==========
+    document.getElementById('rpTabs').addEventListener('click', function (e) {
+        var el = e.target;
+        while (el && !el.dataset.tab && el !== this) { el = el.parentElement; }
+        if (el && el.dataset.tab) {
+            e.preventDefault();
+            e.stopPropagation();
+            switchTab(el.dataset.tab);
+        }
+    });
+
+    function switchTab(tab) {
+        var tabs = ['routes', 'progress', 'report'];
+        for (var i = 0; i < tabs.length; i++) {
+            var panel = document.getElementById('tab-' + tabs[i]);
+            forceStyle(panel, { 'display': tabs[i] === tab ? 'block' : 'none' });
+        }
+        applyTabStyles(tab);
+    }
+
+    // ========== LOAD DATA ==========
+    async function loadZones() {
+        var zones = await apiCall('Get', { typeName: 'Zone' });
+        cachedZones = zones.filter(function (z) {
+            if (SYSTEM_ZONE_IDS.indexOf(z.id) !== -1) return false;
+            if (!z.name || z.name === '') return false;
+            return true;
+        });
+        cachedZones.sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+        // Zone search dropdown is populated dynamically via cachedZones
+    }
+
+    async function loadDevices() {
+        var devices = await apiCall('Get', { typeName: 'Device' });
+        devices.forEach(function (d) { cachedDevices[d.id] = d.name; });
+    }
+
+    async function loadDrivers() {
+        var users = await apiCall('Get', { typeName: 'User' });
+        users.forEach(function (u) {
+            cachedDrivers[u.id] = ((u.firstName || '') + ' ' + (u.lastName || '')).trim();
+        });
+        cachedDrivers['UnknownDriverId'] = '';
+    }
+
+    // ========== CREATE BUTTON (show/hide form) ==========
+    document.getElementById('rpBtnCreateNew').addEventListener('click', function () {
+        clearForm();
+        forceStyle(document.getElementById('rpFormWrap'), { 'display': 'block' });
+        forceStyle(document.getElementById('rpCreateBtnWrap'), { 'display': 'none' });
+        document.getElementById('rpFormWrap').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    function showCreateButton() {
+        forceStyle(document.getElementById('rpFormWrap'), { 'display': 'none' });
+        forceStyle(document.getElementById('rpCreateBtnWrap'), { 'display': 'block' });
+    }
+
+    // ========== ZONE SEARCH DROPDOWN ==========
+    var rpZoneSearchEl = document.getElementById('rpZoneSearch');
+    var rpZoneDropEl = document.getElementById('rpZoneDropdown');
+    var rpZoneSelEl = document.getElementById('rpZoneSelected');
+
+    rpZoneSearchEl.addEventListener('input', function () {
+        var q = this.value.toLowerCase();
+        if (!q) { forceStyle(rpZoneDropEl, { 'display': 'none' }); return; }
+        var matches = cachedZones.filter(function (z) { return z.name.toLowerCase().indexOf(q) !== -1; });
+        if (!matches.length) {
+            rpZoneDropEl.innerHTML = '<div class="rpDropItem" style="color:#888;">No zones found</div>';
+        } else {
+            var html = '';
+            for (var i = 0; i < Math.min(matches.length, 50); i++) {
+                html += '<div class="rpDropItem" data-zone-id="' + matches[i].id + '" data-zone-name="' + escapeHtml(matches[i].name) + '">' + escapeHtml(matches[i].name) + '</div>';
+            }
+            rpZoneDropEl.innerHTML = html;
+        }
+        forceStyle(rpZoneDropEl, { 'display': 'block' });
+        styleDropdownItems(rpZoneDropEl);
+    });
+
+    rpZoneSearchEl.addEventListener('focus', function () {
+        if (this.value) this.dispatchEvent(new Event('input'));
+    });
+
+    rpZoneDropEl.addEventListener('click', function (e) {
+        var item = e.target.closest('.rpDropItem');
+        if (item && item.dataset.zoneId) {
+            selectZone(item.dataset.zoneId, item.dataset.zoneName);
+            forceStyle(rpZoneDropEl, { 'display': 'none' });
+        }
+    });
+
+    function selectZone(id, name) {
+        document.getElementById('rpZoneId').value = id;
+        rpZoneSearchEl.value = '';
+        rpZoneSelEl.textContent = name + ' \u00D7';
+        forceStyle(rpZoneSelEl, { 'display': 'inline-block' });
+    }
+
+    rpZoneSelEl.addEventListener('click', function () {
+        document.getElementById('rpZoneId').value = '';
+        this.textContent = '';
+        forceStyle(this, { 'display': 'none' });
+        rpZoneSearchEl.focus();
+    });
+
+    // ========== VEHICLE SEARCH & CHIPS ==========
+    var rpVehSearchEl = document.getElementById('rpVehicleSearch');
+    var rpVehDropEl = document.getElementById('rpVehicleDropdown');
+
+    rpVehSearchEl.addEventListener('input', function () {
+        var q = this.value.toLowerCase();
+        if (!q) { forceStyle(rpVehDropEl, { 'display': 'none' }); return; }
+        var ids = Object.keys(cachedDevices);
+        ids.sort(function (a, b) { return (cachedDevices[a] || '').localeCompare(cachedDevices[b] || ''); });
+        var matches = ids.filter(function (id) {
+            return !selectedVehicles[id] && (cachedDevices[id] || '').toLowerCase().indexOf(q) !== -1;
+        });
+        if (!matches.length) {
+            rpVehDropEl.innerHTML = '<div class="rpDropItem" style="color:#888;">No vehicles found</div>';
+        } else {
+            var html = '';
+            for (var i = 0; i < Math.min(matches.length, 50); i++) {
+                html += '<div class="rpDropItem" data-veh-id="' + matches[i] + '">' + escapeHtml(cachedDevices[matches[i]]) + '</div>';
+            }
+            rpVehDropEl.innerHTML = html;
+        }
+        forceStyle(rpVehDropEl, { 'display': 'block' });
+        styleDropdownItems(rpVehDropEl);
+    });
+
+    rpVehSearchEl.addEventListener('focus', function () {
+        if (this.value) this.dispatchEvent(new Event('input'));
+    });
+
+    rpVehDropEl.addEventListener('click', function (e) {
+        var item = e.target.closest('.rpDropItem');
+        if (item && item.dataset.vehId) {
+            selectedVehicles[item.dataset.vehId] = true;
+            renderVehicleChips();
+            rpVehSearchEl.value = '';
+            forceStyle(rpVehDropEl, { 'display': 'none' });
+            rpVehSearchEl.focus();
+        }
+    });
+
+    function renderVehicleChips() {
+        var container = document.getElementById('rpVehicleChips');
+        var ids = Object.keys(selectedVehicles);
+        ids.sort(function (a, b) { return (cachedDevices[a] || '').localeCompare(cachedDevices[b] || ''); });
+        var html = '';
+        for (var i = 0; i < ids.length; i++) {
+            var name = cachedDevices[ids[i]] || ids[i];
+            html += '<span class="rpChip" data-veh-id="' + ids[i] + '">' + escapeHtml(name) + ' <span class="rpChipX">\u00D7</span></span>';
+        }
+        container.innerHTML = html;
+        // Style chips
+        var chips = container.querySelectorAll('.rpChip');
+        for (var i = 0; i < chips.length; i++) {
+            forceStyle(chips[i], {
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '4px',
+                'padding': '4px 10px', 'background': '#e8f0fe', 'border-radius': '16px',
+                'font-size': '12px', 'color': '#0078d4', 'font-weight': '600', 'cursor': 'default'
+            });
+        }
+        var xs = container.querySelectorAll('.rpChipX');
+        for (var i = 0; i < xs.length; i++) {
+            forceStyle(xs[i], {
+                'cursor': 'pointer', 'font-size': '14px', 'color': '#dc3545',
+                'margin-left': '2px', 'font-weight': '700', 'line-height': '1'
+            });
+        }
+    }
+
+    document.getElementById('rpVehicleChips').addEventListener('click', function (e) {
+        var x = e.target.closest('.rpChipX');
+        if (x) {
+            var chip = x.parentElement;
+            if (chip && chip.dataset.vehId) {
+                delete selectedVehicles[chip.dataset.vehId];
+                renderVehicleChips();
+            }
+        }
+    });
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('#rpZoneSearchWrap')) forceStyle(rpZoneDropEl, { 'display': 'none' });
+        if (!e.target.closest('#rpVehicleSelectWrap')) forceStyle(rpVehDropEl, { 'display': 'none' });
+    });
+
+    function styleDropdownItems(container) {
+        var items = container.querySelectorAll('.rpDropItem');
+        for (var i = 0; i < items.length; i++) {
+            forceStyle(items[i], {
+                'padding': '8px 12px', 'cursor': 'pointer', 'font-size': '13px',
+                'border-bottom': '1px solid #f0f0f0', 'color': '#333'
+            });
+        }
+    }
+
+    // ========== DIRECTION TOGGLE ==========
+    document.getElementById('rpDirInside').addEventListener('click', function () {
+        selectedDirection = 'inside';
+        forceStyle(this, { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+        forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+    });
+    document.getElementById('rpDirOutside').addEventListener('click', function () {
+        selectedDirection = 'outside';
+        forceStyle(this, { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+        forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+    });
+
+    // ========== ROUTE CRUD ==========
+    async function loadRoutes() {
+        var allData = await apiCall('Get', { typeName: 'CustomData' });
+        savedRoutes = [];
+        for (var i = 0; i < allData.length; i++) {
+            var d = allData[i];
+            if (d.data && d.data.indexOf(ROUTE_PREFIX) === 0) {
+                try {
+                    var json = JSON.parse(d.data.substring(ROUTE_PREFIX.length));
+                    json._id = d.id;
+                    json._dateTime = d.dateTime;
+                    savedRoutes.push(json);
+                } catch (e) { /* skip bad data */ }
+            }
+        }
+        renderRoutesTable();
+    }
+
+    function renderRoutesTable() {
+        var tbody = document.getElementById('rpRoutesBody');
+        if (!savedRoutes.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:#888;font-size:13px;">No routes created yet.</td></tr>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < savedRoutes.length; i++) {
+            var r = savedRoutes[i];
+            var vehCount = r.vehicleIds ? r.vehicleIds.length : 0;
+            // Check for removed vehicles
+            var removedCount = 0;
+            if (r.vehicleIds) {
+                for (var v = 0; v < r.vehicleIds.length; v++) {
+                    if (!cachedDevices[r.vehicleIds[v]]) removedCount++;
+                }
+            }
+            var vehText = vehCount + ' vehicle' + (vehCount !== 1 ? 's' : '');
+            if (removedCount > 0) vehText += ' <span class="rpWarn">(' + removedCount + ' removed)</span>';
+
+            var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            var daysArr = r.activeDays || [0,1,2,3,4,5]; // default Sun-Fri
+            var daysText = daysArr.map(function(d) { return DAY_NAMES[d]; }).join(', ');
+
+            html += '<tr>' +
+                '<td class="rptd">' + escapeHtml(r.name) + '</td>' +
+                '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
+                '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '">' +
+                    (r.direction === 'inside' ? 'Inside' : 'Outside') + '</span></td>' +
+                '<td class="rptd">' + (r.startTime || '') + ' - ' + (r.endTime || '') + '</td>' +
+                '<td class="rptd">' + daysText + '</td>' +
+                '<td class="rptd">' + vehText + '</td>' +
+                '<td class="rptd">' +
+                    '<span class="rpActionBtn rpEditBtn" data-route-idx="' + i + '">Edit</span> ' +
+                    '<span class="rpActionBtn rpDeleteBtn" data-route-idx="' + i + '">Delete</span>' +
+                '</td></tr>';
+        }
+        tbody.innerHTML = html;
+        styleRoutesTable();
+    }
+
+    function styleRoutesTable() {
+        var tds = document.querySelectorAll('#rpRoutesBody .rptd');
+        for (var i = 0; i < tds.length; i++) {
+            forceStyle(tds[i], { 'padding': '10px 12px', 'border-bottom': '1px solid #eee', 'vertical-align': 'middle', 'font-size': '13px' });
+        }
+        var warns = document.querySelectorAll('.rpWarn');
+        for (var i = 0; i < warns.length; i++) {
+            forceStyle(warns[i], { 'color': '#dc3545', 'font-size': '11px' });
+        }
+        var edits = document.querySelectorAll('.rpEditBtn');
+        for (var i = 0; i < edits.length; i++) {
+            forceStyle(edits[i], {
+                'padding': '4px 12px', 'border-radius': '4px', 'cursor': 'pointer',
+                'background': '#0078d4', 'color': '#fff', 'font-size': '12px', 'font-weight': '600'
+            });
+        }
+        var dels = document.querySelectorAll('.rpDeleteBtn');
+        for (var i = 0; i < dels.length; i++) {
+            forceStyle(dels[i], {
+                'padding': '4px 12px', 'border-radius': '4px', 'cursor': 'pointer',
+                'background': '#dc3545', 'color': '#fff', 'font-size': '12px', 'font-weight': '600'
+            });
+        }
+        var dirIn = document.querySelectorAll('.rpDirIn');
+        for (var i = 0; i < dirIn.length; i++) {
+            forceStyle(dirIn[i], {
+                'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px',
+                'font-weight': '600', 'background': '#d4edda', 'color': '#155724'
+            });
+        }
+        var dirOut = document.querySelectorAll('.rpDirOut');
+        for (var i = 0; i < dirOut.length; i++) {
+            forceStyle(dirOut[i], {
+                'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px',
+                'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460'
+            });
+        }
+    }
+
+    // Save route
+    document.getElementById('rpBtnSaveRoute').addEventListener('click', async function () {
+        var name = document.getElementById('rpRouteName').value.trim();
+        var zoneId = document.getElementById('rpZoneId').value;
+        var zoneObj = cachedZones.find(function (z) { return z.id === zoneId; });
+        var zoneName = zoneObj ? zoneObj.name : '';
+        var startTime = document.getElementById('rpStartTime').value;
+        var endTime = document.getElementById('rpEndTime').value;
+        var vehicleIds = Object.keys(selectedVehicles);
+
+        if (!name) { showStatus('routeStatus', 'Please enter a route name.', 'error'); return; }
+        if (!zoneId) { showStatus('routeStatus', 'Please select a zone.', 'error'); return; }
+        if (!startTime || !endTime) { showStatus('routeStatus', 'Please set start and end times.', 'error'); return; }
+        if (!vehicleIds.length) { showStatus('routeStatus', 'Please select at least one vehicle.', 'error'); return; }
+
+        // Collect active days
+        var dayChecks = document.querySelectorAll('.rpDayCheck');
+        var activeDays = [];
+        for (var di = 0; di < dayChecks.length; di++) {
+            if (dayChecks[di].checked) activeDays.push(parseInt(dayChecks[di].value, 10));
+        }
+        if (!activeDays.length) { showStatus('routeStatus', 'Please select at least one active day.', 'error'); return; }
+
+        var routeData = {
+            name: name, zoneId: zoneId, zoneName: zoneName,
+            direction: selectedDirection, startTime: startTime, endTime: endTime,
+            vehicleIds: vehicleIds, activeDays: activeDays
+        };
+
+        var btn = document.getElementById('rpBtnSaveRoute');
+        forceStyle(btn, { 'background': '#a0c4e8' });
+        btn.textContent = 'Saving...';
+
+        try {
+            if (editingRouteId) {
+                await apiCall('Set', {
+                    typeName: 'CustomData',
+                    entity: {
+                        id: editingRouteId,
+                        data: ROUTE_PREFIX + JSON.stringify(routeData),
+                        dateTime: new Date().toISOString(),
+                        device: { id: 'NoDeviceId' }
+                    }
+                });
+                showStatus('routeStatus', 'Route updated.', 'success');
+            } else {
+                await apiCall('Add', {
+                    typeName: 'CustomData',
+                    entity: {
+                        data: ROUTE_PREFIX + JSON.stringify(routeData),
+                        dateTime: new Date().toISOString(),
+                        device: { id: 'NoDeviceId' }
+                    }
+                });
+                showStatus('routeStatus', 'Route created.', 'success');
+            }
+            clearForm();
+            showCreateButton();
+            await loadRoutes();
+            populateFilters();
+        } catch (err) {
+            showStatus('routeStatus', 'Error saving route: ' + err.message, 'error');
+        } finally {
+            forceStyle(btn, { 'background': '#0078d4' });
+            btn.textContent = 'Save Route';
+        }
+    });
+
+    // Edit/Delete via event delegation
+    document.getElementById('rpRoutesBody').addEventListener('click', function (e) {
+        var el = e.target;
+        if (el.classList.contains('rpEditBtn')) {
+            var idx = parseInt(el.dataset.routeIdx, 10);
+            editRoute(idx);
+        } else if (el.classList.contains('rpDeleteBtn')) {
+            var idx = parseInt(el.dataset.routeIdx, 10);
+            confirmDeleteRoute(idx);
+        }
+    });
+
+    function editRoute(idx) {
+        var r = savedRoutes[idx];
+        if (!r) return;
+        editingRouteId = r._id;
+        document.getElementById('rpRouteName').value = r.name;
+
+        // Set zone
+        selectZone(r.zoneId, r.zoneName || '');
+
+        document.getElementById('rpStartTime').value = r.startTime;
+        document.getElementById('rpEndTime').value = r.endTime;
+        selectedDirection = r.direction || 'inside';
+        selectedVehicles = {};
+        if (r.vehicleIds) {
+            for (var i = 0; i < r.vehicleIds.length; i++) selectedVehicles[r.vehicleIds[i]] = true;
+        }
+        renderVehicleChips();
+
+        // Restore day checkboxes
+        var editDays = r.activeDays || [0,1,2,3,4,5];
+        var dayChecks = document.querySelectorAll('.rpDayCheck');
+        for (var i = 0; i < dayChecks.length; i++) {
+            dayChecks[i].checked = editDays.indexOf(parseInt(dayChecks[i].value, 10)) !== -1;
+        }
+
+        // Update direction toggle visuals
+        if (selectedDirection === 'inside') {
+            forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        } else {
+            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+            forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        }
+
+        document.getElementById('rpFormTitle').textContent = 'Edit Route: ' + r.name;
+        document.getElementById('rpBtnSaveRoute').textContent = 'Update Route';
+        // Show form, hide create button
+        forceStyle(document.getElementById('rpFormWrap'), { 'display': 'block' });
+        forceStyle(document.getElementById('rpCreateBtnWrap'), { 'display': 'none' });
+        document.getElementById('rpFormWrap').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    document.getElementById('rpBtnCancelEdit').addEventListener('click', function () {
+        clearForm();
+        showCreateButton();
+    });
+
+    function clearForm() {
+        editingRouteId = null;
+        document.getElementById('rpRouteName').value = '';
+        // Clear zone
+        document.getElementById('rpZoneId').value = '';
+        document.getElementById('rpZoneSearch').value = '';
+        rpZoneSelEl.textContent = '';
+        forceStyle(rpZoneSelEl, { 'display': 'none' });
+
+        document.getElementById('rpStartTime').value = '08:00';
+        document.getElementById('rpEndTime').value = '17:00';
+        selectedDirection = 'inside';
+        selectedVehicles = {};
+        renderVehicleChips();
+        // Reset days: all checked (Sun-Fri, no Sat)
+        var dayChecks = document.querySelectorAll('.rpDayCheck');
+        for (var i = 0; i < dayChecks.length; i++) {
+            dayChecks[i].checked = true;
+        }
+        document.getElementById('rpFormTitle').textContent = 'Create New Route';
+        document.getElementById('rpBtnSaveRoute').textContent = 'Save Route';
+        forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+        forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        document.getElementById('rpVehicleSearch').value = '';
+    }
+
+    // Delete with modal
+    function confirmDeleteRoute(idx) {
+        deleteRouteId = savedRoutes[idx] ? savedRoutes[idx]._id : null;
+        if (!deleteRouteId) return;
+        document.getElementById('rpModalMsg').textContent = 'Are you sure you want to delete the route "' + savedRoutes[idx].name + '"? This cannot be undone.';
+        forceStyle(document.getElementById('rpModal'), { 'display': 'flex' });
+    }
+
+    document.getElementById('rpModalConfirm').addEventListener('click', async function () {
+        if (!deleteRouteId) return;
+        try {
+            await apiCall('Remove', { typeName: 'CustomData', entity: { id: deleteRouteId } });
+            showStatus('routeStatus', 'Route deleted.', 'success');
+            await loadRoutes();
+            populateFilters();
+        } catch (err) {
+            showStatus('routeStatus', 'Error deleting: ' + err.message, 'error');
+        }
+        deleteRouteId = null;
+        forceStyle(document.getElementById('rpModal'), { 'display': 'none' });
+    });
+
+    document.getElementById('rpModalCancel').addEventListener('click', function () {
+        deleteRouteId = null;
+        forceStyle(document.getElementById('rpModal'), { 'display': 'none' });
+    });
+
+    document.getElementById('rpModal').addEventListener('click', function (e) {
+        if (e.target === this) {
+            deleteRouteId = null;
+            forceStyle(this, { 'display': 'none' });
+        }
+    });
+
+    // ========== ROUTE PROGRESS (Tab 2) ==========
+    document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
+
+    // Auto-refresh toggle
+    document.getElementById('rpBtnAutoRefresh').addEventListener('click', function () {
+        if (autoRefreshActive) {
+            stopAutoRefresh();
+        } else {
+            startAutoRefresh();
+        }
+    });
+
+    function startAutoRefresh() {
+        stopAutoRefresh(); // clear any existing
+        autoRefreshActive = true;
+        styleAutoRefreshBtn();
+        renderProgress();
+        autoRefreshInterval = setInterval(function () {
+            // Stop at 8 PM
+            var now = new Date();
+            if (now.getHours() >= 20) {
+                stopAutoRefresh();
+                styleAutoRefreshBtn();
+                return;
+            }
+            renderProgress();
+        }, 5000);
+    }
+
+    function stopAutoRefresh() {
+        if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+        autoRefreshActive = false;
+        styleAutoRefreshBtn();
+    }
+
+    async function renderProgress() {
+        var dateStr = document.getElementById('rpProgressDate').value;
+        if (!dateStr) { showStatus('progressStatus', 'Please select a date.', 'error'); return; }
+
+        var container = document.getElementById('rpProgressContent');
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">Loading progress...</div>';
+
+        try {
+            await loadRoutes();
+
+            if (!savedRoutes.length) {
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">No routes created. Create routes in the Manage Routes tab.</div>';
+                document.getElementById('rpProgressCards').innerHTML = '';
+                return;
+            }
+
+            // Get trips for the selected date
+            var dayStart = new Date(dateStr + 'T00:00:00');
+            var dayEnd = new Date(dateStr + 'T23:59:59');
+            var trips = await apiCall('Get', {
+                typeName: 'Trip',
+                search: { fromDate: dayStart.toISOString(), toDate: dayEnd.toISOString() }
+            });
+
+            var now = new Date();
+            var currentMinutes = now.getHours() * 60 + now.getMinutes();
+            var isToday = dateStr === formatDate(now);
+
+            // Sort routes by proximity to current time
+            // Filter routes by active day
+            var selectedDay = new Date(dateStr).getDay();
+            var dayFilteredRoutes = savedRoutes.filter(function (r) {
+                var days = r.activeDays || [0,1,2,3,4,5];
+                return days.indexOf(selectedDay) !== -1;
+            });
+
+            if (!dayFilteredRoutes.length) {
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">No routes active for this day.</div>';
+                document.getElementById('rpProgressCards').innerHTML = '';
+                return;
+            }
+
+            var routesWithScore = dayFilteredRoutes.map(function (r) {
+                var startMin = timeToMinutes(r.startTime);
+                var endMin = timeToMinutes(r.endTime);
+                var midpoint = (startMin + endMin) / 2;
+                var score;
+                if (isToday) {
+                    if (currentMinutes >= startMin && currentMinutes <= endMin) score = 0; // Active
+                    else if (currentMinutes < startMin) score = startMin - currentMinutes; // Upcoming
+                    else score = 10000 + (currentMinutes - endMin); // Past
+                } else {
+                    score = startMin;
+                }
+                return { route: r, score: score, startMin: startMin, endMin: endMin };
+            });
+            routesWithScore.sort(function (a, b) { return a.score - b.score; });
+
+            // Build progress for each route
+            var totalAssign = 0, completedCount = 0, inProgressCount = 0, notStartedCount = 0, missedCount = 0;
+            var html = '';
+
+            for (var ri = 0; ri < routesWithScore.length; ri++) {
+                var r = routesWithScore[ri].route;
+                var startMin = routesWithScore[ri].startMin;
+                var endMin = routesWithScore[ri].endMin;
+                var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+
+                // Route time status label
+                var timeLabel = '';
+                if (isToday) {
+                    if (currentMinutes < startMin) timeLabel = '<span class="rpTimeBadge rpTimeUpcoming">Upcoming</span>';
+                    else if (currentMinutes <= endMin) timeLabel = '<span class="rpTimeBadge rpTimeActive">Active Now</span>';
+                    else timeLabel = '<span class="rpTimeBadge rpTimePast">Completed Window</span>';
+                } else {
+                    timeLabel = '<span class="rpTimeBadge rpTimePast">' + dateStr + '</span>';
+                }
+
+                html += '<div class="rpRouteCard">' +
+                    '<div class="rpRouteCardHead">' +
+                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel +
+                        '<span class="rpRouteCardInfo">' + escapeHtml(r.zoneName || '') +
+                        ' | ' + (r.direction === 'inside' ? 'Inside' : 'Outside') +
+                        ' | ' + r.startTime + ' - ' + r.endTime + '</span>' +
+                    '</div>';
+
+                html += '<table class="rpProgressTable"><thead><tr>' +
+                    '<th class="rpth rpthSm">Vehicle</th>' +
+                    '<th class="rpth rpthSm">' + (r.direction === 'outside' ? 'Time Outside (min)' : 'Time in Zone (min)') + '</th>' +
+                    (r.direction === 'outside' ? '<th class="rpth rpthSm">Distance to Zone</th>' : '') +
+                    '<th class="rpth rpthSm">Status</th>' +
+                    '</tr></thead><tbody>';
+
+                if (!r.vehicleIds || !r.vehicleIds.length) {
+                    html += '<tr><td colspan="3" style="padding:10px;color:#888;text-align:center;">No vehicles assigned</td></tr>';
+                } else {
+                    for (var vi = 0; vi < r.vehicleIds.length; vi++) {
+                        var vId = r.vehicleIds[vi];
+                        var vName = cachedDevices[vId];
+
+                        var colSpan = r.direction === 'outside' ? '4' : '3';
+                        if (!vName) {
+                            html += '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">Vehicle Removed (ID: ' + vId + ')</span></td></tr>';
+                            continue;
+                        }
+
+                        totalAssign++;
+                        var zoneMinutes = 0;
+                        var lastStopLat = null, lastStopLng = null;
+
+                        // Check trips for this vehicle
+                        if (zone && zone.points && zone.points.length) {
+                            for (var ti = 0; ti < trips.length; ti++) {
+                                var trip = trips[ti];
+                                if (!trip.device || trip.device.id !== vId) continue;
+                                if (!trip.stopPoint || !trip.stopDuration) continue;
+                                var stopTime = new Date(trip.stop);
+                                var stopMin = stopTime.getHours() * 60 + stopTime.getMinutes();
+                                if (stopMin < startMin || stopMin > endMin) continue;
+                                var inZone = pointInPolygon(trip.stopPoint.y, trip.stopPoint.x, zone.points);
+                                if ((r.direction === 'inside' && inZone) || (r.direction === 'outside' && !inZone)) {
+                                    zoneMinutes += durationToMinutes(trip.stopDuration);
+                                }
+                                // Track last stop position for distance calc
+                                lastStopLat = trip.stopPoint.y;
+                                lastStopLng = trip.stopPoint.x;
+                            }
+                        }
+
+                        zoneMinutes = Math.round(zoneMinutes * 10) / 10;
+                        var windowLen = endMin - startMin;
+                        var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
+                        var vStatus, vStatusClass;
+
+                        var pastWindow = isToday ? currentMinutes > endMin : true;
+                        if (zoneMinutes > 0 && pct >= 80) {
+                            vStatus = 'Completed'; vStatusClass = 'rpStCompleted'; completedCount++;
+                        } else if (zoneMinutes > 0 && !pastWindow) {
+                            vStatus = 'In Progress (' + pct + '%)'; vStatusClass = 'rpStProgress'; inProgressCount++;
+                        } else if (pastWindow && zoneMinutes < windowLen * 0.8) {
+                            if (zoneMinutes === 0) { vStatus = 'Not Started'; vStatusClass = 'rpStNotStarted'; notStartedCount++; }
+                            else { vStatus = 'Missed (' + pct + '%)'; vStatusClass = 'rpStMissed'; missedCount++; }
+                        } else {
+                            vStatus = 'Not Started'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                        }
+
+                        // Distance to zone for outside routes
+                        var distCol = '';
+                        if (r.direction === 'outside') {
+                            if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
+                                var distKm = distanceToZone(lastStopLat, lastStopLng, zone.points);
+                                distCol = '<td class="rptd">' + distKm + ' km</td>';
+                            } else {
+                                distCol = '<td class="rptd" style="color:#aaa;">N/A</td>';
+                            }
+                        }
+
+                        html += '<tr>' +
+                            '<td class="rptd">' + escapeHtml(vName) + '</td>' +
+                            '<td class="rptd">' + zoneMinutes + '</td>' +
+                            distCol +
+                            '<td class="rptd"><span class="rpStatusBadge ' + vStatusClass + '">' + vStatus + '</span></td>' +
+                            '</tr>';
+                    }
+                }
+                html += '</tbody></table></div>';
+            }
+
+            container.innerHTML = html;
+
+            // Summary cards
+            var cardsHtml = '<div id="rpProgSummary">' +
+                '<div class="rpSC"><div class="rpSV">' + totalAssign + '</div><div class="rpSL">Total Assignments</div></div>' +
+                '<div class="rpSC"><div class="rpSV rpGreen">' + completedCount + '</div><div class="rpSL">Completed</div></div>' +
+                '<div class="rpSC"><div class="rpSV rpAmber">' + inProgressCount + '</div><div class="rpSL">In Progress</div></div>' +
+                '<div class="rpSC"><div class="rpSV">' + notStartedCount + '</div><div class="rpSL">Not Started</div></div>' +
+                '<div class="rpSC"><div class="rpSV rpRed">' + missedCount + '</div><div class="rpSL">Missed</div></div>' +
+                '</div>';
+            document.getElementById('rpProgressCards').innerHTML = cardsHtml;
+            styleProgressCards();
+            styleProgressContent();
+
+        } catch (err) {
+            showStatus('progressStatus', 'Error: ' + err.message, 'error');
+        }
+    }
+
+    function styleProgressCards() {
+        forceStyle(document.getElementById('rpProgSummary'), {
+            'display': 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(150px, 1fr))',
+            'gap': '12px', 'margin-bottom': '16px'
+        });
+        var cards = document.querySelectorAll('#rpProgSummary .rpSC');
+        for (var i = 0; i < cards.length; i++) {
+            forceStyle(cards[i], {
+                'background': '#fff', 'border-radius': '8px', 'padding': '14px',
+                'box-shadow': '0 1px 4px rgba(0,0,0,0.1)', 'text-align': 'center'
+            });
+        }
+        var vals = document.querySelectorAll('#rpProgSummary .rpSV');
+        for (var i = 0; i < vals.length; i++) forceStyle(vals[i], { 'font-size': '26px', 'font-weight': '700', 'color': '#0078d4' });
+        var lbls = document.querySelectorAll('#rpProgSummary .rpSL');
+        for (var i = 0; i < lbls.length; i++) forceStyle(lbls[i], { 'font-size': '12px', 'color': '#888', 'margin-top': '4px' });
+        var g = document.querySelectorAll('.rpGreen'); for (var i = 0; i < g.length; i++) forceStyle(g[i], { 'color': '#28a745' });
+        var a = document.querySelectorAll('.rpAmber'); for (var i = 0; i < a.length; i++) forceStyle(a[i], { 'color': '#e67e22' });
+        var r = document.querySelectorAll('.rpRed'); for (var i = 0; i < r.length; i++) forceStyle(r[i], { 'color': '#dc3545' });
+    }
+
+    function styleProgressContent() {
+        var cards = document.querySelectorAll('.rpRouteCard');
+        for (var i = 0; i < cards.length; i++) {
+            forceStyle(cards[i], {
+                'background': '#fff', 'border': '1px solid #e0e0e0', 'border-radius': '8px',
+                'margin-bottom': '16px', 'overflow': 'hidden'
+            });
+        }
+        var heads = document.querySelectorAll('.rpRouteCardHead');
+        for (var i = 0; i < heads.length; i++) {
+            forceStyle(heads[i], {
+                'padding': '12px 16px', 'background': '#f8f9fa', 'border-bottom': '1px solid #e0e0e0',
+                'display': 'flex', 'align-items': 'center', 'gap': '10px', 'flex-wrap': 'wrap'
+            });
+        }
+        var titles = document.querySelectorAll('.rpRouteCardTitle');
+        for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '14px', 'color': '#333' });
+        var infos = document.querySelectorAll('.rpRouteCardInfo');
+        for (var i = 0; i < infos.length; i++) forceStyle(infos[i], { 'font-size': '12px', 'color': '#777', 'margin-left': 'auto' });
+        var tbls = document.querySelectorAll('.rpProgressTable');
+        for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'border-collapse': 'collapse', 'font-size': '13px' });
+        var smTh = document.querySelectorAll('.rpthSm');
+        for (var i = 0; i < smTh.length; i++) forceStyle(smTh[i], { 'font-size': '12px', 'padding': '8px 12px' });
+        var tds = document.querySelectorAll('#rpProgressContent .rptd');
+        for (var i = 0; i < tds.length; i++) forceStyle(tds[i], { 'padding': '8px 12px', 'border-bottom': '1px solid #f0f0f0', 'font-size': '13px' });
+
+        // Time badges
+        var upcoming = document.querySelectorAll('.rpTimeUpcoming');
+        for (var i = 0; i < upcoming.length; i++) forceStyle(upcoming[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460' });
+        var active = document.querySelectorAll('.rpTimeActive');
+        for (var i = 0; i < active.length; i++) forceStyle(active[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
+        var past = document.querySelectorAll('.rpTimePast');
+        for (var i = 0; i < past.length; i++) forceStyle(past[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
+
+        // Status badges
+        var st = document.querySelectorAll('.rpStCompleted');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
+        st = document.querySelectorAll('.rpStProgress');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404' });
+        st = document.querySelectorAll('.rpStNotStarted');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
+        st = document.querySelectorAll('.rpStMissed');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f8d7da', 'color': '#721c24' });
+    }
+
+    // ========== ROUTE REPORT (Tab 3) ==========
+    function populateFilters() {
+        // Route filter
+        var rf = document.getElementById('rpRouteFilter');
+        rf.innerHTML = '<option value="">All Routes</option>';
+        for (var i = 0; i < savedRoutes.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = savedRoutes[i]._id;
+            opt.textContent = savedRoutes[i].name;
+            rf.appendChild(opt);
+        }
+        // Vehicle filter
+        var vf = document.getElementById('rpVehicleFilter');
+        vf.innerHTML = '<option value="">All Vehicles</option>';
+        var vIds = Object.keys(cachedDevices).sort(function (a, b) { return cachedDevices[a].localeCompare(cachedDevices[b]); });
+        for (var i = 0; i < vIds.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = vIds[i];
+            opt.textContent = cachedDevices[vIds[i]];
+            vf.appendChild(opt);
+        }
+        // Driver filter
+        var df = document.getElementById('rpDriverFilter');
+        df.innerHTML = '<option value="">All Drivers</option>';
+        var dIds = Object.keys(cachedDrivers).filter(function (id) { return id !== 'UnknownDriverId' && cachedDrivers[id]; });
+        dIds.sort(function (a, b) { return cachedDrivers[a].localeCompare(cachedDrivers[b]); });
+        for (var i = 0; i < dIds.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = dIds[i];
+            opt.textContent = cachedDrivers[dIds[i]];
+            df.appendChild(opt);
+        }
+        styleFormElements();
+    }
+
+    document.getElementById('rpBtnGenReport').addEventListener('click', function () { generateReport(); });
+
+    async function generateReport() {
+        var fromDate = document.getElementById('rpReportFrom').value;
+        var toDate = document.getElementById('rpReportTo').value;
+        var routeFilterId = document.getElementById('rpRouteFilter').value;
+        var vehicleFilterId = document.getElementById('rpVehicleFilter').value;
+        var driverFilterId = document.getElementById('rpDriverFilter').value;
+
+        if (!fromDate || !toDate) { showStatus('reportStatus', 'Please select both From and To dates.', 'error'); return; }
+
+        var btn = document.getElementById('rpBtnGenReport');
+        btn.textContent = 'Generating...';
+        forceStyle(btn, { 'background': '#a0c4e8' });
+
+        try {
+            await loadRoutes();
+            var routes = savedRoutes;
+            if (routeFilterId) routes = routes.filter(function (r) { return r._id === routeFilterId; });
+
+            if (!routes.length) {
+                showStatus('reportStatus', 'No routes found.', 'info');
+                return;
+            }
+
+            var toDatePlusOne = new Date(toDate);
+            toDatePlusOne.setDate(toDatePlusOne.getDate() + 1);
+            var trips = await apiCall('Get', {
+                typeName: 'Trip',
+                search: { fromDate: new Date(fromDate).toISOString(), toDate: toDatePlusOne.toISOString() }
+            });
+
+            reportData = [];
+            var dateStart = new Date(fromDate);
+            var dateEnd = new Date(toDate);
+
+            // For each day in range, for each route, for each vehicle — calculate status
+            for (var d = new Date(dateStart); d <= dateEnd; d.setDate(d.getDate() + 1)) {
+                var dayStr = formatDate(d);
+                var dayOfWeek = d.getDay();
+                for (var ri = 0; ri < routes.length; ri++) {
+                    var r = routes[ri];
+                    // Skip if route not active on this day
+                    var rDays = r.activeDays || [0,1,2,3,4,5];
+                    if (rDays.indexOf(dayOfWeek) === -1) continue;
+                    var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+                    var startMin = timeToMinutes(r.startTime);
+                    var endMin = timeToMinutes(r.endTime);
+                    var windowLen = endMin - startMin;
+
+                    if (!r.vehicleIds) continue;
+                    for (var vi = 0; vi < r.vehicleIds.length; vi++) {
+                        var vId = r.vehicleIds[vi];
+                        if (!cachedDevices[vId]) continue; // Skip removed vehicles
+                        if (vehicleFilterId && vId !== vehicleFilterId) continue;
+
+                        var zoneMinutes = 0;
+                        var driverId = '';
+
+                        if (zone && zone.points && zone.points.length) {
+                            for (var ti = 0; ti < trips.length; ti++) {
+                                var trip = trips[ti];
+                                if (!trip.device || trip.device.id !== vId) continue;
+                                if (!trip.stopPoint || !trip.stopDuration) continue;
+                                var stopDate = new Date(trip.stop);
+                                if (formatDate(stopDate) !== dayStr) continue;
+                                var stopMin = stopDate.getHours() * 60 + stopDate.getMinutes();
+                                if (stopMin < startMin || stopMin > endMin) continue;
+                                var inZone = pointInPolygon(trip.stopPoint.y, trip.stopPoint.x, zone.points);
+                                if ((r.direction === 'inside' && inZone) || (r.direction === 'outside' && !inZone)) {
+                                    zoneMinutes += durationToMinutes(trip.stopDuration);
+                                    if (trip.driver && trip.driver.id && trip.driver.id !== 'UnknownDriverId') {
+                                        driverId = trip.driver.id;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (driverFilterId && driverId !== driverFilterId) continue;
+
+                        zoneMinutes = Math.round(zoneMinutes * 10) / 10;
+                        var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
+                        var status;
+                        if (pct >= 80) status = 'Completed';
+                        else if (zoneMinutes > 0) status = 'Incomplete';
+                        else status = 'Missed';
+
+                        reportData.push({
+                            routeName: r.name, routeId: r._id,
+                            vehicleId: vId, vehicleName: cachedDevices[vId] || vId,
+                            driverId: driverId, driverName: driverId ? (cachedDrivers[driverId] || '') : '',
+                            date: dayStr, zoneName: r.zoneName || '',
+                            direction: r.direction === 'inside' ? 'Inside' : 'Outside',
+                            window: r.startTime + ' - ' + r.endTime,
+                            durationMin: zoneMinutes, status: status
+                        });
+                    }
+                }
+            }
+
+            activeReportFilter = 'all';
+            renderReportTable();
+            renderReportSummary();
+            reportExportEnabled = true;
+
+            if (!reportData.length) showStatus('reportStatus', 'No data found for the selected range.', 'info');
+            else showStatus('reportStatus', 'Found ' + reportData.length + ' record(s).', 'success');
+
+        } catch (err) {
+            showStatus('reportStatus', 'Error: ' + err.message, 'error');
+        } finally {
+            btn.textContent = 'Generate Report';
+            forceStyle(btn, { 'background': '#0078d4' });
+        }
+    }
+
+    function getFilteredReport() {
+        var filtered = reportData;
+        if (activeReportFilter === 'completed') filtered = filtered.filter(function (r) { return r.status === 'Completed'; });
+        else if (activeReportFilter === 'incomplete') filtered = filtered.filter(function (r) { return r.status === 'Incomplete'; });
+        else if (activeReportFilter === 'missed') filtered = filtered.filter(function (r) { return r.status === 'Missed'; });
+        return filtered;
+    }
+
+    function renderReportTable() {
+        var tbody = document.getElementById('rpReportBody');
+        var filtered = getFilteredReport();
+        if (!filtered.length) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:#888;">No records found.</td></tr>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < filtered.length; i++) {
+            var r = filtered[i];
+            var stClass = r.status === 'Completed' ? 'rpStCompleted' : (r.status === 'Incomplete' ? 'rpStProgress' : 'rpStMissed');
+            html += '<tr>' +
+                '<td class="rptd">' + escapeHtml(r.routeName) + '</td>' +
+                '<td class="rptd">' + escapeHtml(r.vehicleName) + '</td>' +
+                '<td class="rptd">' + (r.driverName ? escapeHtml(r.driverName) : '<span style="color:#aaa">No driver</span>') + '</td>' +
+                '<td class="rptd">' + r.date + '</td>' +
+                '<td class="rptd">' + escapeHtml(r.zoneName) + '</td>' +
+                '<td class="rptd">' + r.direction + '</td>' +
+                '<td class="rptd">' + r.window + '</td>' +
+                '<td class="rptd">' + r.durationMin + '</td>' +
+                '<td class="rptd"><span class="rpStatusBadge ' + stClass + '">' + r.status + '</span></td>' +
+                '</tr>';
+        }
+        tbody.innerHTML = html;
+        styleReportTable();
+    }
+
+    function styleReportTable() {
+        var tds = document.querySelectorAll('#rpReportBody .rptd');
+        for (var i = 0; i < tds.length; i++) forceStyle(tds[i], { 'padding': '10px 12px', 'border-bottom': '1px solid #eee', 'vertical-align': 'middle', 'font-size': '13px' });
+        var st = document.querySelectorAll('#rpReportBody .rpStCompleted');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
+        st = document.querySelectorAll('#rpReportBody .rpStProgress');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404' });
+        st = document.querySelectorAll('#rpReportBody .rpStMissed');
+        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f8d7da', 'color': '#721c24' });
+    }
+
+    function renderReportSummary() {
+        var area = document.getElementById('rpReportSummary');
+        if (!reportData.length) { area.innerHTML = ''; return; }
+        var total = reportData.length;
+        var comp = reportData.filter(function (r) { return r.status === 'Completed'; }).length;
+        var inc = reportData.filter(function (r) { return r.status === 'Incomplete'; }).length;
+        var miss = reportData.filter(function (r) { return r.status === 'Missed'; }).length;
+        var pct = total > 0 ? Math.round((comp / total) * 100) : 0;
+
+        area.innerHTML = '<div id="rpReportCards">' +
+            '<div class="rpSC rpClickable" data-filter="all"><div class="rpSV">' + total + '</div><div class="rpSL">Total</div></div>' +
+            '<div class="rpSC rpClickable" data-filter="completed"><div class="rpSV rpGreen">' + comp + '</div><div class="rpSL">Completed</div></div>' +
+            '<div class="rpSC rpClickable" data-filter="incomplete"><div class="rpSV rpAmber">' + inc + '</div><div class="rpSL">Incomplete</div></div>' +
+            '<div class="rpSC rpClickable" data-filter="missed"><div class="rpSV rpRed">' + miss + '</div><div class="rpSL">Missed</div></div>' +
+            '<div class="rpSC"><div class="rpSV">' + pct + '%</div><div class="rpSL">Compliance</div></div>' +
+            '</div>';
+
+        forceStyle(document.getElementById('rpReportCards'), {
+            'display': 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(150px, 1fr))',
+            'gap': '12px', 'margin-bottom': '16px'
+        });
+        var cards = area.querySelectorAll('.rpSC');
+        for (var i = 0; i < cards.length; i++) {
+            forceStyle(cards[i], {
+                'background': '#fff', 'border-radius': '8px', 'padding': '14px',
+                'box-shadow': '0 1px 4px rgba(0,0,0,0.1)', 'text-align': 'center'
+            });
+        }
+        var clickable = area.querySelectorAll('.rpClickable');
+        for (var i = 0; i < clickable.length; i++) forceStyle(clickable[i], { 'cursor': 'pointer' });
+        var vals = area.querySelectorAll('.rpSV');
+        for (var i = 0; i < vals.length; i++) forceStyle(vals[i], { 'font-size': '26px', 'font-weight': '700', 'color': '#0078d4' });
+        var lbls = area.querySelectorAll('.rpSL');
+        for (var i = 0; i < lbls.length; i++) forceStyle(lbls[i], { 'font-size': '12px', 'color': '#888', 'margin-top': '4px' });
+        var g = area.querySelectorAll('.rpGreen'); for (var i = 0; i < g.length; i++) forceStyle(g[i], { 'color': '#28a745' });
+        var am = area.querySelectorAll('.rpAmber'); for (var i = 0; i < am.length; i++) forceStyle(am[i], { 'color': '#e67e22' });
+        var re = area.querySelectorAll('.rpRed'); for (var i = 0; i < re.length; i++) forceStyle(re[i], { 'color': '#dc3545' });
+
+        // Highlight active filter card
+        highlightActiveCard();
+
+        // Click handler
+        var grid = document.getElementById('rpReportCards');
+        if (!grid._hasClick) {
+            grid._hasClick = true;
+            grid.addEventListener('click', function (e) {
+                var card = e.target.closest('.rpClickable');
+                if (card && card.dataset.filter) {
+                    activeReportFilter = card.dataset.filter;
+                    renderReportTable();
+                    highlightActiveCard();
+                }
+            });
+        }
+    }
+
+    function highlightActiveCard() {
+        var cards = document.querySelectorAll('#rpReportCards .rpClickable');
+        for (var i = 0; i < cards.length; i++) {
+            if (cards[i].dataset.filter === activeReportFilter) {
+                forceStyle(cards[i], { 'border': '2px solid #0078d4' });
+            } else {
+                forceStyle(cards[i], { 'border': '2px solid transparent' });
+            }
+        }
+    }
+
+    // ========== EXPORT XLSX ==========
+    document.getElementById('rpBtnExport').addEventListener('click', function () { exportExcel(); });
+
+    async function exportExcel() {
+        if (!reportData.length || !reportExportEnabled) return;
+        var data = getFilteredReport();
+        if (!data.length) { showStatus('reportStatus', 'No data to export.', 'info'); return; }
+
+        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Direction', 'Window', 'Duration (min)', 'Status'];
+        var ss = []; var ssMap = {};
+        function ssIdx(s) { s = String(s == null ? '' : s); if (ssMap[s] !== undefined) return ssMap[s]; ssMap[s] = ss.length; ss.push(s); return ssMap[s]; }
+        function colLetter(idx) { return String.fromCharCode(65 + idx); }
+        function xmlEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+        for (var i = 0; i < headers.length; i++) ssIdx(headers[i]);
+        var rows = [];
+        for (var i = 0; i < data.length; i++) {
+            var r = data[i];
+            var style = 0;
+            if (r.status === 'Completed') style = 2;
+            else if (r.status === 'Incomplete') style = 3;
+            else if (r.status === 'Missed') style = 4;
+            var cells = [r.routeName, r.vehicleName, r.driverName || '', r.date, r.zoneName, r.direction, r.window, r.durationMin, r.status];
+            for (var c = 0; c < cells.length; c++) ssIdx(String(cells[c]));
+            rows.push({ cells: cells, style: style });
+        }
+
+        var sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+            '<cols><col min="1" max="1" width="22"/><col min="2" max="2" width="18"/><col min="3" max="3" width="18"/>' +
+            '<col min="4" max="4" width="14"/><col min="5" max="5" width="20"/><col min="6" max="6" width="12"/>' +
+            '<col min="7" max="7" width="16"/><col min="8" max="8" width="14"/><col min="9" max="9" width="14"/></cols>' +
+            '<sheetData>';
+
+        sheet += '<row r="1">';
+        for (var c = 0; c < headers.length; c++) sheet += '<c r="' + colLetter(c) + '1" t="s" s="1"><v>' + ssIdx(headers[c]) + '</v></c>';
+        sheet += '</row>';
+
+        for (var i = 0; i < rows.length; i++) {
+            var rn = i + 2;
+            sheet += '<row r="' + rn + '">';
+            for (var c = 0; c < rows[i].cells.length; c++) {
+                var val = rows[i].cells[c];
+                var sty = rows[i].style;
+                if (c === 7 && val !== '' && !isNaN(val)) {
+                    sheet += '<c r="' + colLetter(c) + rn + '" s="' + sty + '"><v>' + val + '</v></c>';
+                } else {
+                    sheet += '<c r="' + colLetter(c) + rn + '" t="s" s="' + sty + '"><v>' + ssIdx(String(val)) + '</v></c>';
+                }
+            }
+            sheet += '</row>';
+        }
+        sheet += '</sheetData></worksheet>';
+
+        var sst = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' + ss.length + '" uniqueCount="' + ss.length + '">';
+        for (var i = 0; i < ss.length; i++) sst += '<si><t>' + xmlEsc(ss[i]) + '</t></si>';
+        sst += '</sst>';
+
+        var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+            '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+            '<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFF0F2F5"/></patternFill></fill>' +
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFD4EDDA"/></patternFill></fill>' +
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF3CD"/></patternFill></fill>' +
+            '<fill><patternFill patternType="solid"><fgColor rgb="FFF8D7DA"/></patternFill></fill></fills>' +
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+            '<cellXfs count="5">' +
+            '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>' +
+            '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" applyFont="1" applyFill="1"/>' +
+            '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" applyFill="1"/>' +
+            '<xf numFmtId="0" fontId="0" fillId="4" borderId="0" applyFill="1"/>' +
+            '<xf numFmtId="0" fontId="0" fillId="5" borderId="0" applyFill="1"/>' +
+            '</cellXfs></styleSheet>';
+
+        var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+            '<Default Extension="xml" ContentType="application/xml"/>' +
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+            '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>';
+
+        var rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+
+        var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+            '<sheets><sheet name="Route Report" sheetId="1" r:id="rId1"/></sheets></workbook>';
+
+        var wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>';
+
+        var files = {
+            '[Content_Types].xml': contentTypes,
+            '_rels/.rels': rels,
+            'xl/workbook.xml': workbook,
+            'xl/_rels/workbook.xml.rels': wbRels,
+            'xl/worksheets/sheet1.xml': sheet,
+            'xl/styles.xml': styles,
+            'xl/sharedStrings.xml': sst
+        };
+
+        var blob = await buildZip(files);
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'route-report.xlsx';
+        a.click();
+    }
+
+    // ========== ZIP BUILDER ==========
+    async function buildZip(files) {
+        var enc = new TextEncoder();
+        var entries = [];
+        var names = Object.keys(files);
+        for (var i = 0; i < names.length; i++) {
+            var raw = enc.encode(files[names[i]]);
+            var compressed = raw;
+            var method = 0;
+            try {
+                var cs = new CompressionStream('deflate-raw');
+                var writer = cs.writable.getWriter();
+                var reader = cs.readable.getReader();
+                var chunks = [];
+                writer.write(raw); writer.close();
+                while (true) {
+                    var r = await reader.read();
+                    if (r.done) break;
+                    chunks.push(r.value);
+                }
+                var total = 0; for (var c = 0; c < chunks.length; c++) total += chunks[c].length;
+                compressed = new Uint8Array(total);
+                var off = 0; for (var c = 0; c < chunks.length; c++) { compressed.set(chunks[c], off); off += chunks[c].length; }
+                method = 8;
+            } catch (e) { compressed = raw; method = 0; }
+            entries.push({ name: enc.encode(names[i]), raw: raw, compressed: compressed, method: method, crc: crc32(raw) });
+        }
+
+        var parts = [];
+        var offsets = [];
+        var offset = 0;
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            offsets.push(offset);
+            var header = new Uint8Array(30 + e.name.length);
+            var dv = new DataView(header.buffer);
+            dv.setUint32(0, 0x04034b50, true);
+            dv.setUint16(4, 20, true);
+            dv.setUint16(8, e.method, true);
+            dv.setUint32(14, e.crc, true);
+            dv.setUint32(18, e.compressed.length, true);
+            dv.setUint32(22, e.raw.length, true);
+            dv.setUint16(26, e.name.length, true);
+            header.set(e.name, 30);
+            parts.push(header, e.compressed);
+            offset += header.length + e.compressed.length;
+        }
+
+        var cdStart = offset;
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            var cd = new Uint8Array(46 + e.name.length);
+            var dv = new DataView(cd.buffer);
+            dv.setUint32(0, 0x02014b50, true);
+            dv.setUint16(4, 20, true);
+            dv.setUint16(6, 20, true);
+            dv.setUint16(10, e.method, true);
+            dv.setUint32(16, e.crc, true);
+            dv.setUint32(20, e.compressed.length, true);
+            dv.setUint32(24, e.raw.length, true);
+            dv.setUint16(28, e.name.length, true);
+            dv.setUint32(42, offsets[i], true);
+            cd.set(e.name, 46);
+            parts.push(cd);
+            offset += cd.length;
+        }
+
+        var eocd = new Uint8Array(22);
+        var dv = new DataView(eocd.buffer);
+        dv.setUint32(0, 0x06054b50, true);
+        dv.setUint16(8, entries.length, true);
+        dv.setUint16(10, entries.length, true);
+        dv.setUint32(12, offset - cdStart, true);
+        dv.setUint32(16, cdStart, true);
+        parts.push(eocd);
+
+        return new Blob(parts, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    }
+
+    function crc32(data) {
+        var table = crc32.table;
+        if (!table) {
+            table = crc32.table = new Uint32Array(256);
+            for (var i = 0; i < 256; i++) {
+                var c = i;
+                for (var j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+                table[i] = c;
+            }
+        }
+        var crc = 0xFFFFFFFF;
+        for (var i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    // ========== HELPERS ==========
+    function timeToMinutes(t) {
+        if (!t) return 0;
+        var parts = t.split(':');
+        return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    }
+
+    function pointInPolygon(lat, lng, pts) {
+        var inside = false, n = pts.length;
+        for (var i = 0, j = n - 1; i < n; j = i++) {
+            var yi = pts[i].y, xi = pts[i].x, yj = pts[j].y, xj = pts[j].x;
+            if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+        }
+        return inside;
+    }
+
+    // Haversine distance in km from a point to the nearest edge of a polygon
+    function distanceToZone(lat, lng, pts) {
+        var minDist = Infinity;
+        for (var i = 0; i < pts.length; i++) {
+            var d = haversine(lat, lng, pts[i].y, pts[i].x);
+            if (d < minDist) minDist = d;
+        }
+        // Also check midpoints of edges for better accuracy
+        for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            var midLat = (pts[i].y + pts[j].y) / 2;
+            var midLng = (pts[i].x + pts[j].x) / 2;
+            var d = haversine(lat, lng, midLat, midLng);
+            if (d < minDist) minDist = d;
+        }
+        return Math.round(minDist * 10) / 10;
+    }
+
+    function haversine(lat1, lon1, lat2, lon2) {
+        var R = 6371; // Earth radius km
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function durationToMinutes(dur) {
+        if (typeof dur === 'string') {
+            var p = dur.split(':');
+            if (p.length === 3) {
+                var h = parseFloat(p[0]), m = parseFloat(p[1]), s = parseFloat(p[2]);
+                if (p[0].indexOf('.') !== -1) { var d = p[0].split('.'); h = parseFloat(d[0]) * 24 + parseFloat(d[1]); }
+                return h * 60 + m + s / 60;
+            }
+            return 0;
+        }
+        if (typeof dur === 'object' && dur !== null) {
+            return (dur.days || 0) * 1440 + (dur.hours || 0) * 60 + (dur.minutes || 0) + (dur.seconds || 0) / 60;
+        }
+        return 0;
+    }
+
+    function formatDate(d) { return d.toISOString().split('T')[0]; }
+
+    function formatDateTime(dt) {
+        if (!dt) return '-';
+        try {
+            var d = new Date(dt);
+            var dd = ('0' + d.getDate()).slice(-2);
+            var mon = MONTHS[d.getMonth()];
+            var yyyy = d.getFullYear();
+            var hh = ('0' + d.getHours()).slice(-2);
+            var mm = ('0' + d.getMinutes()).slice(-2);
+            return dd + '/' + mon + '/' + yyyy + ' ' + hh + ':' + mm;
+        } catch (e) { return String(dt); }
+    }
+
+    function escapeHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function showStatus(id, msg, type) {
+        var el = document.getElementById(id);
+        var colors = { success: ['#d4edda', '#155724'], error: ['#f8d7da', '#721c24'], info: ['#d1ecf1', '#0c5460'] };
+        var c = colors[type] || colors.info;
+        var msgId = 'rpStatus' + (++statusCounter);
+        el.innerHTML = '<div id="' + msgId + '">' + msg + '</div>';
+        forceStyle(document.getElementById(msgId), {
+            'padding': '10px 16px', 'border-radius': '4px', 'margin-bottom': '12px',
+            'font-size': '13px', 'background': c[0], 'color': c[1]
+        });
+        setTimeout(function () { el.innerHTML = ''; }, 5000);
+    }
+
+    // ========== API WRAPPERS ==========
+    function apiCall(method, params) {
+        return new Promise(function (resolve, reject) {
+            if (!api) { reject(new Error('Geotab API not connected.')); return; }
+            api.call(method, params, resolve, reject);
+        });
+    }
+
+    function apiMultiCall(calls) {
+        return new Promise(function (resolve, reject) {
+            if (!api) { reject(new Error('Geotab API not connected.')); return; }
+            api.multiCall(calls, resolve, reject);
+        });
+    }
+</script>
+
+</body>
+</html>
