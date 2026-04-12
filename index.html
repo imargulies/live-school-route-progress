@@ -108,6 +108,12 @@
         <div id="rpToolbar2">
             <span class="rpLbl">Date:</span>
             <input type="date" id="rpProgressDate">
+            <span id="rpProgressDateLabel"></span>
+            <span class="rpLbl" style="margin-left:12px;">From:</span>
+            <input type="time" id="rpProgressTimeFrom" value="00:00">
+            <span class="rpLbl">To:</span>
+            <input type="time" id="rpProgressTimeTo" value="23:59">
+            <select id="rpProgressRouteFilter" multiple><option value="" selected>All Routes</option></select>
             <span id="rpBtnRefresh">Refresh</span>
             <span id="rpBtnAutoRefresh">Start Live Refresh</span>
             <span id="rpAutoRefreshStatus"></span>
@@ -269,6 +275,11 @@
     }
 
     function styleFormElements() {
+        // Style the progress route multi-select
+        forceStyle(document.getElementById('rpProgressRouteFilter'), {
+            'min-width': '180px', 'max-width': '300px', 'height': 'auto',
+            'min-height': '34px', 'padding': '4px 8px'
+        });
         var inputs = document.querySelectorAll('#rp-root input[type="text"], #rp-root input[type="date"], #rp-root input[type="time"], #rp-root select');
         for (var i = 0; i < inputs.length; i++) {
             forceStyle(inputs[i], {
@@ -530,6 +541,7 @@
             await loadDrivers();
             await loadRoutes();
             setDefaultDates();
+            updateDateLabel();
             populateFilters();
             renderVehicleChips();
         } catch (err) {
@@ -842,7 +854,7 @@
                 '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
                 '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '">' +
                     (r.direction === 'inside' ? 'Inside' : 'Outside') + '</span></td>' +
-                '<td class="rptd">' + (r.startTime || '') + ' - ' + (r.endTime || '') + '</td>' +
+                '<td class="rptd">' + formatWindow(r.startTime, r.endTime) + '</td>' +
                 '<td class="rptd">' + daysText + '</td>' +
                 '<td class="rptd">' + vehText + '</td>' +
                 '<td class="rptd">' +
@@ -1100,6 +1112,23 @@
     // ========== ROUTE PROGRESS (Tab 2) ==========
     document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
 
+    var DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    function updateDateLabel() {
+        var dateStr = document.getElementById('rpProgressDate').value;
+        var label = document.getElementById('rpProgressDateLabel');
+        if (!dateStr) { label.textContent = ''; return; }
+        var d = new Date(dateStr + 'T12:00:00');
+        var dayName = DAY_FULL[d.getDay()];
+        var mon = MONTHS[d.getMonth()];
+        var day = d.getDate();
+        var year = d.getFullYear();
+        label.textContent = dayName + ', ' + mon + ' ' + day + ', ' + year;
+        forceStyle(label, { 'font-size': '14px', 'font-weight': '600', 'color': '#0078d4' });
+    }
+    document.getElementById('rpProgressDate').addEventListener('change', updateDateLabel);
+    // Set initial label after dates are set
+    setTimeout(updateDateLabel, 100);
+
     // Auto-refresh toggle
     document.getElementById('rpBtnAutoRefresh').addEventListener('click', function () {
         if (autoRefreshActive) {
@@ -1140,6 +1169,7 @@
         container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">Loading progress...</div>';
 
         try {
+            await loadZones(); // Refresh zone comments to get latest routes
             await loadRoutes();
 
             if (!savedRoutes.length) {
@@ -1162,14 +1192,36 @@
 
             // Sort routes by proximity to current time
             // Filter routes by active day
-            var selectedDay = new Date(dateStr).getDay();
+            var selectedDay = new Date(dateStr + 'T12:00:00').getDay();
+
+            // Time filter
+            var filterFrom = timeToMinutes(document.getElementById('rpProgressTimeFrom').value || '00:00');
+            var filterTo = timeToMinutes(document.getElementById('rpProgressTimeTo').value || '23:59');
+
+            // Route name filter (multi-select)
+            var routeFilterEl = document.getElementById('rpProgressRouteFilter');
+            var selectedRouteUids = [];
+            for (var oi = 0; oi < routeFilterEl.options.length; oi++) {
+                if (routeFilterEl.options[oi].selected && routeFilterEl.options[oi].value) {
+                    selectedRouteUids.push(routeFilterEl.options[oi].value);
+                }
+            }
+            var filterAllRoutes = selectedRouteUids.length === 0 || routeFilterEl.options[0].selected;
+
             var dayFilteredRoutes = savedRoutes.filter(function (r) {
                 var days = r.activeDays || [0,1,2,3,4,5];
-                return days.indexOf(selectedDay) !== -1;
+                if (days.indexOf(selectedDay) === -1) return false;
+                // Time window overlap check
+                var rStart = timeToMinutes(r.startTime);
+                var rEnd = timeToMinutes(r.endTime);
+                if (rEnd < filterFrom || rStart > filterTo) return false;
+                // Route name filter
+                if (!filterAllRoutes && selectedRouteUids.indexOf(r._uid) === -1) return false;
+                return true;
             });
 
             if (!dayFilteredRoutes.length) {
-                container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">No routes active for this day.</div>';
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">No routes match the selected filters.</div>';
                 document.getElementById('rpProgressCards').innerHTML = '';
                 return;
             }
@@ -1210,39 +1262,51 @@
                     timeLabel = '<span class="rpTimeBadge rpTimePast">' + dateStr + '</span>';
                 }
 
-                html += '<div class="rpRouteCard">' +
+                var isActiveRoute = isToday && currentMinutes >= startMin && currentMinutes <= endMin;
+                html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel +
-                        '<span class="rpRouteCardInfo">' + escapeHtml(r.zoneName || '') +
-                        ' | ' + (r.direction === 'inside' ? 'Inside' : 'Outside') +
-                        ' | ' + r.startTime + ' - ' + r.endTime + '</span>' +
+                        '<span class="rpRouteCardInfo">Tracking ' + (r.direction === 'inside' ? 'Inside' : 'Outside') +
+                        ' of ' + escapeHtml(r.zoneName || '') +
+                        ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>';
 
+                // Calculate elapsed minutes since route start
+                var elapsedMin = 0;
+                if (isToday && currentMinutes >= startMin) {
+                    elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
+                } else if (!isToday || currentMinutes > endMin) {
+                    elapsedMin = endMin - startMin;
+                }
+
+                var timeColLabel = (r.direction === 'outside' ? 'Time Outside Zone' : 'Time Inside Zone') + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
                 html += '<table class="rpProgressTable"><thead><tr>' +
-                    '<th class="rpth rpthSm">Vehicle</th>' +
-                    '<th class="rpth rpthSm">' + (r.direction === 'outside' ? 'Time Outside (min)' : 'Time in Zone (min)') + '</th>' +
-                    (r.direction === 'outside' ? '<th class="rpth rpthSm">Distance to Zone</th>' : '') +
-                    '<th class="rpth rpthSm">Status</th>' +
+                    '<th class="rpth rpthSm" title="Vehicle assigned to this route">Vehicle</th>' +
+                    '<th class="rpth rpthSm" title="Shows if vehicle is In Zone or Out of Zone right now. Green = where it should be, Red = not where it should be.">Status</th>' +
+                    '<th class="rpth rpthSm" title="Minutes the vehicle spent ' + (r.direction === 'outside' ? 'outside' : 'inside') + ' the zone vs minutes elapsed since route started">' + timeColLabel + '</th>' +
+                    (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone boundary">Distance to Zone</th>' : '') +
                     '</tr></thead><tbody>';
 
                 if (!r.vehicleIds || !r.vehicleIds.length) {
                     html += '<tr><td colspan="3" style="padding:10px;color:#888;text-align:center;">No vehicles assigned</td></tr>';
                 } else {
+                    // Build vehicle rows, then sort: red first, green second, no data last
+                    var vehRows = [];
                     for (var vi = 0; vi < r.vehicleIds.length; vi++) {
                         var vId = r.vehicleIds[vi];
                         var vName = cachedDevices[vId];
 
                         var colSpan = r.direction === 'outside' ? '4' : '3';
                         if (!vName) {
-                            html += '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">Vehicle Removed (ID: ' + vId + ')</span></td></tr>';
+                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">Vehicle Removed (ID: ' + vId + ')</span></td></tr>' });
                             continue;
                         }
 
                         totalAssign++;
                         var zoneMinutes = 0;
                         var lastStopLat = null, lastStopLng = null;
+                        var isCurrentlyInZone = false;
 
-                        // Check trips for this vehicle
                         if (zone && zone.points && zone.points.length) {
                             for (var ti = 0; ti < trips.length; ti++) {
                                 var trip = trips[ti];
@@ -1253,32 +1317,48 @@
                                 if (stopMin < startMin || stopMin > endMin) continue;
                                 var inZone = pointInPolygon(trip.stopPoint.y, trip.stopPoint.x, zone.points);
                                 if ((r.direction === 'inside' && inZone) || (r.direction === 'outside' && !inZone)) {
-                                    zoneMinutes += durationToMinutes(trip.stopDuration);
+                                    var dur = durationToMinutes(trip.stopDuration);
+                                    if (isToday && trip.nextTripStart === undefined) {
+                                        var maxDur = Math.max(0, currentMinutes - stopMin);
+                                        dur = Math.min(dur, maxDur);
+                                    }
+                                    zoneMinutes += dur;
                                 }
-                                // Track last stop position for distance calc
                                 lastStopLat = trip.stopPoint.y;
                                 lastStopLng = trip.stopPoint.x;
+                                isCurrentlyInZone = inZone;
                             }
                         }
 
                         zoneMinutes = Math.round(zoneMinutes * 10) / 10;
-                        var windowLen = endMin - startMin;
-                        var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
-                        var vStatus, vStatusClass;
-
                         var pastWindow = isToday ? currentMinutes > endMin : true;
-                        if (zoneMinutes > 0 && pct >= 80) {
-                            vStatus = 'Completed'; vStatusClass = 'rpStCompleted'; completedCount++;
-                        } else if (zoneMinutes > 0 && !pastWindow) {
-                            vStatus = 'In Progress (' + pct + '%)'; vStatusClass = 'rpStProgress'; inProgressCount++;
-                        } else if (pastWindow && zoneMinutes < windowLen * 0.8) {
-                            if (zoneMinutes === 0) { vStatus = 'Not Started'; vStatusClass = 'rpStNotStarted'; notStartedCount++; }
-                            else { vStatus = 'Missed (' + pct + '%)'; vStatusClass = 'rpStMissed'; missedCount++; }
+                        var beforeWindow = isToday && currentMinutes < startMin;
+
+                        var vStatus, vStatusClass, statusTip, sortOrder;
+                        if (beforeWindow) {
+                            vStatus = 'Waiting'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                            statusTip = 'Route has not started yet'; sortOrder = 2;
+                        } else if (!isToday && !pastWindow) {
+                            vStatus = '-'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                            statusTip = ''; sortOrder = 2;
                         } else {
-                            vStatus = 'Not Started'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
+                            if (zoneMinutes === 0 && lastStopLat === null) {
+                                vStatus = 'No Data'; vStatusClass = 'rpStNotStarted';
+                                statusTip = 'No trip data found for this vehicle in the route window';
+                                notStartedCount++; sortOrder = 2;
+                            } else {
+                                var goodDir = (r.direction === 'inside' && isCurrentlyInZone) || (r.direction === 'outside' && !isCurrentlyInZone);
+                                if (isCurrentlyInZone) {
+                                    vStatus = 'In Zone'; vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
+                                    statusTip = goodDir ? 'Vehicle is in the zone as expected' : 'Vehicle is in the zone but should be outside';
+                                } else {
+                                    vStatus = 'Out of Zone'; vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
+                                    statusTip = goodDir ? 'Vehicle is outside the zone as expected' : 'Vehicle is outside the zone but should be inside';
+                                }
+                                if (goodDir) { completedCount++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
+                            }
                         }
 
-                        // Distance to zone for outside routes
                         var distCol = '';
                         if (r.direction === 'outside') {
                             if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
@@ -1289,13 +1369,22 @@
                             }
                         }
 
-                        html += '<tr>' +
-                            '<td class="rptd">' + escapeHtml(vName) + '</td>' +
-                            '<td class="rptd">' + zoneMinutes + '</td>' +
-                            distCol +
-                            '<td class="rptd"><span class="rpStatusBadge ' + vStatusClass + '">' + vStatus + '</span></td>' +
-                            '</tr>';
+                        var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
+
+                        vehRows.push({
+                            sortOrder: sortOrder,
+                            html: '<tr>' +
+                                '<td class="rptd">' + escapeHtml(vName) + '</td>' +
+                                '<td class="rptd"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
+                                '<td class="rptd">' + timeDisplay + '</td>' +
+                                distCol +
+                                '</tr>'
+                        });
                     }
+
+                    // Sort: 0=red (off track), 1=green (on track), 2=no data/waiting, 3=removed
+                    vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+                    for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
                 html += '</tbody></table></div>';
             }
@@ -1304,11 +1393,10 @@
 
             // Summary cards
             var cardsHtml = '<div id="rpProgSummary">' +
-                '<div class="rpSC"><div class="rpSV">' + totalAssign + '</div><div class="rpSL">Total Assignments</div></div>' +
-                '<div class="rpSC"><div class="rpSV rpGreen">' + completedCount + '</div><div class="rpSL">Completed</div></div>' +
-                '<div class="rpSC"><div class="rpSV rpAmber">' + inProgressCount + '</div><div class="rpSL">In Progress</div></div>' +
-                '<div class="rpSC"><div class="rpSV">' + notStartedCount + '</div><div class="rpSL">Not Started</div></div>' +
-                '<div class="rpSC"><div class="rpSV rpRed">' + missedCount + '</div><div class="rpSL">Missed</div></div>' +
+                '<div class="rpSC" title="Total number of vehicle-route assignments for this day"><div class="rpSV">' + totalAssign + '</div><div class="rpSL">Total Vehicles</div></div>' +
+                '<div class="rpSC" title="Vehicles currently where they should be (in or out of zone as required)"><div class="rpSV rpGreen">' + completedCount + '</div><div class="rpSL">On Track</div></div>' +
+                '<div class="rpSC" title="Vehicles NOT where they should be right now"><div class="rpSV rpRed">' + missedCount + '</div><div class="rpSL">Off Track</div></div>' +
+                '<div class="rpSC" title="Vehicles waiting for their route to start"><div class="rpSV">' + notStartedCount + '</div><div class="rpSL">Waiting</div></div>' +
                 '</div>';
             document.getElementById('rpProgressCards').innerHTML = cardsHtml;
             styleProgressCards();
@@ -1343,15 +1431,18 @@
     function styleProgressContent() {
         var cards = document.querySelectorAll('.rpRouteCard');
         for (var i = 0; i < cards.length; i++) {
+            var isActive = cards[i].classList.contains('rpRouteActive');
             forceStyle(cards[i], {
-                'background': '#fff', 'border': '1px solid #e0e0e0', 'border-radius': '8px',
-                'margin-bottom': '16px', 'overflow': 'hidden'
+                'background': '#fff', 'border': isActive ? '2px solid #28a745' : '1px solid #e0e0e0',
+                'border-radius': '8px', 'margin-bottom': '16px', 'overflow': 'hidden',
+                'box-shadow': isActive ? '0 0 8px rgba(40,167,69,0.25)' : '0 1px 4px rgba(0,0,0,0.05)'
             });
         }
         var heads = document.querySelectorAll('.rpRouteCardHead');
         for (var i = 0; i < heads.length; i++) {
+            var isActive = heads[i].parentElement && heads[i].parentElement.classList.contains('rpRouteActive');
             forceStyle(heads[i], {
-                'padding': '12px 16px', 'background': '#f8f9fa', 'border-bottom': '1px solid #e0e0e0',
+                'padding': '12px 16px', 'background': isActive ? '#d4edda' : '#f8f9fa', 'border-bottom': '1px solid #e0e0e0',
                 'display': 'flex', 'align-items': 'center', 'gap': '10px', 'flex-wrap': 'wrap'
             });
         }
@@ -1383,11 +1474,19 @@
         for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
         st = document.querySelectorAll('.rpStMissed');
         for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f8d7da', 'color': '#721c24' });
+
+        // Live status badges
+        var liveIn = document.querySelectorAll('.rpLiveIn');
+        for (var i = 0; i < liveIn.length; i++) forceStyle(liveIn[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
+        var liveOut = document.querySelectorAll('.rpLiveOut');
+        for (var i = 0; i < liveOut.length; i++) forceStyle(liveOut[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f8d7da', 'color': '#721c24' });
+        var liveWait = document.querySelectorAll('.rpLiveWaiting');
+        for (var i = 0; i < liveWait.length; i++) forceStyle(liveWait[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460' });
     }
 
     // ========== ROUTE REPORT (Tab 3) ==========
     function populateFilters() {
-        // Route filter
+        // Route filter (Report tab)
         var rf = document.getElementById('rpRouteFilter');
         rf.innerHTML = '<option value="">All Routes</option>';
         for (var i = 0; i < savedRoutes.length; i++) {
@@ -1395,6 +1494,15 @@
             opt.value = savedRoutes[i]._uid;
             opt.textContent = savedRoutes[i].name;
             rf.appendChild(opt);
+        }
+        // Route filter (Progress tab - multi-select)
+        var prf = document.getElementById('rpProgressRouteFilter');
+        prf.innerHTML = '<option value="" selected>All Routes</option>';
+        for (var i = 0; i < savedRoutes.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = savedRoutes[i]._uid;
+            opt.textContent = savedRoutes[i].name + ' (' + formatWindow(savedRoutes[i].startTime, savedRoutes[i].endTime) + ')';
+            prf.appendChild(opt);
         }
         // Vehicle filter
         var vf = document.getElementById('rpVehicleFilter');
@@ -1459,7 +1567,7 @@
             // For each day in range, for each route, for each vehicle — calculate status
             for (var d = new Date(dateStart); d <= dateEnd; d.setDate(d.getDate() + 1)) {
                 var dayStr = formatDate(d);
-                var dayOfWeek = d.getDay();
+                var dayOfWeek = new Date(dayStr + 'T12:00:00').getDay();
                 for (var ri = 0; ri < routes.length; ri++) {
                     var r = routes[ri];
                     // Skip if route not active on this day
@@ -1513,7 +1621,7 @@
                             driverId: driverId, driverName: driverId ? (cachedDrivers[driverId] || '') : '',
                             date: dayStr, zoneName: r.zoneName || '',
                             direction: r.direction === 'inside' ? 'Inside' : 'Outside',
-                            window: r.startTime + ' - ' + r.endTime,
+                            window: formatWindow(r.startTime, r.endTime),
                             durationMin: zoneMinutes, status: status
                         });
                     }
@@ -1935,6 +2043,28 @@
     }
 
     function escapeHtml(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function formatTime12(t) {
+        if (!t) return '';
+        var parts = t.split(':');
+        var h = parseInt(parts[0], 10);
+        var m = parseInt(parts[1], 10);
+        var suffix = h >= 12 ? 'pm' : 'am';
+        h = h % 12 || 12;
+        return m > 0 ? (h + ':' + ('0' + m).slice(-2) + suffix) : (h + suffix);
+    }
+
+    function formatMinutesHM(mins) {
+        var h = Math.floor(mins / 60);
+        var m = Math.round(mins % 60);
+        if (h > 0 && m > 0) return h + 'h ' + m + 'min';
+        if (h > 0) return h + 'h';
+        return m + 'min';
+    }
+
+    function formatWindow(start, end) {
+        return formatTime12(start) + ' - ' + formatTime12(end);
+    }
 
     // Unicode-safe base64 encode/decode
     function utf8ToBase64(str) {
