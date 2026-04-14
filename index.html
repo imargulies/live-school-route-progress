@@ -19,7 +19,7 @@
 <div id="tab-routes">
     <div id="rpCard1">
         <div id="rpTitle1">Manage Routes</div>
-        <div id="rpDesc1">Create routes by assigning vehicles to a zone with a time window. Vehicles can be required to be inside or outside the zone during that window.</div>
+        <div id="rpDesc1">Create routes by assigning vehicles to a zone with a time window. Use "Arrived" when vehicles should be at the zone (e.g. parked at school). Use "Departed" when vehicles should have left the zone (e.g. out on their route).</div>
 
         <!-- Create Route Button (shown when form is hidden) -->
         <div id="rpCreateBtnWrap">
@@ -44,9 +44,9 @@
                     </div>
                 </div>
                 <div class="rpFormRow">
-                    <span class="rpLbl">Direction:</span>
-                    <span id="rpDirInside" class="rpToggle rpToggleActive">Inside Zone</span>
-                    <span id="rpDirOutside" class="rpToggle">Outside Zone</span>
+                    <span class="rpLbl">Tracking:</span>
+                    <span id="rpDirInside" class="rpToggle rpToggleActive" title="Vehicles should be inside the zone (e.g. parked at school)">Arrived</span>
+                    <span id="rpDirOutside" class="rpToggle" title="Vehicles should have left the zone (e.g. out driving their route)">Departed</span>
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Start Time:</span>
@@ -86,7 +86,7 @@
                 <thead><tr>
                     <th class="rpth">Route Name</th>
                     <th class="rpth">Zone</th>
-                    <th class="rpth">Direction</th>
+                    <th class="rpth">Tracking</th>
                     <th class="rpth">Window</th>
                     <th class="rpth">Days</th>
                     <th class="rpth">Vehicles</th>
@@ -150,7 +150,7 @@
                     <th class="rpth">Driver</th>
                     <th class="rpth">Date</th>
                     <th class="rpth">Zone</th>
-                    <th class="rpth">Direction</th>
+                    <th class="rpth">Tracking</th>
                     <th class="rpth">Window</th>
                     <th class="rpth">Duration (min)</th>
                     <th class="rpth">Status</th>
@@ -852,8 +852,9 @@
             html += '<tr>' +
                 '<td class="rptd">' + escapeHtml(r.name) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
-                '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '">' +
-                    (r.direction === 'inside' ? 'Inside' : 'Outside') + '</span></td>' +
+                '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '" title="' +
+                    (r.direction === 'inside' ? 'Vehicles should be at the zone' : 'Vehicles should have left the zone') + '">' +
+                    (r.direction === 'inside' ? 'Arrived' : 'Departed') + '</span></td>' +
                 '<td class="rptd">' + formatWindow(r.startTime, r.endTime) + '</td>' +
                 '<td class="rptd">' + daysText + '</td>' +
                 '<td class="rptd">' + vehText + '</td>' +
@@ -1349,9 +1350,14 @@
                     statusTip = 'No trip data found';
                 } else {
                     var goodDir = (r.direction === 'inside' && isCurrentlyInZone) || (r.direction === 'outside' && !isCurrentlyInZone);
-                    vStatus = isCurrentlyInZone ? 'In Zone' : 'Out of Zone';
+                    if (isCurrentlyInZone) {
+                        vStatus = r.direction === 'inside' ? 'Arrived' : 'Not Departed';
+                        statusTip = goodDir ? 'Vehicle has arrived at the zone' : 'Vehicle is still at the zone but should have departed';
+                    } else {
+                        vStatus = r.direction === 'outside' ? 'Departed' : 'Not Arrived';
+                        statusTip = goodDir ? 'Vehicle has departed from the zone' : 'Vehicle has not arrived at the zone yet';
+                    }
                     vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                    statusTip = goodDir ? 'Vehicle is where it should be' : 'Vehicle is NOT where it should be';
                     if (goodDir) completedCount++; else missedCount++;
                 }
 
@@ -1510,8 +1516,8 @@
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel +
-                        '<span class="rpRouteCardInfo">Tracking ' + (r.direction === 'inside' ? 'Inside' : 'Outside') +
-                        ' of ' + escapeHtml(r.zoneName || '') +
+                        '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at' : 'Departed from') +
+                        ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>';
 
@@ -1523,12 +1529,12 @@
                     elapsedMin = endMin - startMin;
                 }
 
-                var timeColLabel = (r.direction === 'outside' ? 'Time Outside Zone' : 'Time Inside Zone') + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
+                var timeColLabel = (r.direction === 'outside' ? 'Time Away' : 'Time at Zone') + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
                 html += '<table class="rpProgressTable"><thead><tr>' +
                     '<th class="rpth rpthSm" title="Vehicle assigned to this route">Vehicle</th>' +
-                    '<th class="rpth rpthSm" title="Shows if vehicle is In Zone or Out of Zone right now. Green = where it should be, Red = not where it should be.">Status</th>' +
-                    '<th class="rpth rpthSm" title="Minutes the vehicle spent ' + (r.direction === 'outside' ? 'outside' : 'inside') + ' the zone vs minutes elapsed since route started">' + timeColLabel + '</th>' +
-                    (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone boundary">Distance to Zone</th>' : '') +
+                    '<th class="rpth rpthSm" title="Shows if vehicle has arrived or departed. Green = where it should be, Red = not where it should be.">Status</th>' +
+                    '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
+                    (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone">Distance to Zone</th>' : '') +
                     '</tr></thead><tbody>';
 
                 if (!r.vehicleIds || !r.vehicleIds.length) {
@@ -1593,11 +1599,13 @@
                             } else {
                                 var goodDir = (r.direction === 'inside' && isCurrentlyInZone) || (r.direction === 'outside' && !isCurrentlyInZone);
                                 if (isCurrentlyInZone) {
-                                    vStatus = 'In Zone'; vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                                    statusTip = goodDir ? 'Vehicle is in the zone as expected' : 'Vehicle is in the zone but should be outside';
+                                    vStatus = r.direction === 'inside' ? 'Arrived' : 'Not Departed';
+                                    vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
+                                    statusTip = goodDir ? 'Vehicle has arrived at the zone' : 'Vehicle is still at the zone but should have departed';
                                 } else {
-                                    vStatus = 'Out of Zone'; vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                                    statusTip = goodDir ? 'Vehicle is outside the zone as expected' : 'Vehicle is outside the zone but should be inside';
+                                    vStatus = r.direction === 'outside' ? 'Departed' : 'Not Arrived';
+                                    vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
+                                    statusTip = goodDir ? 'Vehicle has departed from the zone' : 'Vehicle has not arrived at the zone yet';
                                 }
                                 if (goodDir) { completedCount++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
                             }
@@ -1859,7 +1867,7 @@
                             vehicleId: vId, vehicleName: cachedDevices[vId] || vId,
                             driverId: driverId, driverName: driverId ? (cachedDrivers[driverId] || '') : '',
                             date: dayStr, zoneName: r.zoneName || '',
-                            direction: r.direction === 'inside' ? 'Inside' : 'Outside',
+                            direction: r.direction === 'inside' ? 'Arrived' : 'Departed',
                             window: formatWindow(r.startTime, r.endTime),
                             durationMin: zoneMinutes, status: status
                         });
@@ -2009,7 +2017,7 @@
         var data = getFilteredReport();
         if (!data.length) { showStatus('reportStatus', 'No data to export.', 'info'); return; }
 
-        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Direction', 'Window', 'Duration (min)', 'Status'];
+        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Duration (min)', 'Status'];
         var ss = []; var ssMap = {};
         function ssIdx(s) { s = String(s == null ? '' : s); if (ssMap[s] !== undefined) return ssMap[s]; ssMap[s] = ss.length; ss.push(s); return ssMap[s]; }
         function colLetter(idx) { return String.fromCharCode(65 + idx); }
