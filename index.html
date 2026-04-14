@@ -26,7 +26,7 @@
 
         <!-- Create Route Button (shown when form is hidden) -->
         <div id="rpCreateBtnWrap">
-            <span id="rpBtnCreateNew">+ Create New Route</span>
+            <span id="rpBtnCreateNew">+ New Route</span>
         </div>
 
         <!-- Route Form (hidden by default) -->
@@ -92,7 +92,7 @@
                     <div id="rpDriverChips"></div>
                 </div>
                 <div id="rpFormBtns">
-                    <span id="rpBtnSaveRoute">Save Route</span>
+                    <span id="rpBtnSaveRoute">&#x2714; Save</span>
                     <span id="rpBtnCancelEdit">Cancel</span>
                 </div>
             </div>
@@ -133,8 +133,8 @@
             <input type="time" id="rpProgressTimeFrom" value="00:00">
             <span class="rpLbl">To:</span>
             <input type="time" id="rpProgressTimeTo" value="23:59">
-            <span id="rpBtnRefresh">Refresh</span>
-            <span id="rpBtnAutoRefresh">Start Live Refresh</span>
+            <span id="rpBtnRefresh">&#x21BB; Refresh</span>
+            <span id="rpBtnAutoRefresh">&#x25B6; Go Live</span>
             <span id="rpAutoRefreshStatus"></span>
         </div>
         <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpChipSelectAll" title="Select all routes">All</span> <span id="rpChipDeselectAll" title="Deselect all routes">None</span> <span id="rpRouteChips"></span></div>
@@ -157,8 +157,8 @@
             <select id="rpRouteFilter"><option value="">All Routes</option></select>
             <select id="rpVehicleFilter"><option value="">All Vehicles</option></select>
             <select id="rpDriverFilter"><option value="">All Drivers</option></select>
-            <span id="rpBtnGenReport">Generate Report</span>
-            <span id="rpBtnExport">Export Excel</span>
+            <span id="rpBtnGenReport">&#x1F4CA; Generate Report</span>
+            <span id="rpBtnExport">&#x1F4E5; Export Excel</span>
         </div>
         <div id="reportStatus"></div>
         <div id="rpReportSummary"></div>
@@ -441,7 +441,7 @@
                 'background': '#dc3545', 'color': '#fff', 'display': 'inline-block',
                 'user-select': 'none'
             });
-            btn.textContent = 'Stop Live Refresh';
+            btn.innerHTML = '&#x23F9; Stop Live';
         } else {
             var now = new Date();
             var isPast8pm = now.getHours() >= 20;
@@ -451,7 +451,7 @@
                 'background': isPast8pm ? '#dc3545' : '#28a745', 'color': '#fff',
                 'display': 'inline-block', 'user-select': 'none'
             });
-            btn.textContent = isPast8pm ? 'Start Live Refresh' : 'Start Live Refresh';
+            btn.innerHTML = '&#x25B6; Go Live';
         }
         var statusEl = document.getElementById('rpAutoRefreshStatus');
         if (autoRefreshActive) {
@@ -1111,7 +1111,7 @@
             showStatus('routeStatus', 'Error saving route: ' + err.message, 'error');
         } finally {
             forceStyle(btn, { 'background': '#0078d4' });
-            btn.textContent = 'Save Route';
+            btn.innerHTML = '&#x2714; Save';
         }
     });
 
@@ -1171,7 +1171,7 @@
         }
 
         document.getElementById('rpFormTitle').textContent = 'Edit Route: ' + r.name;
-        document.getElementById('rpBtnSaveRoute').textContent = 'Update Route';
+        document.getElementById('rpBtnSaveRoute').innerHTML = '&#x2714; Update';
         // Show form, hide create button
         forceStyle(document.getElementById('rpFormWrap'), { 'display': 'block' });
         forceStyle(document.getElementById('rpCreateBtnWrap'), { 'display': 'none' });
@@ -2061,7 +2061,7 @@
         } catch (err) {
             showStatus('reportStatus', 'Error: ' + err.message, 'error');
         } finally {
-            btn.textContent = 'Generate Report';
+            btn.innerHTML = '&#x1F4CA; Generate Report';
             forceStyle(btn, { 'background': '#0078d4' });
         }
     }
