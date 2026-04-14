@@ -48,8 +48,8 @@
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Tracking:</span>
-                    <span id="rpDirInside" class="rpToggle rpToggleActive" title="Vehicles should be inside the zone (e.g. parked at school)">Arrived</span>
-                    <span id="rpDirOutside" class="rpToggle" title="Vehicles should have left the zone (e.g. out driving their route)">Departed</span>
+                    <span id="rpDirInside" class="rpToggle rpToggleActive" title="Vehicles/drivers should be inside the zone (e.g. parked at school)">Arrived at Location</span>
+                    <span id="rpDirOutside" class="rpToggle" title="Vehicles/drivers should have left the zone (e.g. out driving their route)">Departed from Location</span>
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Start Time:</span>
@@ -984,8 +984,8 @@
                 '<td class="rptd">' + escapeHtml(r.name) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
                 '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '" title="' +
-                    (r.direction === 'inside' ? 'Vehicles should be at the zone' : 'Vehicles should have left the zone') + '">' +
-                    (r.direction === 'inside' ? 'Arrived' : 'Departed') + '</span></td>' +
+                    (r.direction === 'inside' ? 'Should be at the zone' : 'Should have left the zone') + '">' +
+                    (r.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location') + '</span></td>' +
                 '<td class="rptd">' + formatWindow(r.startTime, r.endTime) + '</td>' +
                 '<td class="rptd">' + daysText + '</td>' +
                 '<td class="rptd">' + assignLabel + '</td>' +
@@ -1668,7 +1668,7 @@
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel +
-                        '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at' : 'Departed from') +
+                        '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>';
