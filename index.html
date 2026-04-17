@@ -1500,6 +1500,7 @@
                 var statusCell = row.querySelector('.rpStatusCell');
                 var timeCell = row.querySelector('.rpTimeCell');
                 var distCell = row.querySelector('.rpDistCell');
+                var eventCell = row.querySelector('.rpEventCell');
 
                 // Compute new status
                 var vStatus, vStatusClass, statusTip;
@@ -1530,6 +1531,10 @@
                 }
                 if (timeCell) {
                     timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
+                }
+                if (eventCell) {
+                    var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                    eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
                 }
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
@@ -1707,10 +1712,15 @@
                 var assignedIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
                 var idLookup = isDriverRoute ? cachedDrivers : cachedDevices;
 
+                var eventColLabel = r.direction === 'outside' ? 'Departed At' : 'Arrived At';
+                var eventColTip = r.direction === 'outside'
+                    ? 'When the vehicle left the zone (relative to now)'
+                    : 'When the vehicle first entered the zone (relative to now)';
                 html += '<table class="rpProgressTable"><thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
                     (isDriverRoute ? '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">Current Vehicle</th>' : '') +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
+                    '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone">Distance to Zone</th>' : '') +
                     '</tr></thead><tbody>';
@@ -1723,7 +1733,7 @@
                         var aId = assignedIds[vi];
                         var aName = idLookup[aId];
 
-                        var colSpan = (r.direction === 'outside' ? 4 : 3) + (isDriverRoute ? 1 : 0);
+                        var colSpan = (r.direction === 'outside' ? 5 : 4) + (isDriverRoute ? 1 : 0);
                         if (!aName) {
                             vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
@@ -1816,12 +1826,16 @@
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
                         var curVehCol = isDriverRoute ? '<td class="rptd">' + (currentVehicleName || '<span style="color:#aaa">-</span>') + '</td>' : '';
 
+                        var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                        var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
+
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '">' +
                                 '<td class="rptd">' + escapeHtml(aName) + '</td>' +
                                 curVehCol +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
+                                eventCell +
                                 '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
                                 '</tr>'
@@ -2546,14 +2560,17 @@
     }
 
     // Compute zone presence from GPS log records, clipped to [windowFromMs, windowToMs].
-    // Returns { hasData, everInZone, zoneMinutes, isCurrentlyInZone, lastLat, lastLng }.
+    // Returns { hasData, everInZone, zoneMinutes, isCurrentlyInZone, lastLat, lastLng,
+    //           arrivedAtMs, departedAtMs }.
+    // arrivedAtMs: timestamp of the first in-zone log within the window.
+    // departedAtMs: timestamp of the latest transition from in-zone to out-of-zone within the window.
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
-        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null };
+        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, arrivedAtMs: null, departedAtMs: null };
         if (!logs || !logs.length || !zonePoints || !zonePoints.length) return out;
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
         var zoneSec = 0;
-        var prevMs = null, prevIn = false;
+        var prevMs = null, prevIn = false, haveSeenIn = false;
         for (var i = 0; i < sorted.length; i++) {
             var lg = sorted[i];
             if (typeof lg.latitude !== 'number' || typeof lg.longitude !== 'number') continue;
@@ -2561,7 +2578,14 @@
             if (t < windowFromMs || t > windowToMs) continue;
             out.hasData = true;
             var inZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
-            if (inZ) out.everInZone = true;
+            if (inZ) {
+                out.everInZone = true;
+                if (out.arrivedAtMs === null) out.arrivedAtMs = t;
+                haveSeenIn = true;
+            } else if (haveSeenIn) {
+                // Transition in → out within window: record the latest such moment as departure
+                out.departedAtMs = t;
+            }
             if (prevMs !== null && prevIn && inZ) {
                 var delta = (t - prevMs) / 1000;
                 // cap long gaps (>10 min) so a parked-then-moved sequence isn't overcounted
@@ -2634,16 +2658,35 @@
                         presence.everInZone = true;
                         if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
                         if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
+                        // Arrival: stop time (clamped into window)
+                        var arrCandidate = Math.max(stopMs, windowFromMs);
+                        if (presence.arrivedAtMs === null || arrCandidate < presence.arrivedAtMs) {
+                            presence.arrivedAtMs = arrCandidate;
+                        }
+                        // Departure: next trip started (they drove off) during window
+                        if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
+                            if (presence.departedAtMs === null || nextStartMs > presence.departedAtMs) {
+                                presence.departedAtMs = nextStartMs;
+                            }
+                        }
                     }
                 }
             }
-            // Trip start point: vehicle was there at the moment the trip began
+            // Trip start point: vehicle was there at the moment the trip began, then drove off
             if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
                 var startMs2 = tr.start ? new Date(tr.start).getTime() : null;
                 if (startMs2 !== null && startMs2 >= windowFromMs && startMs2 <= windowToMs) {
                     if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
                         presence.hasData = true;
                         presence.everInZone = true;
+                        // They were already there — arrival was earlier than startMs2 (or at windowFromMs)
+                        if (presence.arrivedAtMs === null || windowFromMs < presence.arrivedAtMs) {
+                            presence.arrivedAtMs = windowFromMs;
+                        }
+                        // Driving off = departure moment
+                        if (presence.departedAtMs === null || startMs2 > presence.departedAtMs) {
+                            presence.departedAtMs = startMs2;
+                        }
                     }
                 }
             }
@@ -2770,6 +2813,28 @@
         if (h > 0 && m > 0) return h + 'h ' + m + 'min';
         if (h > 0) return h + 'h';
         return m + 'min';
+    }
+
+    // "7:45 AM (25 min ago)" — ms = event time, nowMs = reference time
+    function formatTimeWithAgo(ms, nowMs) {
+        if (!ms) return '<span style="color:#aaa">-</span>';
+        var d = new Date(ms);
+        var hh = d.getHours();
+        var mm = d.getMinutes();
+        var ampm = hh >= 12 ? 'PM' : 'AM';
+        var h12 = hh % 12 || 12;
+        var timeStr = h12 + ':' + ('0' + mm).slice(-2) + ' ' + ampm;
+        var ago = Math.floor((nowMs - ms) / 60000);
+        var agoStr;
+        if (ago < 0) agoStr = 'in future';
+        else if (ago === 0) agoStr = 'just now';
+        else if (ago < 60) agoStr = ago + ' min ago';
+        else {
+            var hAgo = Math.floor(ago / 60);
+            var mAgo = ago % 60;
+            agoStr = mAgo > 0 ? (hAgo + 'h ' + mAgo + 'm ago') : (hAgo + 'h ago');
+        }
+        return timeStr + ' <span style="color:#888;font-size:11px;">(' + agoStr + ')</span>';
     }
 
     function formatWindow(start, end) {
