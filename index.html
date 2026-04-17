@@ -1465,14 +1465,20 @@
                 if (!aLookup[aId]) continue;
                 totalAssign++;
 
-                // GPS-based presence (catches drive-throughs, not just stops)
+                // GPS-based presence (catches drive-throughs, not just stops).
+                // In driver mode, slice logs by attribution intervals so a shared vehicle's
+                // other-driver pings don't count for this driver.
                 var rowDeviceIds = resolveDeviceIdsForAssigned(r, aId, trips, startMin, endMin);
                 var windowFromMs = new Date(dateStr + 'T00:00:00').getTime() + startMin * 60000;
                 var windowToMs = new Date(dateStr + 'T00:00:00').getTime() + endMin * 60000;
                 if (isToday) windowToMs = Math.min(windowToMs, now.getTime());
-                var mergedLogs = mergeDeviceLogs(logsByDevice, rowDeviceIds);
+                var effectiveLogsByDevice = logsByDevice;
+                if (isDriverRoute) {
+                    effectiveLogsByDevice = filterLogsByAttribution(logsByDevice, rowDeviceIds, buildDriverAttributionMap(trips, aId));
+                }
+                var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
-                augmentPresenceWithTrips(presence, trips, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
                     var elapsedInWindow = Math.max(0, (windowToMs - windowFromMs) / 60000);
@@ -1743,12 +1749,18 @@
                         }
 
                         // Compute presence from GPS logs (catches drive-throughs, not just stops).
+                        // In driver mode, restrict logs to intervals where the driver was attributed
+                        // to the device, so shared vehicles don't leak other drivers' movements.
                         var windowFromMs = new Date(dateStr + 'T00:00:00').getTime() + startMin * 60000;
                         var windowToMs = new Date(dateStr + 'T00:00:00').getTime() + endMin * 60000;
                         if (isToday) windowToMs = Math.min(windowToMs, now.getTime());
-                        var mergedLogs = mergeDeviceLogs(logsByDevice, rowDeviceIds);
+                        var effectiveLogsByDevice = logsByDevice;
+                        if (isDriverRoute) {
+                            effectiveLogsByDevice = filterLogsByAttribution(logsByDevice, rowDeviceIds, buildDriverAttributionMap(trips, aId));
+                        }
+                        var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
-                        augmentPresenceWithTrips(presence, trips, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                        augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
                         var lastStopLng = presence.lastLng;
@@ -2079,9 +2091,13 @@
                             }
                         }
 
-                        var mergedLogsR = mergeDeviceLogs(reportLogsByDevice, dayDeviceIds);
+                        var effectiveLogsByDeviceR = reportLogsByDevice;
+                        if (isDriverRoute) {
+                            effectiveLogsByDeviceR = filterLogsByAttribution(reportLogsByDevice, dayDeviceIds, buildDriverAttributionMap(trips, aId));
+                        }
+                        var mergedLogsR = mergeDeviceLogs(effectiveLogsByDeviceR, dayDeviceIds);
                         var presenceR = computePresenceFromLogs(mergedLogsR, zone && zone.points, windowFromMs, windowToMs);
-                        augmentPresenceWithTrips(presenceR, trips, deviceIdSetFromList(dayDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                        augmentPresenceWithTrips(presenceR, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         var zoneMinutes = presenceR.zoneMinutes;
                         if (r.direction === 'outside') {
                             zoneMinutes = Math.max(0, windowLen - presenceR.zoneMinutes);
@@ -2594,13 +2610,19 @@
     }
 
     // Augment GPS-based presence with Trip stop/start points. Catches cases where raw
-    // LogRecords are sparse, unavailable, or when a driver is parked at the zone from
+    // LogRecords are sparse, unavailable, or when the vehicle is parked at the zone from
     // a prior trip (stop before windowFrom, nextTripStart after windowFrom).
-    function augmentPresenceWithTrips(presence, trips, deviceIdSet, zonePoints, windowFromMs, windowToMs) {
+    //
+    // Because a vehicle can have many drivers and a driver can use many vehicles, in
+    // driver mode we require BOTH trip.driver.id === driverIdFilter AND
+    // trip.device.id ∈ deviceIdSet, so presence is attributed to the correct driver.
+    // In vehicle mode driverIdFilter is null and only the device match is required.
+    function augmentPresenceWithTrips(presence, trips, driverIdFilter, deviceIdSet, zonePoints, windowFromMs, windowToMs) {
         if (!trips || !trips.length || !zonePoints || !zonePoints.length) return presence;
         for (var i = 0; i < trips.length; i++) {
             var tr = trips[i];
             if (!tr.device || !tr.device.id || !deviceIdSet[tr.device.id]) continue;
+            if (driverIdFilter && (!tr.driver || tr.driver.id !== driverIdFilter)) continue;
 
             // Trip stop point: vehicle is parked there from tr.stop until tr.nextTripStart (or ∞)
             if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
@@ -2633,6 +2655,48 @@
         var s = {};
         for (var i = 0; i < (ids || []).length; i++) s[ids[i]] = true;
         return s;
+    }
+
+    // Build per-device attribution intervals for a driver. Each interval is the
+    // time the driver is considered to be associated with that device — from
+    // trip.start until trip.nextTripStart (or Infinity if no next trip yet).
+    // A vehicle can have multiple drivers; a driver can be in multiple vehicles.
+    function buildDriverAttributionMap(trips, driverId) {
+        var map = {};
+        if (!driverId || !trips) return map;
+        for (var i = 0; i < trips.length; i++) {
+            var tr = trips[i];
+            if (!tr.driver || tr.driver.id !== driverId) continue;
+            if (!tr.device || !tr.device.id) continue;
+            var startMs = tr.start ? new Date(tr.start).getTime() : null;
+            if (startMs === null) continue;
+            var endMs = tr.nextTripStart ? new Date(tr.nextTripStart).getTime() : Infinity;
+            if (!map[tr.device.id]) map[tr.device.id] = [];
+            map[tr.device.id].push({ fromMs: startMs, toMs: endMs });
+        }
+        return map;
+    }
+
+    // Filter per-device GPS logs down to only those captured while the driver
+    // was attributed to that device. Used in driver mode so shared-vehicle
+    // pings from other drivers don't leak into this driver's presence.
+    // Returns a fresh logsByDevice-shaped object.
+    function filterLogsByAttribution(logsByDevice, deviceIds, attributionMap) {
+        var out = {};
+        for (var i = 0; i < deviceIds.length; i++) {
+            var devId = deviceIds[i];
+            var arr = logsByDevice[devId] || [];
+            var intervals = attributionMap[devId];
+            if (!intervals || !intervals.length) { out[devId] = []; continue; }
+            out[devId] = arr.filter(function (lg) {
+                var t = new Date(lg.dateTime).getTime();
+                for (var j = 0; j < intervals.length; j++) {
+                    if (t >= intervals[j].fromMs && t <= intervals[j].toMs) return true;
+                }
+                return false;
+            });
+        }
+        return out;
     }
 
     // Collect all unique device IDs needed to render a set of routes, for the given trips.
