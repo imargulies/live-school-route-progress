@@ -1472,6 +1472,7 @@
                 if (isToday) windowToMs = Math.min(windowToMs, now.getTime());
                 var mergedLogs = mergeDeviceLogs(logsByDevice, rowDeviceIds);
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
+                augmentPresenceWithTrips(presence, trips, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
                     var elapsedInWindow = Math.max(0, (windowToMs - windowFromMs) / 60000);
@@ -1747,6 +1748,7 @@
                         if (isToday) windowToMs = Math.min(windowToMs, now.getTime());
                         var mergedLogs = mergeDeviceLogs(logsByDevice, rowDeviceIds);
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
+                        augmentPresenceWithTrips(presence, trips, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
                         var lastStopLng = presence.lastLng;
@@ -2079,6 +2081,7 @@
 
                         var mergedLogsR = mergeDeviceLogs(reportLogsByDevice, dayDeviceIds);
                         var presenceR = computePresenceFromLogs(mergedLogsR, zone && zone.points, windowFromMs, windowToMs);
+                        augmentPresenceWithTrips(presenceR, trips, deviceIdSetFromList(dayDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         var zoneMinutes = presenceR.zoneMinutes;
                         if (r.direction === 'outside') {
                             zoneMinutes = Math.max(0, windowLen - presenceR.zoneMinutes);
@@ -2510,12 +2513,18 @@
                     deviceSearch: { id: deviceIds[i] },
                     fromDate: fromIso,
                     toDate: toIso
-                }
+                },
+                resultsLimit: 50000
             }]);
         }
-        var results = await apiMultiCall(calls);
-        for (var i = 0; i < deviceIds.length; i++) {
-            byDevice[deviceIds[i]] = (results && results[i]) || [];
+        try {
+            var results = await apiMultiCall(calls);
+            for (var i = 0; i < deviceIds.length; i++) {
+                byDevice[deviceIds[i]] = (results && results[i]) || [];
+            }
+        } catch (err) {
+            if (window.console) console.warn('[RouteProgress] LogRecord fetch failed:', err && err.message ? err.message : err);
+            for (var i = 0; i < deviceIds.length; i++) byDevice[deviceIds[i]] = [];
         }
         return byDevice;
     }
@@ -2562,8 +2571,9 @@
     }
 
     // Which device IDs are relevant for an assigned row?
-    // Vehicle mode: the vehicle itself. Driver mode: the devices the driver drove
-    // (from trips) whose time window overlaps the route window.
+    // Vehicle mode: the vehicle itself.
+    // Driver mode: every device whose (start → nextTripStart) interval overlaps the route window,
+    // so that both driving-through and parked-through intervals are covered.
     function resolveDeviceIdsForAssigned(r, aId, trips, startMin, endMin) {
         if (r.trackBy !== 'driver') return [aId];
         var set = {};
@@ -2571,15 +2581,58 @@
             var tr = trips[i];
             if (!tr.driver || tr.driver.id !== aId) continue;
             if (!tr.device || !tr.device.id) continue;
-            var stopDate = tr.stop ? new Date(tr.stop) : null;
-            var startDate = tr.start ? new Date(tr.start) : null;
-            var stopMin = stopDate ? (stopDate.getHours() * 60 + stopDate.getMinutes()) : null;
-            var startTMin = startDate ? (startDate.getHours() * 60 + startDate.getMinutes()) : null;
-            if (stopMin !== null && stopMin < startMin) continue;
-            if (startTMin !== null && startTMin > endMin) continue;
-            set[tr.device.id] = true;
+            var startMs = tr.start ? new Date(tr.start).getTime() : null;
+            var nextStartMs = tr.nextTripStart ? new Date(tr.nextTripStart).getTime() : Infinity;
+            if (startMs === null) { set[tr.device.id] = true; continue; }
+            var dayMs = new Date(new Date(tr.start).toDateString()).getTime();
+            var winFromMs = dayMs + startMin * 60000;
+            var winToMs = dayMs + endMin * 60000;
+            // Overlap check: [startMs, nextStartMs] ∩ [winFromMs, winToMs]
+            if (nextStartMs >= winFromMs && startMs <= winToMs) set[tr.device.id] = true;
         }
         return Object.keys(set);
+    }
+
+    // Augment GPS-based presence with Trip stop/start points. Catches cases where raw
+    // LogRecords are sparse, unavailable, or when a driver is parked at the zone from
+    // a prior trip (stop before windowFrom, nextTripStart after windowFrom).
+    function augmentPresenceWithTrips(presence, trips, deviceIdSet, zonePoints, windowFromMs, windowToMs) {
+        if (!trips || !trips.length || !zonePoints || !zonePoints.length) return presence;
+        for (var i = 0; i < trips.length; i++) {
+            var tr = trips[i];
+            if (!tr.device || !tr.device.id || !deviceIdSet[tr.device.id]) continue;
+
+            // Trip stop point: vehicle is parked there from tr.stop until tr.nextTripStart (or ∞)
+            if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
+                var stopMs = tr.stop ? new Date(tr.stop).getTime() : null;
+                var nextStartMs = tr.nextTripStart ? new Date(tr.nextTripStart).getTime() : Infinity;
+                if (stopMs !== null && stopMs <= windowToMs && nextStartMs >= windowFromMs) {
+                    if (pointInPolygon(tr.stopPoint.y, tr.stopPoint.x, zonePoints)) {
+                        presence.hasData = true;
+                        presence.everInZone = true;
+                        if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
+                        if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
+                    }
+                }
+            }
+            // Trip start point: vehicle was there at the moment the trip began
+            if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
+                var startMs2 = tr.start ? new Date(tr.start).getTime() : null;
+                if (startMs2 !== null && startMs2 >= windowFromMs && startMs2 <= windowToMs) {
+                    if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
+                        presence.hasData = true;
+                        presence.everInZone = true;
+                    }
+                }
+            }
+        }
+        return presence;
+    }
+
+    function deviceIdSetFromList(ids) {
+        var s = {};
+        for (var i = 0; i < (ids || []).length; i++) s[ids[i]] = true;
+        return s;
     }
 
     // Collect all unique device IDs needed to render a set of routes, for the given trips.
