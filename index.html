@@ -2583,8 +2583,8 @@
                 if (out.arrivedAtMs === null) out.arrivedAtMs = t;
                 haveSeenIn = true;
             } else if (haveSeenIn) {
-                // Transition in → out within window: record the latest such moment as departure
-                out.departedAtMs = t;
+                // First transition in → out within window is the departure
+                if (out.departedAtMs === null) out.departedAtMs = t;
             }
             if (prevMs !== null && prevIn && inZ) {
                 var delta = (t - prevMs) / 1000;
@@ -2663,9 +2663,9 @@
                         if (presence.arrivedAtMs === null || arrCandidate < presence.arrivedAtMs) {
                             presence.arrivedAtMs = arrCandidate;
                         }
-                        // Departure: next trip started (they drove off) during window
+                        // Departure: next trip started (they drove off) during window — keep EARLIEST
                         if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
-                            if (presence.departedAtMs === null || nextStartMs > presence.departedAtMs) {
+                            if (presence.departedAtMs === null || nextStartMs < presence.departedAtMs) {
                                 presence.departedAtMs = nextStartMs;
                             }
                         }
@@ -2683,8 +2683,8 @@
                         if (presence.arrivedAtMs === null || windowFromMs < presence.arrivedAtMs) {
                             presence.arrivedAtMs = windowFromMs;
                         }
-                        // Driving off = departure moment
-                        if (presence.departedAtMs === null || startMs2 > presence.departedAtMs) {
+                        // Driving off = departure moment — keep EARLIEST
+                        if (presence.departedAtMs === null || startMs2 < presence.departedAtMs) {
                             presence.departedAtMs = startMs2;
                         }
                     }
