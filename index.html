@@ -58,6 +58,11 @@
                     <input type="time" id="rpEndTime" value="17:00">
                 </div>
                 <div class="rpFormRow">
+                    <span class="rpLbl" title="Target time within the window (e.g. expected arrival or departure). Used to compute Early/Late variance on the Progress tab.">Target Time:</span>
+                    <input type="time" id="rpTargetTime" value="">
+                    <span style="font-size:12px;color:#888;">(must be within the start/end window)</span>
+                </div>
+                <div class="rpFormRow">
                     <span class="rpLbl">Active Days:</span>
                     <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="0" checked> Sun</label>
                     <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="1" checked> Mon</label>
@@ -806,6 +811,10 @@
         }
     }
 
+    // ========== TIME WINDOW / TARGET BOUNDS ==========
+    document.getElementById('rpStartTime').addEventListener('change', syncTargetTimeBounds);
+    document.getElementById('rpEndTime').addEventListener('change', syncTargetTimeBounds);
+
     // ========== DIRECTION TOGGLE ==========
     document.getElementById('rpDirInside').addEventListener('click', function () {
         selectedDirection = 'inside';
@@ -1045,12 +1054,22 @@
         var zoneName = zoneObj ? zoneObj.name : '';
         var startTime = document.getElementById('rpStartTime').value;
         var endTime = document.getElementById('rpEndTime').value;
+        var targetTime = document.getElementById('rpTargetTime').value;
         var vehicleIds = Object.keys(selectedVehicles);
         var driverIds = Object.keys(selectedDrivers);
 
         if (!name) { showStatus('routeStatus', 'Please enter a route name.', 'error'); return; }
         if (!zoneId) { showStatus('routeStatus', 'Please select a zone.', 'error'); return; }
         if (!startTime || !endTime) { showStatus('routeStatus', 'Please set start and end times.', 'error'); return; }
+        if (targetTime) {
+            var tMin = timeToMinutes(targetTime);
+            var sMin = timeToMinutes(startTime);
+            var eMin = timeToMinutes(endTime);
+            if (tMin < sMin || tMin > eMin) {
+                showStatus('routeStatus', 'Target time must be within the route start and end times.', 'error');
+                return;
+            }
+        }
         if (selectedTrackBy === 'vehicle' && !vehicleIds.length) { showStatus('routeStatus', 'Please select at least one vehicle.', 'error'); return; }
         if (selectedTrackBy === 'driver' && !driverIds.length) { showStatus('routeStatus', 'Please select at least one driver.', 'error'); return; }
 
@@ -1066,6 +1085,7 @@
             name: name, direction: selectedDirection,
             trackBy: selectedTrackBy,
             startTime: startTime, endTime: endTime,
+            targetTime: targetTime || '',
             vehicleIds: selectedTrackBy === 'vehicle' ? vehicleIds : [],
             driverIds: selectedTrackBy === 'driver' ? driverIds : [],
             activeDays: activeDays,
@@ -1138,6 +1158,8 @@
 
         document.getElementById('rpStartTime').value = r.startTime;
         document.getElementById('rpEndTime').value = r.endTime;
+        document.getElementById('rpTargetTime').value = r.targetTime || '';
+        syncTargetTimeBounds();
         selectedDirection = r.direction || 'inside';
         selectedTrackBy = r.trackBy || 'vehicle';
         setTrackByUI(selectedTrackBy);
@@ -1194,6 +1216,8 @@
 
         document.getElementById('rpStartTime').value = '08:00';
         document.getElementById('rpEndTime').value = '17:00';
+        document.getElementById('rpTargetTime').value = '';
+        syncTargetTimeBounds();
         selectedDirection = 'inside';
         selectedTrackBy = 'vehicle';
         setTrackByUI('vehicle');
@@ -1501,6 +1525,7 @@
                 var timeCell = row.querySelector('.rpTimeCell');
                 var distCell = row.querySelector('.rpDistCell');
                 var eventCell = row.querySelector('.rpEventCell');
+                var varianceCell = row.querySelector('.rpVarianceCell');
 
                 // Compute new status
                 var vStatus, vStatusClass, statusTip;
@@ -1532,9 +1557,12 @@
                 if (timeCell) {
                     timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
                 }
+                var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                 if (eventCell) {
-                    var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
+                }
+                if (varianceCell) {
+                    varianceCell.innerHTML = formatTargetVariance(eventMs, r.targetTime, dateStr);
                 }
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
@@ -1691,9 +1719,12 @@
                 }
 
                 var isActiveRoute = isToday && currentMinutes >= startMin && currentMinutes <= endMin;
+                var targetBadge = r.targetTime
+                    ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' time">Target: ' + formatTime12(r.targetTime) + '</span>'
+                    : '';
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
-                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel +
+                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge +
                         '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
@@ -1716,11 +1747,15 @@
                 var eventColTip = r.direction === 'outside'
                     ? 'When the vehicle left the zone (relative to now)'
                     : 'When the vehicle first entered the zone (relative to now)';
+                var targetColTip = r.targetTime
+                    ? 'Minutes early or late vs target ' + formatTime12(r.targetTime)
+                    : 'No target time set for this route';
                 html += '<table class="rpProgressTable"><thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
                     (isDriverRoute ? '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">Current Vehicle</th>' : '') +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
+                    '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone">Distance to Zone</th>' : '') +
                     '</tr></thead><tbody>';
@@ -1733,7 +1768,7 @@
                         var aId = assignedIds[vi];
                         var aName = idLookup[aId];
 
-                        var colSpan = (r.direction === 'outside' ? 5 : 4) + (isDriverRoute ? 1 : 0);
+                        var colSpan = (r.direction === 'outside' ? 6 : 5) + (isDriverRoute ? 1 : 0);
                         if (!aName) {
                             vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
@@ -1828,6 +1863,7 @@
 
                         var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
+                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r.targetTime, dateStr) + '</td>';
 
                         vehRows.push({
                             sortOrder: sortOrder,
@@ -1836,6 +1872,7 @@
                                 curVehCol +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
+                                varianceCell +
                                 '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
                                 '</tr>'
@@ -1916,6 +1953,10 @@
         for (var i = 0; i < smTh.length; i++) forceStyle(smTh[i], { 'font-size': '12px', 'padding': '8px 12px' });
         var tds = document.querySelectorAll('#rpProgressContent .rptd');
         for (var i = 0; i < tds.length; i++) forceStyle(tds[i], { 'padding': '8px 12px', 'border-bottom': '1px solid #f0f0f0', 'font-size': '13px' });
+
+        // Target time badges
+        var targets = document.querySelectorAll('.rpTargetBadge');
+        for (var i = 0; i < targets.length; i++) forceStyle(targets[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404', 'border': '1px solid #ffeeba' });
 
         // Time badges
         var upcoming = document.querySelectorAll('.rpTimeUpcoming');
@@ -2494,6 +2535,21 @@
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
     }
 
+    function syncTargetTimeBounds() {
+        var s = document.getElementById('rpStartTime');
+        var e = document.getElementById('rpEndTime');
+        var t = document.getElementById('rpTargetTime');
+        if (!s || !e || !t) return;
+        if (s.value) t.min = s.value; else t.removeAttribute('min');
+        if (e.value) t.max = e.value; else t.removeAttribute('max');
+        if (t.value) {
+            var tMin = timeToMinutes(t.value);
+            var sMin = timeToMinutes(s.value);
+            var eMin = timeToMinutes(e.value);
+            if (tMin < sMin || tMin > eMin) t.value = '';
+        }
+    }
+
     function pointInPolygon(lat, lng, pts) {
         var inside = false, n = pts.length;
         for (var i = 0, j = n - 1; i < n; j = i++) {
@@ -2839,6 +2895,27 @@
 
     function formatWindow(start, end) {
         return formatTime12(start) + ' - ' + formatTime12(end);
+    }
+
+    // Compute variance vs target time for a given event timestamp.
+    // Returns { html, sortKey } where html is the cell content and sortKey
+    // sorts by absolute lateness (most late first, then early, then on time).
+    function formatTargetVariance(eventMs, targetTimeStr, dateStr) {
+        if (!targetTimeStr) {
+            return '<span style="color:#aaa">No target</span>';
+        }
+        if (!eventMs) {
+            return '<span style="color:#aaa">-</span>';
+        }
+        var targetMs = new Date(dateStr + 'T00:00:00').getTime() + timeToMinutes(targetTimeStr) * 60000;
+        var diffMin = Math.round((eventMs - targetMs) / 60000);
+        if (diffMin === 0) {
+            return '<span style="color:#28a745;font-weight:600;">On time</span>';
+        }
+        if (diffMin > 0) {
+            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(diffMin) + '</span>';
+        }
+        return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-diffMin) + '</span>';
     }
 
     // Unicode-safe base64 encode/decode
