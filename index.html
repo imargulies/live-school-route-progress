@@ -1468,12 +1468,14 @@
 
         // Update each vehicle row inline
         var totalAssign = 0, completedCount = 0, missedCount = 0, notStartedCount = 0;
+        var liveRouteCounts = {};
 
         for (var ri = 0; ri < savedRoutes.length; ri++) {
             var r = savedRoutes[ri];
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
+            var rCompleted = 0, rTotal = 0;
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -1488,6 +1490,7 @@
                 var aId = aIds[vi];
                 if (!aLookup[aId]) continue;
                 totalAssign++;
+                rTotal++;
 
                 // GPS-based presence (catches drive-throughs, not just stops).
                 // In driver mode, slice logs by attribution intervals so a shared vehicle's
@@ -1548,7 +1551,7 @@
                         statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                     }
                     vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                    if (goodDir) completedCount++; else missedCount++;
+                    if (goodDir) { completedCount++; rCompleted++; } else { missedCount++; }
                 }
 
                 if (statusCell) {
@@ -1568,7 +1571,10 @@
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
             }
+            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
         }
+
+        applyRouteProgressBadges(liveRouteCounts);
 
         // Update summary cards inline
         var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
@@ -1700,6 +1706,7 @@
 
             // Build progress for each route
             var totalAssign = 0, completedCount = 0, inProgressCount = 0, notStartedCount = 0, missedCount = 0;
+            var routeProgressCounts = {}; // uid -> { completed, total, direction }
             var html = '';
 
             for (var ri = 0; ri < routesWithScore.length; ri++) {
@@ -1722,9 +1729,10 @@
                 var targetBadge = r.targetTime
                     ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' time">Target: ' + formatTime12(r.targetTime) + '</span>'
                     : '';
+                var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
-                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge +
+                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder +
                         '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
@@ -1760,6 +1768,7 @@
                     (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone">Distance to Zone</th>' : '') +
                     '</tr></thead><tbody>';
 
+                var rCompleted = 0, rTotal = 0;
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="3" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -1775,6 +1784,7 @@
                         }
 
                         totalAssign++;
+                        rTotal++;
                         var currentVehicleName = '';
 
                         // Collect relevant device IDs and the latest vehicle the driver used (for driver mode).
@@ -1846,7 +1856,7 @@
                                 statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                             }
                             vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                            if (goodDir) { completedCount++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
+                            if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
                         }
 
                         var distCol = '';
@@ -1882,10 +1892,12 @@
                     vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
                     for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
+                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
                 html += '</tbody></table></div>';
             }
 
             container.innerHTML = html;
+            applyRouteProgressBadges(routeProgressCounts);
             lastProgressHash = getProgressHash();
 
             // Summary cards
@@ -2895,6 +2907,49 @@
 
     function formatWindow(start, end) {
         return formatTime12(start) + ' - ' + formatTime12(end);
+    }
+
+    // Fill in each route card's progress badge placeholder using a counts map.
+    // counts: { [routeUid]: { completed, total, direction } }
+    function applyRouteProgressBadges(counts) {
+        if (!counts) return;
+        var nodes = document.querySelectorAll('#rpProgressContent .rpRouteProgressBadge');
+        for (var i = 0; i < nodes.length; i++) {
+            var uid = nodes[i].dataset.routeUid;
+            var c = counts[uid];
+            if (!c) { nodes[i].innerHTML = ''; continue; }
+            nodes[i].innerHTML = formatRouteProgressBadge(c.completed, c.total, c.direction);
+        }
+        stylePerRouteProgressBadges();
+    }
+
+    function stylePerRouteProgressBadges() {
+        var base = { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600' };
+        function setAll(sel, extra) {
+            var els = document.querySelectorAll(sel);
+            for (var i = 0; i < els.length; i++) {
+                forceStyle(els[i], base);
+                forceStyle(els[i], extra);
+            }
+        }
+        setAll('.rpRouteProgressFull', { 'background': '#d4edda', 'color': '#155724' });
+        setAll('.rpRouteProgressPartial', { 'background': '#fff3cd', 'color': '#856404' });
+        setAll('.rpRouteProgressNone', { 'background': '#f8d7da', 'color': '#721c24' });
+        setAll('.rpRouteProgressEmpty', { 'background': '#f0f0f0', 'color': '#888' });
+    }
+
+    // Badge HTML for per-route completion like "3/5 arrived".
+    // total excludes removed/unknown members. direction: 'inside' | 'outside'.
+    function formatRouteProgressBadge(completed, total, direction) {
+        var verb = direction === 'outside' ? 'departed' : 'arrived';
+        if (!total) {
+            return '<span class="rpRouteProgressCount rpRouteProgressEmpty">0/0 ' + verb + '</span>';
+        }
+        var cls = 'rpRouteProgressPartial';
+        if (completed === total) cls = 'rpRouteProgressFull';
+        else if (completed === 0) cls = 'rpRouteProgressNone';
+        return '<span class="rpRouteProgressCount ' + cls + '" title="' + completed + ' of ' + total + ' ' + (total === 1 ? (direction === 'outside' ? 'has' : 'has') : 'have') + ' ' + verb + '">' +
+            completed + '/' + total + ' ' + verb + '</span>';
     }
 
     // Compute variance vs target time for a given event timestamp.
