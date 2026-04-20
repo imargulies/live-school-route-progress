@@ -1690,7 +1690,11 @@
     });
 
     // ========== ROUTE PROGRESS (Tab 2) ==========
-    document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
+    document.getElementById('rpBtnRefresh').addEventListener('click', function () {
+        // Invalidate historical caches so the user gets fresh data.
+        invalidateApiCaches();
+        renderProgress();
+    });
     // Show a loading state on the Refresh button while a render is running.
     var _refreshBtnDepth = 0;
     function setRefreshLoading(on) {
@@ -3416,6 +3420,37 @@
 
     // ========== GPS PRESENCE (LogRecord-based) ==========
     // Fetch raw GPS log records for multiple devices in a single multiCall.
+    // Simple promise-level cache for the historical fetch paths (sparkline trend,
+    // compare-7d, per-row timeline popup, weekly timeline). Deduplicates concurrent
+    // requests for the same range/devices and reuses results for up to TTL ms.
+    // The live tick deliberately bypasses this so it always sees the freshest state.
+    var _apiCacheTtlMs = 60 * 1000;
+    var _apiTripCache = {};
+    var _apiLogCache = {};
+    function cachedGetTrips(fromIso, toIso) {
+        var key = fromIso + '|' + toIso;
+        var entry = _apiTripCache[key];
+        var nowTs = Date.now();
+        if (entry && (nowTs - entry.ts) < _apiCacheTtlMs) return entry.promise;
+        var p = apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } });
+        _apiTripCache[key] = { ts: nowTs, promise: p };
+        // If the promise rejects, drop it so the next call retries fresh.
+        p.catch(function () { delete _apiTripCache[key]; });
+        return p;
+    }
+    function cachedLogRecordsByDevice(deviceIds, fromIso, toIso) {
+        var sortedIds = (deviceIds || []).slice().sort().join(',');
+        var key = sortedIds + '|' + fromIso + '|' + toIso;
+        var entry = _apiLogCache[key];
+        var nowTs = Date.now();
+        if (entry && (nowTs - entry.ts) < _apiCacheTtlMs) return entry.promise;
+        var p = fetchLogRecordsByDevice(deviceIds, fromIso, toIso);
+        _apiLogCache[key] = { ts: nowTs, promise: p };
+        p.catch(function () { delete _apiLogCache[key]; });
+        return p;
+    }
+    function invalidateApiCaches() { _apiTripCache = {}; _apiLogCache = {}; }
+
     async function fetchLogRecordsByDevice(deviceIds, fromIso, toIso) {
         var byDevice = {};
         if (!deviceIds || !deviceIds.length) return byDevice;
@@ -4006,12 +4041,12 @@
         var dayStart = new Date(prevStr + 'T00:00:00');
         var dayEnd = new Date(prevStr + 'T00:00:00'); dayEnd.setDate(dayEnd.getDate() + 1);
         var trips = [];
-        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: dayStart.toISOString(), toDate: dayEnd.toISOString() } }); }
+        try { trips = await cachedGetTrips(dayStart.toISOString(), dayEnd.toISOString()); }
         catch (e) { return; }
         if (runId !== _compareRunId) return;
         var deviceIds = collectRouteDeviceIds(routes, trips);
         var logsByDevice = {};
-        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, dayStart.toISOString(), dayEnd.toISOString()); } catch (e) {}
+        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, dayStart.toISOString(), dayEnd.toISOString()); } catch (e) {}
         if (runId !== _compareRunId) return;
 
         var prevDow = new Date(prevStr + 'T12:00:00').getDay();
@@ -4570,11 +4605,11 @@
         var toDate = new Date(refDate); toDate.setDate(toDate.getDate() + 1);
         var fromIso = fromDate.toISOString(), toIso = toDate.toISOString();
         var trips = [];
-        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } }); }
+        try { trips = await cachedGetTrips(fromIso, toIso); }
         catch (e) { throw e; }
         var deviceIds = collectRouteDeviceIds([route], trips);
         var logsByDevice = {};
-        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
         var zone = cachedZones.find(function (z) { return z.id === route.zoneId; });
         var isDriver = entityType === 'driver' || route.trackBy === 'driver';
         var rDays = route.activeDays || [0,1,2,3,4,5];
@@ -4848,7 +4883,7 @@
         await new Promise(function (res) { setTimeout(res, 0); });
         var trips;
         try {
-            trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } });
+            trips = await cachedGetTrips(fromIso, toIso);
         } catch (e) { return; }
         if (runId !== _sparklineRunId) return;
         // Progress: fetch logs
@@ -4859,7 +4894,7 @@
         await new Promise(function (res) { setTimeout(res, 0); });
         var deviceIds = collectRouteDeviceIds(routes, trips);
         var logsByDevice = {};
-        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
         if (runId !== _sparklineRunId) return;
 
         var changedSet = {};
@@ -5529,7 +5564,7 @@
         var fromIso = weekStart.toISOString();
         var toIso = weekEnd.toISOString();
         var trips = [];
-        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } }); }
+        try { trips = await cachedGetTrips(fromIso, toIso); }
         catch (e) { trips = []; }
         if (runId !== _tlRunId) return;
         // Collect device ids across all selected entities (for drivers, map through trips).
@@ -5540,7 +5575,7 @@
         }
         var deviceIds = collectRouteDeviceIds(routeUniverse, trips);
         var logsByDevice = {};
-        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
         if (runId !== _tlRunId) return;
 
         // Compute event info for (entry, day, route).
