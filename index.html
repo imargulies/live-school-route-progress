@@ -154,7 +154,7 @@
             <span id="rpAutoRefreshStatus"></span>
             <label id="rpChkProblemsOnlyLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
                 <input type="checkbox" id="rpChkProblemsOnly">
-                <span class="rpLbl" title="Hide routes where every vehicle/driver has arrived/departed on time. Routes with any not-yet-arrived OR late-vs-target rows remain visible.">Show only late arrivals/departures</span>
+                <span class="rpLbl" title="Hide routes where every assigned vehicle/driver is on track. A route stays visible if any row is late vs target, overdue, not arrived/departed, or no-show.">Show only late arrivals/departures</span>
             </label>
             <label id="rpChkCompareModeLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
                 <input type="checkbox" id="rpChkCompareMode">
@@ -2053,8 +2053,9 @@
                     if (goodDir) { completedCount++; rCompleted++; }
                     else { missedCount++; }
                 }
-                // A row counts as "late" for the filter iff its vs Target cell would say "Late".
-                if (isVsTargetLate(eventMs, r, dateStr, now.getTime(), pastWindow)) rLate++;
+                // A row counts as a "problem" for the filter when it's late vs target,
+                // overdue, no-show, or not arrived / not departed after the window ended.
+                if (isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir)) rLate++;
 
                 if (statusCell) {
                     statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>';
@@ -2391,8 +2392,9 @@
                             if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; }
                             else { missedCount++; sortOrder = 0; }
                         }
-                        // A row counts as "late" for the filter iff its vs Target cell would say "Late".
-                        if (isVsTargetLate(eventMs, r, dateStr, now.getTime(), pastWindow)) rLate++;
+                        // A row counts as a "problem" for the filter when it's late vs target,
+                        // overdue, no-show, or not arrived / not departed after the window ended.
+                        if (isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir)) rLate++;
 
                         var distCol;
                         if (r.direction === 'outside') {
@@ -3916,7 +3918,7 @@
                 notice.id = 'rpProblemsFilterNotice';
                 container.insertBefore(notice, container.firstChild);
             }
-            notice.textContent = hidden + ' route' + (hidden === 1 ? '' : 's') + ' hidden (all on time).';
+            notice.textContent = hidden + ' route' + (hidden === 1 ? '' : 's') + ' hidden (all on track).';
             forceStyle(notice, {
                 'padding': '8px 12px', 'background': '#e8f4fd', 'color': '#0c5460',
                 'border-radius': '6px', 'margin-bottom': '12px', 'font-size': '12px'
@@ -4362,15 +4364,30 @@
     //              (b) no event yet, window still open, but now > targetEnd + grace
     //              (the live "Late Nm (no arrival yet)" overdue ticker).
     // Excludes "No-show" (window ended without event), which is a distinct state.
-    function isVsTargetLate(eventMs, route, dateStr, nowMs, windowEnded) {
-        if (!routeHasTarget(route)) return false;
-        var b = routeTargetBounds(route);
-        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
-        var targetEndMs = dayMs + timeToMinutes(b.end) * 60000;
-        var graceMs = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
-        if (eventMs) return eventMs > targetEndMs + graceMs;
-        if (!windowEnded && nowMs && nowMs > targetEndMs + graceMs) return true;
+    // True if a row represents a problem that the "Show only late arrivals/departures"
+    // filter should keep visible. Covers: Late vs Target (with grace), overdue-with-no-event
+    // (still within window but past target), No-show (window ended with no event), and
+    // Not Arrived / Not Departed (window ended with goodDir=false). goodDir is undefined
+    // for rows that didn't reach the direction check (before window / no GPS data).
+    function isRowProblem(eventMs, route, dateStr, nowMs, windowEnded, goodDir) {
+        // No-show: window ended and no event of the expected direction.
+        if (windowEnded && !eventMs) return true;
+        // Not Arrived / Not Departed: window ended and the row's direction check failed.
+        if (windowEnded && goodDir === false) return true;
+        // Late vs target (with grace).
+        if (routeHasTarget(route)) {
+            var b = routeTargetBounds(route);
+            var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+            var targetEndMs = dayMs + timeToMinutes(b.end) * 60000;
+            var graceMs = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
+            if (eventMs && eventMs > targetEndMs + graceMs) return true;
+            if (!eventMs && !windowEnded && nowMs && nowMs > targetEndMs + graceMs) return true;
+        }
         return false;
+    }
+    // Backwards-compat alias kept in case older call sites exist.
+    function isVsTargetLate(eventMs, route, dateStr, nowMs, windowEnded) {
+        return isRowProblem(eventMs, route, dateStr, nowMs, windowEnded, undefined);
     }
 
     // Variance vs target window. Returns HTML for the "vs Target" cell.
