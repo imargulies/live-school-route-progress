@@ -1959,7 +1959,7 @@
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder +
-                        '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
+                        '<span class="rpRouteCardInfo">Tracking ' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>' +
