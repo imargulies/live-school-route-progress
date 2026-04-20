@@ -2039,8 +2039,12 @@
                     vStatus = 'No Data'; vStatusClass = 'rpStNotStarted'; notStartedCount++;
                     statusTip = 'No GPS data found for this window';
                 } else {
-                    var goodDir = (r.direction === 'inside' && (everInZone || isCurrentlyInZone)) ||
-                                  (r.direction === 'outside' && !isCurrentlyInZone);
+                    // "Departed" means they've left the zone at some point during the window —
+                    // either they're out now, or we recorded a departure transition. That way a
+                    // vehicle that left before the target window still reads Departed even if
+                    // it briefly re-enters the zone (e.g. turning around at the exit).
+                    var goodDir = (r.direction === 'inside' && (everInZone || isCurrentlyInZone || !!presence.arrivedAtMs)) ||
+                                  (r.direction === 'outside' && (!isCurrentlyInZone || !!presence.departedAtMs));
                     if (r.direction === 'inside') {
                         vStatus = goodDir ? 'Arrived' : 'Not Arrived';
                         statusTip = goodDir
@@ -2380,8 +2384,8 @@
                         } else {
                             // "inside" route = Arrived if ever (or currently) in zone during window.
                             // "outside" route = Departed if currently outside zone.
-                            var goodDir = (r.direction === 'inside' && (everInZone || isCurrentlyInZone)) ||
-                                          (r.direction === 'outside' && !isCurrentlyInZone);
+                            var goodDir = (r.direction === 'inside' && (everInZone || isCurrentlyInZone || !!presence.arrivedAtMs)) ||
+                                          (r.direction === 'outside' && (!isCurrentlyInZone || !!presence.departedAtMs));
                             if (r.direction === 'inside') {
                                 vStatus = goodDir ? 'Arrived' : 'Not Arrived';
                                 statusTip = goodDir
@@ -4420,7 +4424,25 @@
             var lbl = ('0' + d.getDate()).slice(-2) + '-' + MONTHS[d.getMonth()];
             svg += '<text x="' + xx + '" y="' + (H - padB + 14) + '" font-size="10" fill="#666" text-anchor="middle" transform="rotate(-45 ' + xx + ',' + (H - padB + 14) + ')">' + lbl + '</text>';
         }
-        // Connecting line of event times (skipping days with no event)
+        // Connecting line of event times (skipping days with no event).
+        // Dots are colored by on-time/late/early vs the target window (with grace)
+        // when one is configured, so slips are visible at a glance.
+        var hasTarget = routeHasTarget(route);
+        var targetStartMs = null, targetEndMs = null, graceMs = 0;
+        if (hasTarget) {
+            var tbv = routeTargetBounds(route);
+            targetStartMs = timeToMinutes(tbv.start) * 60000;
+            targetEndMs = timeToMinutes(tbv.end) * 60000;
+            graceMs = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
+        }
+        function evStatus(evMs, dateStr) {
+            if (!hasTarget) return { label: '', color: '#0078d4' };
+            var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+            var tsMs = dayMs + targetStartMs, teMs = dayMs + targetEndMs;
+            if (evMs >= tsMs - graceMs && evMs <= teMs + graceMs) return { label: 'On time', color: '#28a745' };
+            if (evMs > teMs) return { label: 'Late ' + formatMinutesHM(Math.round((evMs - teMs) / 60000)), color: '#dc3545' };
+            return { label: 'Early ' + formatMinutesHM(Math.round((tsMs - evMs) / 60000)), color: '#e67e22' };
+        }
         var pathPts = [];
         for (var k = 0; k < n; k++) {
             if (!data[k].eventMs) continue;
@@ -4438,8 +4460,10 @@
             var pH = pDate.getHours() % 12 || 12;
             var pM = ('0' + pDate.getMinutes()).slice(-2);
             var pAp = pDate.getHours() >= 12 ? 'PM' : 'AM';
-            var tip = formatDateFriendly(pathPts[dp].data.dateStr) + ' \u2022 ' + pH + ':' + pM + ' ' + pAp;
-            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="4" fill="#0078d4" stroke="#fff" stroke-width="1.5">' +
+            var st = evStatus(pathPts[dp].data.eventMs, pathPts[dp].data.dateStr);
+            var tip = formatDateFriendly(pathPts[dp].data.dateStr) + ' \u2022 ' + pH + ':' + pM + ' ' + pAp +
+                (st.label ? ' \u2022 ' + st.label : '');
+            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="5" fill="' + st.color + '" stroke="#fff" stroke-width="1.5">' +
                 '<title>' + tip + '</title>' +
                 '</circle>';
         }
@@ -4491,7 +4515,11 @@
                 var h12 = ed2.getHours() % 12 || 12;
                 var mm = ('0' + ed2.getMinutes()).slice(-2);
                 var ap = ed2.getHours() >= 12 ? 'PM' : 'AM';
-                timeStr = '<span style="color:#0078d4;font-weight:600;">' + h12 + ':' + mm + ' ' + ap + '</span>';
+                var st2 = evStatus(rd.eventMs, rd.dateStr);
+                var pill = st2.label
+                    ? ' <span style="background:' + st2.color + ';color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;">' + st2.label + '</span>'
+                    : '';
+                timeStr = '<span style="color:' + (st2.label ? st2.color : '#0078d4') + ';font-weight:600;">' + h12 + ':' + mm + ' ' + ap + '</span>' + pill;
             } else if (rd.inactive) {
                 timeStr = '<span style="color:#aaa;">Not scheduled</span>';
             } else {
