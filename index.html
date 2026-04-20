@@ -1883,7 +1883,7 @@
                     else if (currentMinutes <= endMin) timeLabel = '<span class="rpTimeBadge rpTimeActive">Active Now</span>';
                     else timeLabel = '<span class="rpTimeBadge rpTimePast">Completed Window</span>';
                 } else {
-                    timeLabel = '<span class="rpTimeBadge rpTimePast">' + dateStr + '</span>';
+                    timeLabel = '<span class="rpTimeBadge rpTimePast">' + formatDateFriendly(dateStr) + '</span>';
                 }
 
                 var isActiveRoute = isToday && currentMinutes >= startMin && currentMinutes <= endMin;
@@ -1922,28 +1922,39 @@
                 var targetColTip = r.targetTime
                     ? 'Minutes early or late vs target ' + formatTime12(r.targetTime)
                     : 'No target time set for this route';
-                html += '<table class="rpProgressTable"><thead><tr>' +
+                // Standardize: every route card uses the same 7 columns at the same widths,
+                // so they line up across the page.
+                html += '<table class="rpProgressTable">' +
+                    '<colgroup>' +
+                        '<col class="rpColName" style="width:18%">' +
+                        '<col class="rpColCurVeh" style="width:14%">' +
+                        '<col class="rpColStatus" style="width:11%">' +
+                        '<col class="rpColEvent" style="width:15%">' +
+                        '<col class="rpColVariance" style="width:14%">' +
+                        '<col class="rpColTime" style="width:14%">' +
+                        '<col class="rpColDist" style="width:14%">' +
+                    '</colgroup>' +
+                    '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
-                    (isDriverRoute ? '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">Current Vehicle</th>' : '') +
+                    '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">' + (isDriverRoute ? 'Current Vehicle' : '') + '</th>' +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
-                    (r.direction === 'outside' ? '<th class="rpth rpthSm" title="How far the vehicle is from the zone">Distance to Zone</th>' : '') +
+                    '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance to Zone' : '') + '</th>' +
                     '</tr></thead><tbody>';
 
                 var rCompleted = 0, rTotal = 0;
                 if (!assignedIds.length) {
-                    html += '<tr><td colspan="3" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
+                    html += '<tr><td colspan="7" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
                     var vehRows = [];
                     for (var vi = 0; vi < assignedIds.length; vi++) {
                         var aId = assignedIds[vi];
                         var aName = idLookup[aId];
 
-                        var colSpan = (r.direction === 'outside' ? 6 : 5) + (isDriverRoute ? 1 : 0);
                         if (!aName) {
-                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="' + colSpan + '"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
+                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="7"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
                         }
 
@@ -2023,17 +2034,21 @@
                             if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
                         }
 
-                        var distCol = '';
+                        var distCol;
                         if (r.direction === 'outside') {
                             if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
                                 distCol = '<td class="rptd rpDistCell">' + distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km</td>';
                             } else {
                                 distCol = '<td class="rptd rpDistCell" style="color:#aaa;">N/A</td>';
                             }
+                        } else {
+                            distCol = '<td class="rptd rpDistCell" style="color:#ccc;">—</td>';
                         }
 
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
-                        var curVehCol = isDriverRoute ? '<td class="rptd">' + (currentVehicleName || '<span style="color:#aaa">-</span>') + '</td>' : '';
+                        var curVehCol = isDriverRoute
+                            ? '<td class="rptd">' + (currentVehicleName || '<span style="color:#aaa">-</span>') + '</td>'
+                            : '<td class="rptd" style="color:#ccc;">—</td>';
 
                         var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
@@ -2128,11 +2143,11 @@
             });
         }
         var titles = document.querySelectorAll('.rpRouteCardTitle');
-        for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '14px', 'color': '#333' });
+        for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '18px', 'color': '#333' });
         var infos = document.querySelectorAll('.rpRouteCardInfo');
-        for (var i = 0; i < infos.length; i++) forceStyle(infos[i], { 'font-size': '12px', 'color': '#777', 'margin-left': 'auto' });
+        for (var i = 0; i < infos.length; i++) forceStyle(infos[i], { 'font-size': '16px', 'color': '#777', 'margin-left': 'auto' });
         var tbls = document.querySelectorAll('.rpProgressTable');
-        for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'border-collapse': 'collapse', 'font-size': '13px' });
+        for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         var smTh = document.querySelectorAll('.rpthSm');
         for (var i = 0; i < smTh.length; i++) forceStyle(smTh[i], { 'font-size': '12px', 'padding': '8px 12px' });
         var tds = document.querySelectorAll('#rpProgressContent .rptd');
@@ -2140,15 +2155,15 @@
 
         // Target time badges
         var targets = document.querySelectorAll('.rpTargetBadge');
-        for (var i = 0; i < targets.length; i++) forceStyle(targets[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404', 'border': '1px solid #ffeeba' });
+        for (var i = 0; i < targets.length; i++) forceStyle(targets[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404', 'border': '1px solid #ffeeba' });
 
         // Time badges
         var upcoming = document.querySelectorAll('.rpTimeUpcoming');
-        for (var i = 0; i < upcoming.length; i++) forceStyle(upcoming[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460' });
+        for (var i = 0; i < upcoming.length; i++) forceStyle(upcoming[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460' });
         var active = document.querySelectorAll('.rpTimeActive');
-        for (var i = 0; i < active.length; i++) forceStyle(active[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
+        for (var i = 0; i < active.length; i++) forceStyle(active[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
         var past = document.querySelectorAll('.rpTimePast');
-        for (var i = 0; i < past.length; i++) forceStyle(past[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
+        for (var i = 0; i < past.length; i++) forceStyle(past[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
 
         // Status badges
         var st = document.querySelectorAll('.rpStCompleted');
@@ -2430,7 +2445,7 @@
                 '<td class="rptd">' + escapeHtml(r.routeName) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.vehicleName) + '</td>' +
                 '<td class="rptd">' + (r.driverName ? escapeHtml(r.driverName) : '<span style="color:#aaa">No driver</span>') + '</td>' +
-                '<td class="rptd">' + r.date + '</td>' +
+                '<td class="rptd" title="' + r.date + '">' + formatDateFriendly(r.date) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.zoneName) + '</td>' +
                 '<td class="rptd">' + r.direction + '</td>' +
                 '<td class="rptd">' + r.window + '</td>' +
@@ -3049,6 +3064,15 @@
         return yyyy + '-' + mm + '-' + dd;
     }
 
+    // Human-friendly form of a YYYY-MM-DD date string, e.g. "Fri, Apr 17, 2026".
+    function formatDateFriendly(dateStr) {
+        if (!dateStr) return '';
+        var d = new Date(dateStr + 'T12:00:00');
+        if (isNaN(d.getTime())) return dateStr;
+        var DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        return DAY_SHORT[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+    }
+
     function formatDateTime(dt) {
         if (!dt) return '-';
         try {
@@ -3275,7 +3299,7 @@
     }
 
     function stylePerRouteProgressBadges() {
-        var base = { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '11px', 'font-weight': '600' };
+        var base = { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600' };
         function setAll(sel, extra) {
             var els = document.querySelectorAll(sel);
             for (var i = 0; i < els.length; i++) {
@@ -3350,7 +3374,7 @@
         for (var i = 0; i < values.length; i++) {
             var v = values[i];
             var pct = v.rate === null || v.rate === undefined ? '—' : Math.round(v.rate * 100) + '%';
-            lines.push(v.dateStr + ': ' + pct);
+            lines.push(formatDateFriendly(v.dateStr) + ': ' + pct);
         }
         return lines.join('\n');
     }
