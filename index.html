@@ -14,6 +14,7 @@
 <!-- TABS -->
 <div id="rpTabs">
     <span id="rpTabBtn-progress" data-tab="progress">Route Progress</span>
+    <span id="rpTabBtn-timeline" data-tab="timeline">Weekly Timeline</span>
     <span id="rpTabBtn-routes" data-tab="routes">Manage Routes</span>
     <span id="rpTabBtn-report" data-tab="report">Route Report</span>
 </div>
@@ -175,6 +176,29 @@
     </div>
 </div>
 
+<!-- TAB: WEEKLY TIMELINE -->
+<div id="tab-timeline">
+    <div id="rpCard4">
+        <div id="rpTitle4">Weekly Timeline</div>
+        <div id="rpDesc4">Select one or more drivers or vehicles. Each day of the week shows their assigned routes as time blocks. Time runs vertically top-to-bottom.</div>
+        <div id="rpTimelineToolbar">
+            <span class="rpLbl">Week of:</span>
+            <input type="date" id="rpTimelineWeek">
+            <span id="rpTimelineWeekLabel" class="rpLbl"></span>
+            <span class="rpLbl" style="margin-left:12px;">By:</span>
+            <span id="rpTimelineTypeVehicle" class="rpToggle rpToggleActive">Vehicle</span>
+            <span id="rpTimelineTypeDriver" class="rpToggle">Driver</span>
+            <span id="rpTimelineSearchWrap" style="position:relative;display:inline-block;margin-left:8px;">
+                <input type="text" id="rpTimelineSearch" placeholder="Search to add..." autocomplete="off" style="width:240px;">
+                <div id="rpTimelineSearchDropdown"></div>
+            </span>
+        </div>
+        <div id="rpTimelineChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px;"></div>
+        <div id="timelineStatus"></div>
+        <div id="rpTimelineGraph"></div>
+    </div>
+</div>
+
 <!-- TAB 3: ROUTE REPORT -->
 <div id="tab-report">
     <div id="rpCard3">
@@ -255,26 +279,29 @@
         applyTabStyles('progress');
 
         // Cards
-        var cards = ['rpCard1', 'rpCard2', 'rpCard3'];
+        var cards = ['rpCard1', 'rpCard2', 'rpCard3', 'rpCard4'];
         for (var i = 0; i < cards.length; i++) {
-            forceStyle(document.getElementById(cards[i]), {
+            var cEl = document.getElementById(cards[i]);
+            if (cEl) forceStyle(cEl, {
                 'background': '#fff', 'border-radius': '8px', 'box-shadow': '0 1px 4px rgba(0,0,0,0.1)',
                 'padding': '20px', 'margin-top': '20px'
             });
         }
 
         // Titles
-        var titles = ['rpTitle1', 'rpTitle2', 'rpTitle3'];
+        var titles = ['rpTitle1', 'rpTitle2', 'rpTitle3', 'rpTitle4'];
         for (var i = 0; i < titles.length; i++) {
-            forceStyle(document.getElementById(titles[i]), {
+            var tEl = document.getElementById(titles[i]);
+            if (tEl) forceStyle(tEl, {
                 'font-size': '18px', 'font-weight': '700', 'color': '#1a1a1a', 'margin-bottom': '4px'
             });
         }
 
         // Descriptions
-        var descs = ['rpDesc1', 'rpDesc2', 'rpDesc3'];
+        var descs = ['rpDesc1', 'rpDesc2', 'rpDesc3', 'rpDesc4'];
         for (var i = 0; i < descs.length; i++) {
-            forceStyle(document.getElementById(descs[i]), {
+            var dEl = document.getElementById(descs[i]);
+            if (dEl) forceStyle(dEl, {
                 'font-size': '13px', 'color': '#777', 'margin-bottom': '16px', 'line-height': '1.4'
             });
         }
@@ -282,11 +309,13 @@
         // Hide inactive tabs (progress is default/first)
         forceStyle(document.getElementById('tab-routes'), { 'display': 'none' });
         forceStyle(document.getElementById('tab-report'), { 'display': 'none' });
+        forceStyle(document.getElementById('tab-timeline'), { 'display': 'none' });
 
         // Toolbars
-        var toolbars = ['rpToolbar2', 'rpToolbar3'];
+        var toolbars = ['rpToolbar2', 'rpToolbar3', 'rpTimelineToolbar'];
         for (var i = 0; i < toolbars.length; i++) {
-            forceStyle(document.getElementById(toolbars[i]), {
+            var tbEl = document.getElementById(toolbars[i]);
+            if (tbEl) forceStyle(tbEl, {
                 'display': 'flex', 'gap': '12px', 'align-items': 'center', 'flex-wrap': 'wrap', 'margin-bottom': '16px'
             });
         }
@@ -673,9 +702,10 @@
     }
 
     function applyTabStyles(activeTab) {
-        var tabs = ['routes', 'progress', 'report'];
+        var tabs = ['routes', 'progress', 'report', 'timeline'];
         for (var i = 0; i < tabs.length; i++) {
             var btn = document.getElementById('rpTabBtn-' + tabs[i]);
+            if (!btn) continue;
             if (tabs[i] === activeTab) {
                 forceStyle(btn, {
                     'padding': '12px 24px', 'border': 'none', 'background': 'transparent',
@@ -760,6 +790,8 @@
             if (getPref('autoRefresh', false)) {
                 startAutoRefresh();
             }
+            // Set up the Weekly Timeline tab once data is loaded.
+            initTimeline();
         } catch (err) {
             showStatus('routeStatus', 'Error initializing: ' + err.message, 'error');
         }
@@ -810,12 +842,13 @@
     });
 
     function switchTab(tab) {
-        var tabs = ['routes', 'progress', 'report'];
+        var tabs = ['routes', 'progress', 'report', 'timeline'];
         for (var i = 0; i < tabs.length; i++) {
             var panel = document.getElementById('tab-' + tabs[i]);
-            forceStyle(panel, { 'display': tabs[i] === tab ? 'block' : 'none' });
+            if (panel) forceStyle(panel, { 'display': tabs[i] === tab ? 'block' : 'none' });
         }
         applyTabStyles(tab);
+        if (tab === 'timeline') renderTimeline();
     }
 
     // ========== LOAD DATA ==========
@@ -4234,6 +4267,264 @@
         });
         setTimeout(function () { el.innerHTML = ''; }, 5000);
     }
+
+    // ========== WEEKLY TIMELINE TAB ==========
+    var _tlType = 'vehicle';           // 'vehicle' | 'driver'
+    var _tlSelected = {};               // id -> true
+    var _tlPalette = ['#0078d4', '#28a745', '#e67e22', '#8e44ad', '#d63031', '#17a2b8', '#fd7e14', '#2d3436'];
+
+    function tlColorFor(id) {
+        var keys = Object.keys(_tlSelected).filter(function (k) { return _tlSelected[k]; });
+        var idx = keys.indexOf(id);
+        if (idx < 0) idx = 0;
+        return _tlPalette[idx % _tlPalette.length];
+    }
+
+    // Given a date, return the Sunday at start of that week (local).
+    function tlWeekStart(d) {
+        var s = new Date(d);
+        s.setDate(s.getDate() - s.getDay());
+        s.setHours(0, 0, 0, 0);
+        return s;
+    }
+
+    function setTlType(type) {
+        _tlType = type;
+        var v = document.getElementById('rpTimelineTypeVehicle');
+        var d = document.getElementById('rpTimelineTypeDriver');
+        forceStyle(v, type === 'vehicle'
+            ? { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' }
+            : { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        forceStyle(d, type === 'driver'
+            ? { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' }
+            : { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        // Switching type clears current selection (ids aren't cross-comparable).
+        _tlSelected = {};
+        setPref('tlSelected', []);
+        setPref('tlType', type);
+        renderTimelineChips();
+        document.getElementById('rpTimelineSearch').value = '';
+        document.getElementById('rpTimelineSearchDropdown').style.display = 'none';
+        renderTimeline();
+    }
+
+    function renderTimelineChips() {
+        var wrap = document.getElementById('rpTimelineChips');
+        var lookup = _tlType === 'driver' ? cachedDrivers : cachedDevices;
+        var ids = Object.keys(_tlSelected).filter(function (id) { return _tlSelected[id] && lookup[id]; });
+        if (!ids.length) { wrap.innerHTML = '<span style="color:#888;font-size:12px;">Select one or more ' + (_tlType === 'driver' ? 'drivers' : 'vehicles') + ' to see their weekly routes.</span>'; return; }
+        var html = '';
+        for (var i = 0; i < ids.length; i++) {
+            html += '<span class="rpTlChip" data-id="' + ids[i] + '" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;background:' + tlColorFor(ids[i]) + ';color:#fff;font-size:12px;font-weight:600;">' +
+                escapeHtml(lookup[ids[i]] || ids[i]) +
+                '<span class="rpChipX" data-id="' + ids[i] + '" role="button" tabindex="0" aria-label="Remove" style="cursor:pointer;opacity:0.85;">&#x2715;</span>' +
+                '</span>';
+        }
+        wrap.innerHTML = html;
+    }
+
+    function tlRenderSearchResults(q) {
+        var dd = document.getElementById('rpTimelineSearchDropdown');
+        var lookup = _tlType === 'driver' ? cachedDrivers : cachedDevices;
+        q = (q || '').trim().toLowerCase();
+        if (!q) { dd.style.display = 'none'; return; }
+        var html = '';
+        var ids = Object.keys(lookup);
+        var count = 0;
+        for (var i = 0; i < ids.length && count < 20; i++) {
+            var id = ids[i];
+            if (_tlSelected[id]) continue;
+            if (String(lookup[id]).toLowerCase().indexOf(q) === -1) continue;
+            html += '<div class="rpTlSearchItem" data-id="' + id + '" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;">' + escapeHtml(lookup[id]) + '</div>';
+            count++;
+        }
+        if (!html) html = '<div style="padding:6px 10px;color:#888;">No matches.</div>';
+        dd.innerHTML = html;
+        forceStyle(dd, {
+            'display': 'block', 'position': 'absolute', 'top': '100%', 'left': '0',
+            'width': '240px', 'max-height': '220px', 'overflow-y': 'auto',
+            'background': '#fff', 'border': '1px solid #ccc', 'border-radius': '0 0 4px 4px',
+            'box-shadow': '0 4px 12px rgba(0,0,0,0.15)', 'z-index': '200'
+        });
+    }
+
+    // Render the weekly grid. 7 day columns, time on vertical axis.
+    function renderTimeline() {
+        var graph = document.getElementById('rpTimelineGraph');
+        if (!graph) return;
+        updateTlWeekLabel();
+        var weekInput = document.getElementById('rpTimelineWeek').value;
+        if (!weekInput) { graph.innerHTML = ''; return; }
+        var weekStart = tlWeekStart(new Date(weekInput + 'T12:00:00'));
+        var ids = Object.keys(_tlSelected).filter(function (id) { return _tlSelected[id]; });
+        if (!ids.length) { graph.innerHTML = '<div style="color:#888;padding:16px;">Select one or more ' + (_tlType === 'driver' ? 'drivers' : 'vehicles') + ' above.</div>'; return; }
+
+        // Find the routes for each selected id, across the whole savedRoutes.
+        function routesFor(id) {
+            return savedRoutes.filter(function (r) {
+                if (_tlType === 'driver') return (r.trackBy === 'driver') && (r.driverIds || []).indexOf(id) !== -1;
+                return (!r.trackBy || r.trackBy === 'vehicle') && (r.vehicleIds || []).indexOf(id) !== -1;
+            });
+        }
+
+        // Determine the time range that covers all visible routes (pad 30 min).
+        var minMin = 24 * 60, maxMin = 0;
+        var anyRoute = false;
+        for (var i = 0; i < ids.length; i++) {
+            var rs = routesFor(ids[i]);
+            for (var j = 0; j < rs.length; j++) {
+                var rr = rs[j];
+                var s = timeToMinutes(rr.startTime);
+                var e = timeToMinutes(rr.endTime);
+                if (s < minMin) minMin = s;
+                if (e > maxMin) maxMin = e;
+                anyRoute = true;
+            }
+        }
+        if (!anyRoute) {
+            graph.innerHTML = '<div style="color:#888;padding:16px;">No routes assigned to the selected ' + (_tlType === 'driver' ? 'drivers' : 'vehicles') + '.</div>';
+            return;
+        }
+        minMin = Math.max(0, minMin - 30);
+        maxMin = Math.min(24 * 60, maxMin + 30);
+        if (maxMin - minMin < 120) maxMin = Math.min(24 * 60, minMin + 120);
+        var spanMin = maxMin - minMin;
+
+        // Build grid
+        var DAY_HDR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        var graphHeight = 640;
+        var pxPerMin = graphHeight / spanMin;
+
+        var html = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, 1fr);gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">';
+        // Header row
+        html += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
+        for (var di = 0; di < 7; di++) {
+            var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
+            var hd = '<div style="background:#fff;padding:8px 4px;text-align:center;">' +
+                '<div style="font-weight:700;font-size:12px;color:#333;">' + DAY_HDR[di] + '</div>' +
+                '<div style="font-size:11px;color:#777;">' + ('0' + dd.getDate()).slice(-2) + '-' + MONTHS[dd.getMonth()] + '</div>' +
+                '</div>';
+            html += hd;
+        }
+        // Time rulers (every hour)
+        var firstHour = Math.floor(minMin / 60) * 60;
+        if (firstHour < minMin) firstHour += 60;
+        var timeAxis = '<div class="rpTlAxis" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
+        for (var tm = firstHour; tm <= maxMin; tm += 60) {
+            var top = (tm - minMin) * pxPerMin;
+            var hh12 = ((Math.floor(tm / 60) + 11) % 12) + 1;
+            var ampm = Math.floor(tm / 60) >= 12 ? 'PM' : 'AM';
+            timeAxis += '<div style="position:absolute;left:0;right:0;top:' + top + 'px;font-size:10px;color:#999;padding-left:6px;">' + hh12 + ' ' + ampm + '</div>';
+        }
+        timeAxis += '</div>';
+        html += timeAxis;
+
+        // Day columns
+        for (var dcol = 0; dcol < 7; dcol++) {
+            var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dcol);
+            var dow = colDate.getDay();
+            html += '<div class="rpTlDay" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
+            // Hour grid lines
+            for (var g = firstHour; g <= maxMin; g += 60) {
+                var gtop = (g - minMin) * pxPerMin;
+                html += '<div style="position:absolute;left:0;right:0;top:' + gtop + 'px;border-top:1px dashed #eee;pointer-events:none;"></div>';
+            }
+            // Route cards per selected entity
+            // Lay out columns side-by-side when the same day has multiple entities so cards don't overlap.
+            var cardColCount = Math.max(1, ids.length);
+            for (var ei = 0; ei < ids.length; ei++) {
+                var eid = ids[ei];
+                var rs2 = routesFor(eid);
+                for (var rj = 0; rj < rs2.length; rj++) {
+                    var rr2 = rs2[rj];
+                    var rDays = rr2.activeDays || [0,1,2,3,4,5];
+                    if (rDays.indexOf(dow) === -1) continue;
+                    var s2 = timeToMinutes(rr2.startTime);
+                    var e2 = timeToMinutes(rr2.endTime);
+                    var cardTop = (s2 - minMin) * pxPerMin;
+                    var cardH = Math.max(20, (e2 - s2) * pxPerMin);
+                    var color = tlColorFor(eid);
+                    var leftPct = (ei / cardColCount) * 100;
+                    var widthPct = (1 / cardColCount) * 100;
+                    var label = escapeHtml(rr2.name);
+                    var subLabel = formatWindow(rr2.startTime, rr2.endTime);
+                    var tipName = escapeHtml((_tlType === 'driver' ? cachedDrivers[eid] : cachedDevices[eid]) || eid);
+                    html += '<div class="rpTlCard" title="' + tipName + ' — ' + label + ' (' + subLabel + ')" ' +
+                        'style="position:absolute;top:' + cardTop + 'px;height:' + cardH + 'px;' +
+                        'left:calc(' + leftPct + '% + 2px);width:calc(' + widthPct + '% - 4px);' +
+                        'background:' + color + ';color:#fff;border-radius:4px;padding:4px 6px;' +
+                        'font-size:11px;line-height:1.2;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.15);' +
+                        'box-sizing:border-box;">' +
+                        '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
+                        '<div style="opacity:0.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + subLabel + '</div>' +
+                        '</div>';
+                }
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+        graph.innerHTML = html;
+    }
+
+    function updateTlWeekLabel() {
+        var label = document.getElementById('rpTimelineWeekLabel');
+        var weekInput = document.getElementById('rpTimelineWeek').value;
+        if (!weekInput) { label.textContent = ''; return; }
+        var ws = tlWeekStart(new Date(weekInput + 'T12:00:00'));
+        var we = new Date(ws); we.setDate(we.getDate() + 6);
+        label.textContent = formatDateFriendly(formatDate(ws)) + ' – ' + formatDateFriendly(formatDate(we));
+    }
+
+    function initTimeline() {
+        // Restore prefs
+        _tlType = getPref('tlType', 'vehicle');
+        var savedIds = getPref('tlSelected', []);
+        _tlSelected = {};
+        for (var i = 0; i < savedIds.length; i++) _tlSelected[savedIds[i]] = true;
+        // Default week = this week
+        document.getElementById('rpTimelineWeek').value = formatDate(tlWeekStart(new Date()));
+        setTlType(_tlType);
+        renderTimelineChips();
+    }
+
+    // Wire events for the Timeline tab.
+    document.getElementById('rpTimelineTypeVehicle').addEventListener('click', function () { setTlType('vehicle'); });
+    document.getElementById('rpTimelineTypeDriver').addEventListener('click', function () { setTlType('driver'); });
+    document.getElementById('rpTimelineWeek').addEventListener('change', function () {
+        updateTlWeekLabel();
+        renderTimeline();
+    });
+    document.getElementById('rpTimelineSearch').addEventListener('input', function () {
+        tlRenderSearchResults(this.value);
+    });
+    document.getElementById('rpTimelineSearch').addEventListener('focus', function () {
+        if (this.value) tlRenderSearchResults(this.value);
+    });
+    document.getElementById('rpTimelineSearchDropdown').addEventListener('click', function (e) {
+        var it = e.target.closest('.rpTlSearchItem');
+        if (!it) return;
+        var id = it.dataset.id;
+        _tlSelected[id] = true;
+        setPref('tlSelected', Object.keys(_tlSelected).filter(function (k) { return _tlSelected[k]; }));
+        document.getElementById('rpTimelineSearch').value = '';
+        this.style.display = 'none';
+        renderTimelineChips();
+        renderTimeline();
+    });
+    document.addEventListener('click', function (e) {
+        var sw = document.getElementById('rpTimelineSearchWrap');
+        var dd = document.getElementById('rpTimelineSearchDropdown');
+        if (sw && !sw.contains(e.target)) { if (dd) dd.style.display = 'none'; }
+    });
+    document.getElementById('rpTimelineChips').addEventListener('click', function (e) {
+        var x = e.target.closest('.rpChipX');
+        if (!x) return;
+        var id = x.dataset.id;
+        delete _tlSelected[id];
+        setPref('tlSelected', Object.keys(_tlSelected).filter(function (k) { return _tlSelected[k]; }));
+        renderTimelineChips();
+        renderTimeline();
+    });
 
     // ========== API WRAPPERS ==========
     function apiCall(method, params) {
