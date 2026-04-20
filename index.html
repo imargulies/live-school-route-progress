@@ -63,6 +63,11 @@
                     <span style="font-size:12px;color:#888;">(must be within the start/end window)</span>
                 </div>
                 <div class="rpFormRow">
+                    <span class="rpLbl" title="Within ±N minutes of the target counts as On time.">On-time Grace:</span>
+                    <input type="number" id="rpGraceMin" min="0" max="120" step="1" value="0" style="width:80px;">
+                    <span style="font-size:12px;color:#888;">minutes (0 = strict)</span>
+                </div>
+                <div class="rpFormRow">
                     <span class="rpLbl">Active Days:</span>
                     <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="0" checked> Sun</label>
                     <label class="rpDayCb"><input type="checkbox" class="rpDayCheck" value="1" checked> Mon</label>
@@ -141,6 +146,10 @@
             <span id="rpBtnRefresh">&#x21BB; Refresh</span>
             <span id="rpBtnAutoRefresh">&#x25B6; Go Live</span>
             <span id="rpAutoRefreshStatus"></span>
+            <label id="rpChkProblemsOnlyLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
+                <input type="checkbox" id="rpChkProblemsOnly">
+                <span class="rpLbl" title="Hide routes where every assigned vehicle/driver is on track.">Problems only</span>
+            </label>
         </div>
         <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpChipSelectAll" title="Select all routes">All</span> <span id="rpChipDeselectAll" title="Deselect all routes">None</span> <span id="rpRouteChips"></span></div>
         <div id="progressStatus"></div>
@@ -299,6 +308,95 @@
 
         // Buttons
         styleButtons();
+
+        // Accessibility
+        wireButtonKeyActivation();
+        applyButtonA11y();
+        injectFocusStyles();
+
+        // Responsive layout
+        wireResponsive();
+        applyResponsiveStyles();
+    }
+
+    var _rpFocusStylesInjected = false;
+    function injectFocusStyles() {
+        if (_rpFocusStylesInjected) return;
+        _rpFocusStylesInjected = true;
+        var s = document.createElement('style');
+        s.textContent =
+            '#rp-root [role="button"]:focus-visible,#rp-root button:focus-visible,' +
+            '#rp-root input:focus-visible,#rp-root select:focus-visible,' +
+            '#rp-root textarea:focus-visible{outline:2px solid #0078d4;outline-offset:2px;}';
+        document.head.appendChild(s);
+    }
+
+    // Responsive layout. The page uses forceStyle with !important everywhere,
+    // which defeats CSS media queries — so we toggle overrides in JS instead.
+    var _rpResizeWired = false;
+    function wireResponsive() {
+        if (_rpResizeWired) return;
+        _rpResizeWired = true;
+        var h; window.addEventListener('resize', function () {
+            clearTimeout(h); h = setTimeout(applyResponsiveStyles, 100);
+        });
+    }
+
+    function applyResponsiveStyles() {
+        var narrow = window.innerWidth < 720;
+        var toolbars = ['rpToolbar2', 'rpToolbar3'];
+        for (var i = 0; i < toolbars.length; i++) {
+            var tb = document.getElementById(toolbars[i]);
+            if (!tb) continue;
+            forceStyle(tb, {
+                'display': 'flex', 'flex-wrap': 'wrap',
+                'flex-direction': narrow ? 'column' : 'row',
+                'align-items': narrow ? 'stretch' : 'center',
+                'gap': narrow ? '8px' : '12px', 'margin-bottom': '16px'
+            });
+        }
+        var root = document.getElementById('rp-root');
+        if (root) forceStyle(root, { 'padding': narrow ? '0 8px 16px' : '0 20px 20px' });
+        // Horizontal scroll wrappers for wide tables
+        var wraps = ['rpRoutesTableWrap', 'rpReportTableWrap'];
+        for (var w = 0; w < wraps.length; w++) {
+            var el = document.getElementById(wraps[w]);
+            if (el) forceStyle(el, { 'overflow-x': 'auto', '-webkit-overflow-scrolling': 'touch' });
+        }
+        // Progress route cards: allow inner table to horizontally scroll
+        var cards = document.querySelectorAll('.rpRouteCard');
+        for (var c = 0; c < cards.length; c++) {
+            forceStyle(cards[c], { 'overflow-x': narrow ? 'auto' : 'visible' });
+        }
+        // Form rows stack on narrow
+        var formRows = document.querySelectorAll('#rpFormGrid .rpFormRow');
+        for (var f = 0; f < formRows.length; f++) {
+            forceStyle(formRows[f], {
+                'display': 'flex', 'flex-wrap': 'wrap',
+                'flex-direction': narrow ? 'column' : 'row',
+                'align-items': narrow ? 'flex-start' : 'center',
+                'gap': narrow ? '6px' : '10px'
+            });
+        }
+        // Summary grids: 2-up on narrow
+        var summary = document.getElementById('rpProgSummary');
+        if (summary) forceStyle(summary, {
+            'display': 'grid',
+            'grid-template-columns': narrow ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(150px, 1fr))',
+            'gap': '12px', 'margin-bottom': '16px'
+        });
+        var reportCards = document.getElementById('rpReportCards');
+        if (reportCards) forceStyle(reportCards, {
+            'display': 'grid',
+            'grid-template-columns': narrow ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(150px, 1fr))',
+            'gap': '12px', 'margin-bottom': '16px'
+        });
+        // ETA status label: on narrow screens, let it wrap under the bar
+        var etaStatus = document.querySelectorAll('.rpEtaBarStatus');
+        for (var e = 0; e < etaStatus.length; e++) {
+            if (narrow) forceStyle(etaStatus[e], { 'position': 'static', 'display': 'block', 'text-align': 'right', 'margin-top': '4px' });
+            else forceStyle(etaStatus[e], { 'position': 'absolute', 'top': '10px', 'right': '16px', 'display': 'inline', 'text-align': 'left', 'margin-top': '0' });
+        }
     }
 
     function styleFormElements() {
@@ -412,6 +510,49 @@
                 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4'
             });
         }
+    }
+
+    // Accessibility: mark a span-button so keyboard users can activate it.
+    function makeButton(el, label) {
+        if (!el) return;
+        if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.tagName === 'SELECT') return;
+        if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+        if (label && !el.hasAttribute('aria-label')) el.setAttribute('aria-label', label);
+    }
+
+    // Activate role=button spans on Enter/Space (wired once).
+    var _rpButtonKeysWired = false;
+    function wireButtonKeyActivation() {
+        if (_rpButtonKeysWired) return;
+        _rpButtonKeysWired = true;
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+            var ae = document.activeElement;
+            if (!ae || ae.getAttribute('role') !== 'button') return;
+            if (ae.tagName === 'INPUT' || ae.tagName === 'BUTTON' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            ae.click();
+        });
+    }
+
+    // Make all interactive spans keyboard-activatable. Called after renders.
+    function applyButtonA11y() {
+        var selectors = [
+            '#rp-root #rpBtnCreateNew', '#rp-root #rpBtnSaveRoute', '#rp-root #rpBtnCancelEdit',
+            '#rp-root #rpBtnRefresh', '#rp-root #rpBtnAutoRefresh',
+            '#rp-root #rpBtnGenReport', '#rp-root #rpBtnExport',
+            '#rp-root #rpDirInside', '#rp-root #rpDirOutside',
+            '#rp-root #rpTrackVehicle', '#rp-root #rpTrackDriver',
+            '#rp-root #rpModalConfirm', '#rp-root #rpModalCancel',
+            '#rp-root #rpChipSelectAll', '#rp-root #rpChipDeselectAll',
+            '#rp-root #rpZoneSelected',
+            '#rp-root .rpTabBtn', '#rp-root [data-tab]',
+            '#rp-root .rpActionBtn', '#rp-root .rpRouteChip',
+            '#rp-root .rpChipX', '#rp-root .rpToggle'
+        ];
+        var els = document.querySelectorAll(selectors.join(','));
+        for (var i = 0; i < els.length; i++) makeButton(els[i]);
     }
 
     function styleButtons() {
@@ -1012,6 +1153,7 @@
     }
 
     function styleRoutesTable() {
+        applyButtonA11y();
         var tds = document.querySelectorAll('#rpRoutesBody .rptd');
         for (var i = 0; i < tds.length; i++) {
             forceStyle(tds[i], { 'padding': '10px 12px', 'border-bottom': '1px solid #eee', 'vertical-align': 'middle', 'font-size': '13px' });
@@ -1063,6 +1205,8 @@
         var startTime = document.getElementById('rpStartTime').value;
         var endTime = document.getElementById('rpEndTime').value;
         var targetTime = document.getElementById('rpTargetTime').value;
+        var graceMinRaw = parseInt(document.getElementById('rpGraceMin').value, 10);
+        var graceMin = isNaN(graceMinRaw) ? 0 : Math.max(0, Math.min(120, graceMinRaw));
         var vehicleIds = Object.keys(selectedVehicles);
         var driverIds = Object.keys(selectedDrivers);
 
@@ -1094,6 +1238,7 @@
             trackBy: selectedTrackBy,
             startTime: startTime, endTime: endTime,
             targetTime: targetTime || '',
+            graceMin: graceMin,
             vehicleIds: selectedTrackBy === 'vehicle' ? vehicleIds : [],
             driverIds: selectedTrackBy === 'driver' ? driverIds : [],
             activeDays: activeDays,
@@ -1167,6 +1312,7 @@
         document.getElementById('rpStartTime').value = r.startTime;
         document.getElementById('rpEndTime').value = r.endTime;
         document.getElementById('rpTargetTime').value = r.targetTime || '';
+        document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
         syncTargetTimeBounds();
         selectedDirection = r.direction || 'inside';
         selectedTrackBy = r.trackBy || 'vehicle';
@@ -1225,6 +1371,7 @@
         document.getElementById('rpStartTime').value = '08:00';
         document.getElementById('rpEndTime').value = '17:00';
         document.getElementById('rpTargetTime').value = '';
+        document.getElementById('rpGraceMin').value = 0;
         syncTargetTimeBounds();
         selectedDirection = 'inside';
         selectedTrackBy = 'vehicle';
@@ -1295,6 +1442,7 @@
 
     // ========== ROUTE PROGRESS (Tab 2) ==========
     document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
+    document.getElementById('rpChkProblemsOnly').addEventListener('change', function () { applyProblemsOnlyFilter(); });
 
     var selectedRouteChips = {}; // _uid -> true (all selected by default)
 
@@ -1331,6 +1479,7 @@
     }
 
     function styleRouteChips() {
+        applyButtonA11y();
         var wrap = document.getElementById('rpRouteChipsWrap');
         forceStyle(wrap, { 'padding': '8px 0', 'display': 'flex', 'align-items': 'center', 'gap': '8px', 'flex-wrap': 'wrap' });
         var allBtn = document.getElementById('rpChipSelectAll');
@@ -1578,6 +1727,8 @@
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
+                var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, r.targetTime, r.graceMin);
+                flashRowOnChange(row, newSig);
             }
             liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
         }
@@ -1739,10 +1890,11 @@
                     ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' time">Target: ' + formatTime12(r.targetTime) + '</span>'
                     : '';
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
+                var sparklineHolder = '<span class="rpSparkline" data-route-uid="' + r._uid + '" title="14-day on-time trend"><span class="rpSparklineLoading">14d …</span></span>';
                 var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
-                html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
+                html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
-                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder +
+                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder +
                         '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
@@ -1886,9 +2038,10 @@
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
                         var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
 
+                        var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, r.targetTime, r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '">' +
                                 '<td class="rptd">' + escapeHtml(aName) + '</td>' +
                                 curVehCol +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
@@ -1910,6 +2063,10 @@
             container.innerHTML = html;
             applyRouteProgressBadges(routeProgressCounts);
             styleEtaBars();
+            styleSparklines();
+            // Paint any cached sparklines instantly, then kick off a compute to refresh.
+            applySparklines(null);
+            computeSparklines(dayFilteredRoutes, dateStr).then(function () { styleSparklines(); });
             lastProgressHash = getProgressHash();
 
             // Summary cards
@@ -1950,6 +2107,8 @@
     }
 
     function styleProgressContent() {
+        applyButtonA11y();
+        applyResponsiveStyles();
         var cards = document.querySelectorAll('.rpRouteCard');
         for (var i = 0; i < cards.length; i++) {
             var isActive = cards[i].classList.contains('rpRouteActive');
@@ -2208,6 +2367,7 @@
                             direction: r.direction === 'inside' ? 'Arrived' : 'Departed',
                             window: formatWindow(r.startTime, r.endTime),
                             targetTime: r.targetTime || '',
+                            graceMin: r.graceMin || 0,
                             varianceMin: varianceMin,
                             durationMin: zoneMinutes, status: status
                         });
@@ -2259,7 +2419,10 @@
             var varianceCellHtml;
             if (!r.targetTime) varianceCellHtml = '<span style="color:#aaa">-</span>';
             else if (r.varianceMin === null || r.varianceMin === undefined) varianceCellHtml = '<span style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
-            else if (r.varianceMin === 0) varianceCellHtml = '<span style="color:#28a745;font-weight:600;">On time</span>';
+            else if (Math.abs(r.varianceMin) <= (r.graceMin || 0)) {
+                var vSuffix = r.varianceMin === 0 ? '' : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (r.varianceMin > 0 ? '+' : '') + r.varianceMin + 'm)</span>';
+                varianceCellHtml = '<span style="color:#28a745;font-weight:600;">On time</span>' + vSuffix;
+            }
             else if (r.varianceMin > 0) varianceCellHtml = '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(r.varianceMin) + '</span>';
             else varianceCellHtml = '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-r.varianceMin) + '</span>';
             html += '<tr>' +
@@ -3067,7 +3230,47 @@
             if (!c) { nodes[i].innerHTML = ''; continue; }
             nodes[i].innerHTML = formatRouteProgressBadge(c.completed, c.total, c.direction);
         }
+        // Mark cards as "all good" for the Problems-only filter
+        var cards = document.querySelectorAll('#rpProgressContent .rpRouteCard');
+        for (var j = 0; j < cards.length; j++) {
+            var cUid = cards[j].dataset.routeUid;
+            var ct = cUid ? counts[cUid] : null;
+            var allGood = ct && ct.total > 0 && ct.completed === ct.total;
+            cards[j].dataset.allGood = allGood ? '1' : '0';
+        }
         stylePerRouteProgressBadges();
+        applyProblemsOnlyFilter();
+    }
+
+    function applyProblemsOnlyFilter() {
+        var on = !!(document.getElementById('rpChkProblemsOnly') && document.getElementById('rpChkProblemsOnly').checked);
+        var cards = document.querySelectorAll('#rpProgressContent .rpRouteCard');
+        var hidden = 0, visible = 0;
+        for (var i = 0; i < cards.length; i++) {
+            if (on && cards[i].dataset.allGood === '1') {
+                cards[i].style.setProperty('display', 'none', 'important');
+                hidden++;
+            } else {
+                cards[i].style.removeProperty('display');
+                visible++;
+            }
+        }
+        var container = document.getElementById('rpProgressContent');
+        var notice = container ? container.querySelector('#rpProblemsFilterNotice') : null;
+        if (on && hidden > 0) {
+            if (!notice) {
+                notice = document.createElement('div');
+                notice.id = 'rpProblemsFilterNotice';
+                container.insertBefore(notice, container.firstChild);
+            }
+            notice.textContent = hidden + ' route' + (hidden === 1 ? '' : 's') + ' hidden (all on track).';
+            forceStyle(notice, {
+                'padding': '8px 12px', 'background': '#e8f4fd', 'color': '#0c5460',
+                'border-radius': '6px', 'margin-bottom': '12px', 'font-size': '12px'
+            });
+        } else if (notice) {
+            notice.parentNode.removeChild(notice);
+        }
     }
 
     function stylePerRouteProgressBadges() {
@@ -3083,6 +3286,195 @@
         setAll('.rpRouteProgressPartial', { 'background': '#fff3cd', 'color': '#856404' });
         setAll('.rpRouteProgressNone', { 'background': '#f8d7da', 'color': '#721c24' });
         setAll('.rpRouteProgressEmpty', { 'background': '#f0f0f0', 'color': '#888' });
+    }
+
+    // ========== LIVE ROW CHANGE FLASH ==========
+    function computeRowSig(vStatus, eventMs, zoneMinRounded, isIn, targetStr, graceMin) {
+        return [vStatus || '', eventMs || 0, zoneMinRounded, isIn ? 1 : 0, targetStr || '', graceMin || 0].join('|');
+    }
+
+    function flashRow(row) {
+        if (!row) return;
+        row.style.setProperty('transition', 'none', 'important');
+        row.style.setProperty('background-color', '#fff3b0', 'important');
+        // Force a reflow so the browser registers the starting color
+        void row.offsetWidth;
+        row.style.setProperty('transition', 'background-color 2s ease-out', 'important');
+        row.style.setProperty('background-color', 'transparent', 'important');
+        setTimeout(function () {
+            row.style.removeProperty('background-color');
+            row.style.removeProperty('transition');
+        }, 2100);
+    }
+
+    function flashRowOnChange(row, newSig) {
+        if (!row) return;
+        var prev = row.dataset.sig;
+        if (prev !== undefined && prev !== newSig) flashRow(row);
+        row.dataset.sig = newSig;
+    }
+
+    // ========== 14-DAY ON-TIME SPARKLINE ==========
+    // Cached values per route: { uid: [ {dateStr, rate|null}, ... ] }
+    var _sparklineCache = {};
+    var _sparklineRunId = 0;
+
+    function sparklineSvg(values) {
+        var width = 80, height = 20, pad = 2;
+        var innerW = width - pad * 2, innerH = height - pad * 2;
+        var n = values.length;
+        var dx = n > 1 ? innerW / (n - 1) : 0;
+        var path = '', dots = '';
+        var hasAny = false;
+        for (var i = 0; i < n; i++) {
+            var rate = values[i].rate;
+            if (rate === null || rate === undefined) continue;
+            hasAny = true;
+            var x = pad + i * dx;
+            var y = pad + (1 - rate) * innerH;
+            path += (path === '' ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+            var color = rate >= 0.9 ? '#28a745' : (rate >= 0.6 ? '#e67e22' : '#dc3545');
+            dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="1.8" fill="' + color + '"/>';
+        }
+        if (!hasAny) return '<span style="color:#aaa;font-size:11px;">no history</span>';
+        return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle">' +
+            '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="none"/>' +
+            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="1.2" fill="none"/>' : '') +
+            dots +
+            '</svg>';
+    }
+
+    function sparklineTitle(values) {
+        var lines = ['14-day on-time trend'];
+        for (var i = 0; i < values.length; i++) {
+            var v = values[i];
+            var pct = v.rate === null || v.rate === undefined ? '—' : Math.round(v.rate * 100) + '%';
+            lines.push(v.dateStr + ': ' + pct);
+        }
+        return lines.join('\n');
+    }
+
+    function applySparklines(routeUidSet) {
+        var nodes = document.querySelectorAll('#rpProgressContent .rpSparkline');
+        for (var i = 0; i < nodes.length; i++) {
+            var uid = nodes[i].dataset.routeUid;
+            if (routeUidSet && !routeUidSet[uid]) continue;
+            var vals = _sparklineCache[uid];
+            if (!vals) continue;
+            nodes[i].innerHTML = sparklineSvg(vals);
+            nodes[i].setAttribute('title', sparklineTitle(vals));
+        }
+    }
+
+    // Compute 14-day trend for the given routes. Runs async; updates inline when done.
+    async function computeSparklines(routes, referenceDateStr) {
+        var runId = ++_sparklineRunId;
+        if (!routes || !routes.length) return;
+        var daysBack = 14;
+        var refDate = new Date(referenceDateStr + 'T00:00:00');
+        var fromDate = new Date(refDate); fromDate.setDate(fromDate.getDate() - daysBack);
+        var toDate = new Date(refDate); toDate.setDate(toDate.getDate() + 1); // exclusive end
+        var fromIso = fromDate.toISOString();
+        var toIso = toDate.toISOString();
+        var trips;
+        try {
+            trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } });
+        } catch (e) { return; }
+        if (runId !== _sparklineRunId) return;
+        var deviceIds = collectRouteDeviceIds(routes, trips);
+        var logsByDevice = {};
+        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        if (runId !== _sparklineRunId) return;
+
+        var changedSet = {};
+        for (var ri = 0; ri < routes.length; ri++) {
+            var r = routes[ri];
+            var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+            var rDays = r.activeDays || [0,1,2,3,4,5];
+            var isDriverRoute = r.trackBy === 'driver';
+            var assignedIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
+            var values = [];
+            for (var d = 0; d < daysBack; d++) {
+                var day = new Date(refDate); day.setDate(day.getDate() - (daysBack - 1 - d));
+                var dStr = formatDate(day);
+                var dow = new Date(dStr + 'T12:00:00').getDay();
+                if (rDays.indexOf(dow) === -1) { values.push({ dateStr: dStr, rate: null }); continue; }
+                var startMinR = timeToMinutes(r.startTime);
+                var endMinR = timeToMinutes(r.endTime);
+                var wFromMs = new Date(dStr + 'T00:00:00').getTime() + startMinR * 60000;
+                var wToMs = new Date(dStr + 'T00:00:00').getTime() + endMinR * 60000;
+                var refToday = formatDate(new Date());
+                var nowMs = Date.now();
+                if (dStr === refToday) wToMs = Math.min(wToMs, nowMs);
+                var onTime = 0, totalAssigned = 0;
+                for (var vi = 0; vi < assignedIds.length; vi++) {
+                    var aId = assignedIds[vi];
+                    var lookup = isDriverRoute ? cachedDrivers : cachedDevices;
+                    if (!lookup[aId]) continue;
+                    totalAssigned++;
+                    var dayDevIds;
+                    if (isDriverRoute) {
+                        var set = {};
+                        for (var ti = 0; ti < trips.length; ti++) {
+                            var tr = trips[ti];
+                            if (!tr.driver || tr.driver.id !== aId) continue;
+                            if (!tr.device || !tr.device.id) continue;
+                            var s = tr.stop ? new Date(tr.stop) : null;
+                            if (!s || formatDate(s) !== dStr) continue;
+                            set[tr.device.id] = true;
+                        }
+                        dayDevIds = Object.keys(set);
+                    } else {
+                        dayDevIds = [aId];
+                    }
+                    var effLogs = isDriverRoute
+                        ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, aId))
+                        : logsByDevice;
+                    var merged = mergeDeviceLogs(effLogs, dayDevIds);
+                    var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
+                    augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
+                    var evMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                    var passed = (r.direction === 'inside' && (presence.everInZone || presence.isCurrentlyInZone)) ||
+                                 (r.direction === 'outside' && !presence.isCurrentlyInZone && presence.hasData);
+                    var good;
+                    if (r.targetTime) {
+                        if (!evMs) { good = false; }
+                        else {
+                            var targetMs = new Date(dStr + 'T00:00:00').getTime() + timeToMinutes(r.targetTime) * 60000;
+                            var diff = Math.abs((evMs - targetMs) / 60000);
+                            good = diff <= ((r.graceMin || 0));
+                        }
+                    } else {
+                        good = passed;
+                    }
+                    if (good) onTime++;
+                }
+                var rate = totalAssigned > 0 ? (onTime / totalAssigned) : null;
+                values.push({ dateStr: dStr, rate: rate });
+            }
+            _sparklineCache[r._uid] = values;
+            changedSet[r._uid] = true;
+        }
+        if (runId !== _sparklineRunId) return;
+        applySparklines(changedSet);
+    }
+
+    function styleSparklines() {
+        var nodes = document.querySelectorAll('.rpSparkline');
+        for (var i = 0; i < nodes.length; i++) {
+            forceStyle(nodes[i], {
+                'display': 'inline-block', 'padding': '2px 6px',
+                'background': '#fff', 'border-radius': '4px',
+                'border': '1px solid #eee', 'line-height': '0'
+            });
+        }
+        var loads = document.querySelectorAll('.rpSparklineLoading');
+        for (var i = 0; i < loads.length; i++) {
+            forceStyle(loads[i], {
+                'font-size': '11px', 'color': '#aaa', 'line-height': '1',
+                'display': 'inline-block', 'padding': '2px 4px'
+            });
+        }
     }
 
     // Badge HTML for per-route completion like "3/5 arrived".
@@ -3112,7 +3504,11 @@
         var targetMs = new Date(dateStr + 'T00:00:00').getTime() + timeToMinutes(route.targetTime) * 60000;
         if (eventMs) {
             var diffMin = Math.round((eventMs - targetMs) / 60000);
-            if (diffMin === 0) return '<span style="color:#28a745;font-weight:600;">On time</span>';
+            var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
+            if (Math.abs(diffMin) <= grace) {
+                var suffix = diffMin === 0 ? '' : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (diffMin > 0 ? '+' : '') + diffMin + 'm)</span>';
+                return '<span style="color:#28a745;font-weight:600;">On time</span>' + suffix;
+            }
             if (diffMin > 0) return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(diffMin) + '</span>';
             return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-diffMin) + '</span>';
         }
