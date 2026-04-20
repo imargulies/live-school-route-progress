@@ -3193,9 +3193,9 @@
     function formatMinutesHM(mins) {
         var h = Math.floor(mins / 60);
         var m = Math.round(mins % 60);
-        if (h > 0 && m > 0) return h + 'h ' + m + 'min';
-        if (h > 0) return h + 'h';
-        return m + 'min';
+        if (h > 0 && m > 0) return h + ' h ' + m + ' min';
+        if (h > 0) return h + ' h';
+        return m + ' min';
     }
 
     // "7:45 AM (25 min ago)" — ms = event time, nowMs = reference time
