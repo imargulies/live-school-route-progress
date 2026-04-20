@@ -4690,64 +4690,65 @@
         }
         if (runId !== _tlRunId) return;
 
-        // Now build the grid using actual event times (or "Missed").
+        // Render one card per selected entity that has at least one assigned route,
+        // each with its own weekly calendar grid. Time axis is shared so cards align.
         var DAY_HDR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        var graphHeight = 640;
+        var graphHeight = 520;
         var pxPerMin = graphHeight / spanMin;
-
-        var html = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, 1fr);gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">';
-        html += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
-        for (var di = 0; di < 7; di++) {
-            var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
-            html += '<div style="background:#fff;padding:8px 4px;text-align:center;">' +
-                '<div style="font-weight:700;font-size:12px;color:#333;">' + DAY_HDR[di] + '</div>' +
-                '<div style="font-size:11px;color:#777;">' + ('0' + dd.getDate()).slice(-2) + '-' + MONTHS[dd.getMonth()] + '</div>' +
-                '</div>';
-        }
         var firstHour = Math.floor(minMin / 60) * 60;
         if (firstHour < minMin) firstHour += 60;
-        var timeAxis = '<div class="rpTlAxis" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
-        for (var tm = firstHour; tm <= maxMin; tm += 60) {
-            var top = (tm - minMin) * pxPerMin;
-            var hh12 = ((Math.floor(tm / 60) + 11) % 12) + 1;
-            var ampm = Math.floor(tm / 60) >= 12 ? 'PM' : 'AM';
-            timeAxis += '<div style="position:absolute;left:0;right:0;top:' + top + 'px;font-size:10px;color:#999;padding-left:6px;">' + hh12 + ' ' + ampm + '</div>';
-        }
-        timeAxis += '</div>';
-        html += timeAxis;
 
-        for (var dcol = 0; dcol < 7; dcol++) {
-            var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dcol);
-            var dow = colDate.getDay();
-            var colDateStr = formatDate(colDate);
-            html += '<div class="rpTlDay" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
-            for (var g = firstHour; g <= maxMin; g += 60) {
-                var gtop = (g - minMin) * pxPerMin;
-                html += '<div style="position:absolute;left:0;right:0;top:' + gtop + 'px;border-top:1px dashed #eee;pointer-events:none;"></div>';
+        function renderWeekGridFor(entry) {
+            var rs = routesFor(entry);
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, 1fr);gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">';
+            inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
+            for (var di = 0; di < 7; di++) {
+                var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
+                inner += '<div style="background:#fff;padding:8px 4px;text-align:center;">' +
+                    '<div style="font-weight:700;font-size:12px;color:#333;">' + DAY_HDR[di] + '</div>' +
+                    '<div style="font-size:11px;color:#777;">' + ('0' + dd.getDate()).slice(-2) + '-' + MONTHS[dd.getMonth()] + '</div>' +
+                    '</div>';
             }
-            var colCount = Math.max(1, selected.length);
-            for (var ei = 0; ei < selected.length; ei++) {
-                var entry2 = selected[ei];
-                var rs2 = routesFor(entry2);
-                for (var rj = 0; rj < rs2.length; rj++) {
-                    var rr2 = rs2[rj];
+            var timeAxis = '<div class="rpTlAxis" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
+            for (var tm = firstHour; tm <= maxMin; tm += 60) {
+                var top = (tm - minMin) * pxPerMin;
+                var hh12 = ((Math.floor(tm / 60) + 11) % 12) + 1;
+                var ampm = Math.floor(tm / 60) >= 12 ? 'PM' : 'AM';
+                timeAxis += '<div style="position:absolute;left:0;right:0;top:' + top + 'px;font-size:10px;color:#999;padding-left:6px;">' + hh12 + ' ' + ampm + '</div>';
+            }
+            timeAxis += '</div>';
+            inner += timeAxis;
+
+            var routeColor = tlColorFor(entry.type, entry.id);
+            for (var dcol = 0; dcol < 7; dcol++) {
+                var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dcol);
+                var dow = colDate.getDay();
+                var colDateStr = formatDate(colDate);
+                inner += '<div class="rpTlDay" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
+                for (var g = firstHour; g <= maxMin; g += 60) {
+                    var gtop = (g - minMin) * pxPerMin;
+                    inner += '<div style="position:absolute;left:0;right:0;top:' + gtop + 'px;border-top:1px dashed #eee;pointer-events:none;"></div>';
+                }
+                for (var rj = 0; rj < rs.length; rj++) {
+                    var rr2 = rs[rj];
                     var rDays = rr2.activeDays || [0,1,2,3,4,5];
                     if (rDays.indexOf(dow) === -1) continue;
                     var s2 = timeToMinutes(rr2.startTime);
                     var e2 = timeToMinutes(rr2.endTime);
                     var cardTop = (s2 - minMin) * pxPerMin;
-                    var cardH = Math.max(20, (e2 - s2) * pxPerMin);
-                    var routeColor = tlColorFor(entry2.type, entry2.id);
-                    var leftPct = (ei / colCount) * 100;
-                    var widthPct = (1 / colCount) * 100;
-                    var tipName = escapeHtml((entry2.type === 'driver' ? cachedDrivers[entry2.id] : cachedDevices[entry2.id]) || entry2.id);
-                    var typeLabel = entry2.type === 'driver' ? 'Driver' : 'Vehicle';
+                    // 3 px gap so back-to-back routes (e.g. Morning 1 ending 8:15 and
+                    // Morning 2 starting 8:15) render as clearly separate cards.
+                    var cardH = Math.max(22, (e2 - s2) * pxPerMin - 3);
 
-                    // Look up event info.
-                    var ev = eventIndex[entry2.type + '|' + entry2.id + '|' + rr2._uid + '|' + colDateStr];
+                    var ev = eventIndex[entry.type + '|' + entry.id + '|' + rr2._uid + '|' + colDateStr];
                     var bg = routeColor;
                     var line2Html = '';
                     var eventVerb = rr2.direction === 'outside' ? 'Departed' : 'Arrived';
+                    // Precompute target bounds + variance label if a target window is set.
+                    var targetLine = '';
+                    if (routeHasTarget(rr2)) {
+                        targetLine = '<span style="opacity:0.85;">Target ' + formatTargetRange(rr2) + '</span>';
+                    }
                     if (!ev) {
                         line2Html = '<span style="opacity:0.9">' + formatWindow(rr2.startTime, rr2.endTime) + '</span>';
                     } else if (ev.future) {
@@ -4757,15 +4758,23 @@
                         bg = '#dc3545';
                         line2Html = '<span style="font-weight:700;letter-spacing:0.5px;">MISSED</span>';
                     } else if (ev.eventMs) {
-                        // Recolor by on-time/late vs target.
+                        var varianceBadge = '';
                         if (routeHasTarget(rr2)) {
                             var b = routeTargetBounds(rr2);
                             var tsMs = new Date(colDateStr + 'T00:00:00').getTime() + timeToMinutes(b.start) * 60000;
                             var teMs = new Date(colDateStr + 'T00:00:00').getTime() + timeToMinutes(b.end) * 60000;
-                            var graceMs = Math.max(0, parseInt(rr2.graceMin, 10) || 0) * 60000;
-                            if (ev.eventMs >= tsMs - graceMs && ev.eventMs <= teMs + graceMs) bg = '#28a745';
-                            else if (ev.eventMs > teMs) bg = '#dc3545';
-                            else bg = '#e67e22';
+                            var graceMin = Math.max(0, parseInt(rr2.graceMin, 10) || 0);
+                            var graceMs = graceMin * 60000;
+                            if (ev.eventMs >= tsMs - graceMs && ev.eventMs <= teMs + graceMs) {
+                                bg = '#28a745';
+                                varianceBadge = 'On time';
+                            } else if (ev.eventMs > teMs) {
+                                bg = '#dc3545';
+                                varianceBadge = formatMinutesHM(Math.round((ev.eventMs - teMs) / 60000)) + ' late';
+                            } else {
+                                bg = '#e67e22';
+                                varianceBadge = formatMinutesHM(Math.round((tsMs - ev.eventMs) / 60000)) + ' early';
+                            }
                         } else {
                             bg = '#28a745';
                         }
@@ -4774,26 +4783,56 @@
                         var em = ('0' + evDate.getMinutes()).slice(-2);
                         var eAmpm = eh >= 12 ? 'PM' : 'AM';
                         var eh12 = eh % 12 || 12;
-                        line2Html = '<span style="font-weight:700;">' + eventVerb + ' ' + eh12 + ':' + em + ' ' + eAmpm + '</span>';
+                        line2Html = '<span style="font-weight:700;">' + eventVerb + ' ' + eh12 + ':' + em + ' ' + eAmpm + '</span>' +
+                            (varianceBadge ? ' <span style="opacity:0.95;font-weight:600;">· ' + varianceBadge + '</span>' : '');
                     } else if (ev.pending) {
                         bg = '#9e9e9e';
                         line2Html = '<span style="opacity:0.9">Pending (' + formatWindow(rr2.startTime, rr2.endTime) + ')</span>';
                     }
                     var label = escapeHtml(rr2.name);
-                    html += '<div class="rpTlCard" title="' + typeLabel + ': ' + tipName + ' — ' + label + ' (scheduled ' + formatWindow(rr2.startTime, rr2.endTime) + ')" ' +
+                    var titleText = label + ' — scheduled ' + formatWindow(rr2.startTime, rr2.endTime) +
+                        (routeHasTarget(rr2) ? ' — target ' + formatTargetRange(rr2) : '');
+                    inner += '<div class="rpTlCard" title="' + titleText + '" ' +
                         'style="position:absolute;top:' + cardTop + 'px;height:' + cardH + 'px;' +
-                        'left:calc(' + leftPct + '% + 2px);width:calc(' + widthPct + '% - 4px);' +
+                        'left:4px;right:4px;' +
                         'background:' + bg + ';color:#fff;border-radius:4px;padding:4px 6px;' +
                         'font-size:11px;line-height:1.2;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.15);' +
-                        'box-sizing:border-box;border-left:3px solid ' + routeColor + ';">' +
+                        'box-sizing:border-box;border:1px solid rgba(0,0,0,0.15);border-left:3px solid ' + routeColor + ';">' +
                         '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
                         '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2Html + '</div>' +
+                        (targetLine ? '<div style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + targetLine + '</div>' : '') +
                         '</div>';
                 }
+                inner += '</div>';
             }
-            html += '</div>';
+            inner += '</div>';
+            return inner;
         }
-        html += '</div>';
+
+        var html = '';
+        var renderedAny = false;
+        for (var ei = 0; ei < selected.length; ei++) {
+            var entry = selected[ei];
+            var rsE = routesFor(entry);
+            if (!rsE.length) continue;
+            renderedAny = true;
+            var typeLabel = entry.type === 'driver' ? 'Driver' : 'Vehicle';
+            var entityName = entry.type === 'driver' ? (cachedDrivers[entry.id] || entry.id) : (cachedDevices[entry.id] || entry.id);
+            var routeNames = rsE.map(function (r) { return r.name; });
+            var color = tlColorFor(entry.type, entry.id);
+            html += '<div class="rpTlEntityCard" style="margin-bottom:20px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.05);">' +
+                '<div class="rpTlEntityHeader" style="padding:12px 16px;background:#f8f9fa;border-bottom:1px solid #eee;display:flex;flex-wrap:wrap;gap:14px;align-items:center;border-left:4px solid ' + color + ';">' +
+                    '<span style="font-weight:700;font-size:15px;color:#333;">' + typeLabel + ': ' + escapeHtml(entityName) + '</span>' +
+                    '<span style="font-size:12px;color:#666;"><span style="color:#888;">Routes:</span> ' + escapeHtml(routeNames.join(', ')) + '</span>' +
+                    '<span style="font-size:12px;color:#888;margin-left:auto;">' + rsE.length + ' route' + (rsE.length === 1 ? '' : 's') + '</span>' +
+                '</div>' +
+                '<div class="rpTlEntityBody" style="padding:12px;">' + renderWeekGridFor(entry) + '</div>' +
+            '</div>';
+        }
+        if (!renderedAny) {
+            graph.innerHTML = '<div style="color:#888;padding:16px;">No routes assigned to the selected vehicles or drivers.</div>';
+            return;
+        }
         graph.innerHTML = html;
     }
 
