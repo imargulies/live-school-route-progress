@@ -1974,6 +1974,7 @@
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
             var rCompleted = 0, rTotal = 0, rLate = 0;
+            var rArrivedNames = [];
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -2050,7 +2051,7 @@
                         statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                     }
                     vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                    if (goodDir) { completedCount++; rCompleted++; }
+                    if (goodDir) { completedCount++; rCompleted++; rArrivedNames.push(aLookup[aId] || aId); }
                     else { missedCount++; }
                 }
                 // A row counts as a "problem" for the filter when it's late vs target,
@@ -2075,7 +2076,7 @@
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
             }
-            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction };
+            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
         }
 
         applyRouteProgressBadges(liveRouteCounts);
@@ -2257,6 +2258,7 @@
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>' +
+                    '<div class="rpRouteArrivedRow" data-route-uid="' + r._uid + '"></div>' +
                     etaBarHtml;
 
                 // Calculate elapsed minutes since route start
@@ -2302,6 +2304,7 @@
                     '</tr></thead><tbody>';
 
                 var rCompleted = 0, rTotal = 0, rLate = 0;
+                var rArrivedNames = [];
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="7" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -2389,7 +2392,7 @@
                                 statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                             }
                             vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                            if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; }
+                            if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; rArrivedNames.push(aName); }
                             else { missedCount++; sortOrder = 0; }
                         }
                         // A row counts as a "problem" for the filter when it's late vs target,
@@ -2437,7 +2440,7 @@
                     vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
                     for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
-                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction };
+                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
                 html += '</tbody></table></div>';
             }
 
@@ -3686,7 +3689,40 @@
             cards[j].dataset.allGood = allGood ? '1' : '0';
         }
         stylePerRouteProgressBadges();
+        applyArrivedLists(counts);
         applyProblemsOnlyFilter();
+    }
+
+    // Populate each route card's "Arrived: Bus 21, Bus 22" line.
+    function applyArrivedLists(counts) {
+        if (!counts) return;
+        var rows = document.querySelectorAll('#rpProgressContent .rpRouteArrivedRow');
+        for (var i = 0; i < rows.length; i++) {
+            var uid = rows[i].dataset.routeUid;
+            var c = counts[uid];
+            if (!c) { rows[i].innerHTML = ''; continue; }
+            var verb = c.direction === 'outside' ? 'Departed' : 'Arrived';
+            var names = c.arrivedNames || [];
+            var body = names.length
+                ? '<span class="rpArrivedNames">' + escapeHtml(names.join(', ')) + '</span>'
+                : '<span style="color:#999;">none yet</span>';
+            rows[i].innerHTML = '<span class="rpArrivedLabel">' + verb + ':</span> ' + body;
+        }
+        var allRows = document.querySelectorAll('.rpRouteArrivedRow');
+        for (var j = 0; j < allRows.length; j++) {
+            forceStyle(allRows[j], {
+                'padding': '8px 16px', 'background': '#f8fafc', 'border-bottom': '1px solid #eee',
+                'font-size': '13px', 'color': '#333', 'line-height': '1.4'
+            });
+        }
+        var labels = document.querySelectorAll('.rpArrivedLabel');
+        for (var k = 0; k < labels.length; k++) {
+            forceStyle(labels[k], { 'font-weight': '700', 'color': '#28a745', 'margin-right': '6px' });
+        }
+        var namesEls = document.querySelectorAll('.rpArrivedNames');
+        for (var m = 0; m < namesEls.length; m++) {
+            forceStyle(namesEls[m], { 'font-weight': '600', 'color': '#155724' });
+        }
     }
 
     // ========== COMPARE 7-DAYS-AGO ==========
