@@ -1944,9 +1944,15 @@
                 }
 
                 var isActiveRoute = isToday && currentMinutes >= startMin && currentMinutes <= endMin;
-                var targetBadge = routeHasTarget(r)
-                    ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' window">Target: ' + formatTargetRange(r) + '</span>'
-                    : '';
+                var targetBadge = '';
+                if (routeHasTarget(r)) {
+                    var tb = routeTargetBounds(r);
+                    var targetLen = Math.max(0, timeToMinutes(tb.end) - timeToMinutes(tb.start));
+                    var lenSuffix = targetLen > 0
+                        ? ' <span class="rpTargetBadgeLen">(' + formatMinutesHM(targetLen) + ')</span>'
+                        : '';
+                    targetBadge = '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' window">Target: ' + formatTargetRange(r) + lenSuffix + '</span>';
+                }
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 var sparklineHolder = '<span class="rpSparkline" data-route-uid="' + r._uid + '" title="14-day on-time trend"><span class="rpSparklineLoading">14d …</span></span>';
                 var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
@@ -2235,6 +2241,8 @@
         // Target time badges
         var targets = document.querySelectorAll('.rpTargetBadge');
         for (var i = 0; i < targets.length; i++) forceStyle(targets[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404', 'border': '1px solid #ffeeba' });
+        var tLens = document.querySelectorAll('.rpTargetBadgeLen');
+        for (var i = 0; i < tLens.length; i++) forceStyle(tLens[i], { 'color': '#a27800', 'font-weight': '500', 'font-size': '12px', 'margin-left': '2px' });
 
         // Time badges
         var upcoming = document.querySelectorAll('.rpTimeUpcoming');
