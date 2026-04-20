@@ -796,9 +796,13 @@
             updateDateLabel();
             populateFilters();
             renderVehicleChips();
-            // Restore Go Live state if previously enabled.
+            // Restore Go Live state if previously enabled. startAutoRefresh()
+            // itself calls renderProgress, so we only need a manual first render
+            // when Live mode wasn't restored.
             if (getPref('autoRefresh', false)) {
                 startAutoRefresh();
+            } else {
+                renderProgress();
             }
             // Set up the Weekly Timeline tab once data is loaded.
             initTimeline();
@@ -859,6 +863,11 @@
         }
         applyTabStyles(tab);
         if (tab === 'timeline') renderTimeline();
+        // First time Route Progress is shown with no content yet, load it.
+        if (tab === 'progress') {
+            var progressContent = document.getElementById('rpProgressContent');
+            if (progressContent && !progressContent.innerHTML.trim()) renderProgress();
+        }
     }
 
     // ========== LOAD DATA ==========
@@ -1621,6 +1630,26 @@
 
     // ========== ROUTE PROGRESS (Tab 2) ==========
     document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
+    // Show a loading state on the Refresh button while a render is running.
+    var _refreshBtnDepth = 0;
+    function setRefreshLoading(on) {
+        var btn = document.getElementById('rpBtnRefresh');
+        if (!btn) return;
+        if (on) {
+            _refreshBtnDepth++;
+            btn.innerHTML = '<span class="rpSpinner" style="width:12px;height:12px;border-width:2px;display:inline-block;vertical-align:-2px;margin-right:6px;"></span>Loading…';
+            btn.style.setProperty('opacity', '0.7', 'important');
+            btn.style.setProperty('pointer-events', 'none', 'important');
+        } else {
+            _refreshBtnDepth = Math.max(0, _refreshBtnDepth - 1);
+            if (_refreshBtnDepth === 0) {
+                btn.innerHTML = '\u21BB Refresh';
+                btn.style.removeProperty('opacity');
+                btn.style.removeProperty('pointer-events');
+            }
+        }
+        injectSparklineStyles(); // ensures .rpSpinner keyframe is present
+    }
     document.getElementById('rpChkProblemsOnly').checked = !!getPref('problemsOnly', false);
     document.getElementById('rpChkProblemsOnly').addEventListener('change', function () {
         setPref('problemsOnly', this.checked);
@@ -2102,7 +2131,12 @@
         if (!dateStr) { showStatus('progressStatus', 'Please select a date.', 'error'); return; }
 
         var container = document.getElementById('rpProgressContent');
-        container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">Loading progress...</div>';
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
+            '<div class="rpSpinner" style="margin:0 auto 12px;"></div>' +
+            '<div style="font-size:13px;">Loading progress…</div>' +
+            '</div>';
+        injectSparklineStyles();
+        setRefreshLoading(true);
 
         try {
             await loadZones(); // Refresh zone comments to get latest routes
@@ -2429,6 +2463,8 @@
 
         } catch (err) {
             showStatus('progressStatus', 'Error: ' + err.message, 'error');
+        } finally {
+            setRefreshLoading(false);
         }
     }
 
