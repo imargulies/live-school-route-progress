@@ -177,6 +177,8 @@
                     <th class="rpth">Zone</th>
                     <th class="rpth">Tracking</th>
                     <th class="rpth">Window</th>
+                    <th class="rpth">Target</th>
+                    <th class="rpth">vs Target</th>
                     <th class="rpth">Duration (min)</th>
                     <th class="rpth">Status</th>
                 </tr></thead>
@@ -995,7 +997,9 @@
                 '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '" title="' +
                     (r.direction === 'inside' ? 'Should be at the zone' : 'Should have left the zone') + '">' +
                     (r.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location') + '</span></td>' +
-                '<td class="rptd">' + formatWindow(r.startTime, r.endTime) + '</td>' +
+                '<td class="rptd">' + formatWindow(r.startTime, r.endTime) +
+                    (r.targetTime ? ' <span class="rpTargetInline" title="Target time">· target ' + formatTime12(r.targetTime) + '</span>' : '') +
+                    '</td>' +
                 '<td class="rptd">' + daysText + '</td>' +
                 '<td class="rptd">' + assignLabel + '</td>' +
                 '<td class="rptd">' +
@@ -1015,6 +1019,10 @@
         var warns = document.querySelectorAll('.rpWarn');
         for (var i = 0; i < warns.length; i++) {
             forceStyle(warns[i], { 'color': '#dc3545', 'font-size': '11px' });
+        }
+        var tgts = document.querySelectorAll('#rpRoutesBody .rpTargetInline');
+        for (var i = 0; i < tgts.length; i++) {
+            forceStyle(tgts[i], { 'color': '#856404', 'font-size': '12px', 'font-weight': '600', 'margin-left': '4px' });
         }
         var edits = document.querySelectorAll('.rpEditBtn');
         for (var i = 0; i < edits.length; i++) {
@@ -1575,6 +1583,7 @@
         }
 
         applyRouteProgressBadges(liveRouteCounts);
+        updateEtaBars(now.getTime());
 
         // Update summary cards inline
         var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
@@ -1730,13 +1739,15 @@
                     ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' time">Target: ' + formatTime12(r.targetTime) + '</span>'
                     : '';
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
+                var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder +
                         '<span class="rpRouteCardInfo">' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
-                    '</div>';
+                    '</div>' +
+                    etaBarHtml;
 
                 // Calculate elapsed minutes since route start
                 var elapsedMin = 0;
@@ -1898,6 +1909,7 @@
 
             container.innerHTML = html;
             applyRouteProgressBadges(routeProgressCounts);
+            styleEtaBars();
             lastProgressHash = getProgressHash();
 
             // Summary cards
@@ -2182,6 +2194,12 @@
                         else if (zoneMinutes > 0 || passedThrough) status = 'Incomplete';
                         else status = 'Missed';
 
+                        var eventMsR = r.direction === 'outside' ? presenceR.departedAtMs : presenceR.arrivedAtMs;
+                        var varianceMin = null;
+                        if (r.targetTime && eventMsR) {
+                            var targetMsR = new Date(dayStr + 'T00:00:00').getTime() + timeToMinutes(r.targetTime) * 60000;
+                            varianceMin = Math.round((eventMsR - targetMsR) / 60000);
+                        }
                         reportData.push({
                             routeName: r.name, routeId: r._uid,
                             vehicleId: vehicleId, vehicleName: vehicleName,
@@ -2189,6 +2207,8 @@
                             date: dayStr, zoneName: r.zoneName || '',
                             direction: r.direction === 'inside' ? 'Arrived' : 'Departed',
                             window: formatWindow(r.startTime, r.endTime),
+                            targetTime: r.targetTime || '',
+                            varianceMin: varianceMin,
                             durationMin: zoneMinutes, status: status
                         });
                     }
@@ -2223,7 +2243,7 @@
         var tbody = document.getElementById('rpReportBody');
         var filtered = getFilteredReport();
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:#888;">No records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:20px;color:#888;">No records found.</td></tr>';
             return;
         }
         // Sort: Completed first, Incomplete second, Missed last
@@ -2235,6 +2255,13 @@
         for (var i = 0; i < filtered.length; i++) {
             var r = filtered[i];
             var stClass = r.status === 'Completed' ? 'rpStCompleted' : (r.status === 'Incomplete' ? 'rpStProgress' : 'rpStMissed');
+            var targetCell = r.targetTime ? formatTime12(r.targetTime) : '<span style="color:#aaa">-</span>';
+            var varianceCellHtml;
+            if (!r.targetTime) varianceCellHtml = '<span style="color:#aaa">-</span>';
+            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCellHtml = '<span style="color:#aaa">No data</span>';
+            else if (r.varianceMin === 0) varianceCellHtml = '<span style="color:#28a745;font-weight:600;">On time</span>';
+            else if (r.varianceMin > 0) varianceCellHtml = '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(r.varianceMin) + '</span>';
+            else varianceCellHtml = '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-r.varianceMin) + '</span>';
             html += '<tr>' +
                 '<td class="rptd">' + escapeHtml(r.routeName) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.vehicleName) + '</td>' +
@@ -2243,6 +2270,8 @@
                 '<td class="rptd">' + escapeHtml(r.zoneName) + '</td>' +
                 '<td class="rptd">' + r.direction + '</td>' +
                 '<td class="rptd">' + r.window + '</td>' +
+                '<td class="rptd">' + targetCell + '</td>' +
+                '<td class="rptd">' + varianceCellHtml + '</td>' +
                 '<td class="rptd">' + formatMinutesHM(r.durationMin) + '</td>' +
                 '<td class="rptd"><span class="rpStatusBadge ' + stClass + '">' + r.status + '</span></td>' +
                 '</tr>';
@@ -2337,7 +2366,7 @@
         var data = getFilteredReport();
         if (!data.length) { showStatus('reportStatus', 'No data to export.', 'info'); return; }
 
-        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Duration (min)', 'Status'];
+        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Target', 'vs Target (min)', 'Duration (min)', 'Status'];
         var ss = []; var ssMap = {};
         function ssIdx(s) { s = String(s == null ? '' : s); if (ssMap[s] !== undefined) return ssMap[s]; ssMap[s] = ss.length; ss.push(s); return ssMap[s]; }
         function colLetter(idx) { return String.fromCharCode(65 + idx); }
@@ -2351,7 +2380,12 @@
             if (r.status === 'Completed') style = 2;
             else if (r.status === 'Incomplete') style = 3;
             else if (r.status === 'Missed') style = 4;
-            var cells = [r.routeName, r.vehicleName, r.driverName || '', r.date, r.zoneName, r.direction, r.window, r.durationMin, r.status];
+            var targetCol = r.targetTime ? formatTime12(r.targetTime) : '';
+            var varianceCol;
+            if (!r.targetTime) varianceCol = '';
+            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCol = '';
+            else varianceCol = r.varianceMin;
+            var cells = [r.routeName, r.vehicleName, r.driverName || '', r.date, r.zoneName, r.direction, r.window, targetCol, varianceCol, r.durationMin, r.status];
             for (var c = 0; c < cells.length; c++) ssIdx(String(cells[c]));
             rows.push({ cells: cells, style: style });
         }
@@ -2360,7 +2394,8 @@
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
             '<cols><col min="1" max="1" width="22"/><col min="2" max="2" width="18"/><col min="3" max="3" width="18"/>' +
             '<col min="4" max="4" width="14"/><col min="5" max="5" width="20"/><col min="6" max="6" width="12"/>' +
-            '<col min="7" max="7" width="16"/><col min="8" max="8" width="14"/><col min="9" max="9" width="14"/></cols>' +
+            '<col min="7" max="7" width="16"/><col min="8" max="8" width="12"/><col min="9" max="9" width="14"/>' +
+            '<col min="10" max="10" width="14"/><col min="11" max="11" width="14"/></cols>' +
             '<sheetData>';
 
         sheet += '<row r="1">';
@@ -2373,7 +2408,7 @@
             for (var c = 0; c < rows[i].cells.length; c++) {
                 var val = rows[i].cells[c];
                 var sty = rows[i].style;
-                if (c === 7 && val !== '' && !isNaN(val)) {
+                if ((c === 8 || c === 9) && val !== '' && !isNaN(val)) {
                     sheet += '<c r="' + colLetter(c) + rn + '" s="' + sty + '"><v>' + val + '</v></c>';
                 } else {
                     sheet += '<c r="' + colLetter(c) + rn + '" t="s" s="' + sty + '"><v>' + ssIdx(String(val)) + '</v></c>';
@@ -2907,6 +2942,118 @@
 
     function formatWindow(start, end) {
         return formatTime12(start) + ' - ' + formatTime12(end);
+    }
+
+    // Render the ETA bar HTML for a route on a given date. Shows elapsed fill
+    // and (if set) a target marker. Stores data attrs so the live tick can
+    // update the fill width without re-rendering.
+    function renderEtaBarHtml(route, dateStr, nowMs) {
+        var startMin = timeToMinutes(route.startTime);
+        var endMin = timeToMinutes(route.endTime);
+        var windowLen = Math.max(0, endMin - startMin);
+        var targetPct = null;
+        if (route.targetTime) {
+            var tMin = timeToMinutes(route.targetTime);
+            if (windowLen > 0) targetPct = Math.max(0, Math.min(100, ((tMin - startMin) / windowLen) * 100));
+        }
+        var dayStartMs = new Date(dateStr + 'T00:00:00').getTime();
+        var windowFromMs = dayStartMs + startMin * 60000;
+        var windowToMs = dayStartMs + endMin * 60000;
+        var elapsedPct = 0;
+        if (windowLen > 0) {
+            if (nowMs >= windowToMs) elapsedPct = 100;
+            else if (nowMs > windowFromMs) elapsedPct = ((nowMs - windowFromMs) / (windowToMs - windowFromMs)) * 100;
+        }
+        var elapsedRounded = Math.round(elapsedPct);
+        var targetMarker = targetPct !== null
+            ? '<div class="rpEtaBarTarget" style="left:' + targetPct + '%" title="Target: ' + formatTime12(route.targetTime) + '"></div>'
+            : '';
+        var rightLabel = nowMs >= windowToMs
+            ? 'Window ended'
+            : (nowMs < windowFromMs ? 'Not started' : elapsedRounded + '% elapsed');
+        return '<div class="rpEtaBarWrap" data-route-uid="' + route._uid + '" ' +
+                'data-start-ms="' + windowFromMs + '" data-end-ms="' + windowToMs + '" ' +
+                'data-target-pct="' + (targetPct === null ? '' : targetPct) + '">' +
+                '<div class="rpEtaBarTrack">' +
+                    '<div class="rpEtaBarFill" style="width:' + elapsedPct + '%"></div>' +
+                    targetMarker +
+                '</div>' +
+                '<div class="rpEtaBarLabels">' +
+                    '<span>' + formatTime12(route.startTime) + '</span>' +
+                    (route.targetTime ? '<span class="rpEtaBarTargetLabel">Target ' + formatTime12(route.targetTime) + '</span>' : '<span></span>') +
+                    '<span>' + formatTime12(route.endTime) + '</span>' +
+                '</div>' +
+                '<div class="rpEtaBarStatus">' + rightLabel + '</div>' +
+                '</div>';
+    }
+
+    function updateEtaBars(nowMs) {
+        var wraps = document.querySelectorAll('#rpProgressContent .rpEtaBarWrap');
+        for (var i = 0; i < wraps.length; i++) {
+            var w = wraps[i];
+            var s = parseInt(w.dataset.startMs, 10);
+            var e = parseInt(w.dataset.endMs, 10);
+            var pct = 0;
+            var status;
+            if (!(e > s)) { pct = 0; status = ''; }
+            else if (nowMs >= e) { pct = 100; status = 'Window ended'; }
+            else if (nowMs <= s) { pct = 0; status = 'Not started'; }
+            else { pct = ((nowMs - s) / (e - s)) * 100; status = Math.round(pct) + '% elapsed'; }
+            var fill = w.querySelector('.rpEtaBarFill');
+            if (fill) fill.style.setProperty('width', pct + '%', 'important');
+            var st = w.querySelector('.rpEtaBarStatus');
+            if (st) st.textContent = status;
+        }
+    }
+
+    function styleEtaBars() {
+        var wraps = document.querySelectorAll('.rpEtaBarWrap');
+        for (var i = 0; i < wraps.length; i++) {
+            forceStyle(wraps[i], {
+                'padding': '10px 16px 8px', 'border-bottom': '1px solid #eee',
+                'background': '#fafafa', 'position': 'relative'
+            });
+        }
+        var tracks = document.querySelectorAll('.rpEtaBarTrack');
+        for (var i = 0; i < tracks.length; i++) {
+            forceStyle(tracks[i], {
+                'position': 'relative', 'height': '8px', 'background': '#e6e6e6',
+                'border-radius': '4px', 'overflow': 'visible'
+            });
+        }
+        var fills = document.querySelectorAll('.rpEtaBarFill');
+        for (var i = 0; i < fills.length; i++) {
+            forceStyle(fills[i], {
+                'height': '100%', 'background': 'linear-gradient(90deg, #74b9ff, #0078d4)',
+                'transition': 'width 0.4s ease'
+            });
+        }
+        // Target marker: overflow isn't hidden for markers; re-wrap via absolute positioning on wrap
+        var targets = document.querySelectorAll('.rpEtaBarTarget');
+        for (var i = 0; i < targets.length; i++) {
+            forceStyle(targets[i], {
+                'position': 'absolute', 'top': '-4px', 'bottom': '-4px', 'width': '2px',
+                'background': '#d63031', 'transform': 'translateX(-1px)', 'z-index': '2'
+            });
+        }
+        var lbls = document.querySelectorAll('.rpEtaBarLabels');
+        for (var i = 0; i < lbls.length; i++) {
+            forceStyle(lbls[i], {
+                'display': 'flex', 'justify-content': 'space-between', 'margin-top': '4px',
+                'font-size': '11px', 'color': '#888'
+            });
+        }
+        var tLbls = document.querySelectorAll('.rpEtaBarTargetLabel');
+        for (var i = 0; i < tLbls.length; i++) {
+            forceStyle(tLbls[i], { 'color': '#d63031', 'font-weight': '600' });
+        }
+        var sts = document.querySelectorAll('.rpEtaBarStatus');
+        for (var i = 0; i < sts.length; i++) {
+            forceStyle(sts[i], {
+                'position': 'absolute', 'top': '10px', 'right': '16px',
+                'font-size': '11px', 'color': '#555', 'font-weight': '600'
+            });
+        }
     }
 
     // Fill in each route card's progress badge placeholder using a counts map.
