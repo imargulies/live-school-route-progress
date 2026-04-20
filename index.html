@@ -1650,9 +1650,9 @@
         }
         injectSparklineStyles(); // ensures .rpSpinner keyframe is present
     }
-    document.getElementById('rpChkProblemsOnly').checked = !!getPref('problemsOnly', false);
+    // Always start unchecked regardless of any previously-saved pref.
+    document.getElementById('rpChkProblemsOnly').checked = false;
     document.getElementById('rpChkProblemsOnly').addEventListener('change', function () {
-        setPref('problemsOnly', this.checked);
         applyProblemsOnlyFilter();
     });
 
@@ -4844,7 +4844,10 @@
 
         function renderWeekGridFor(entry) {
             var rs = routesFor(entry);
-            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, 1fr);gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">';
+            // Min 160px per day column so card text ("Arrived 9:47 AM · 12min late")
+            // can fit on a single line. The entity body wraps with overflow-x:auto
+            // so the grid scrolls horizontally on narrow viewports.
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(160px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:1200px;">';
             inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
             for (var di = 0; di < 7; di++) {
                 var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
@@ -4971,13 +4974,13 @@
             var entityName = entry.type === 'driver' ? (cachedDrivers[entry.id] || entry.id) : (cachedDevices[entry.id] || entry.id);
             var routeNames = rsE.map(function (r) { return r.name; });
             var color = tlColorFor(entry.type, entry.id);
-            html += '<div class="rpTlEntityCard" style="margin-bottom:20px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.05);">' +
+            html += '<div class="rpTlEntityCard" data-entity-type="' + entry.type + '" data-entity-id="' + escapeHtml(entry.id) + '" style="margin-bottom:20px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.05);">' +
                 '<div class="rpTlEntityHeader" style="padding:12px 16px;background:#f8f9fa;border-bottom:1px solid #eee;display:flex;flex-wrap:wrap;gap:14px;align-items:center;border-left:4px solid ' + color + ';">' +
                     '<span style="font-weight:700;font-size:15px;color:#333;">' + typeLabel + ': ' + escapeHtml(entityName) + '</span>' +
                     '<span style="font-size:12px;color:#666;"><span style="color:#888;">Routes:</span> ' + escapeHtml(routeNames.join(', ')) + '</span>' +
                     '<span style="font-size:12px;color:#888;margin-left:auto;">' + rsE.length + ' route' + (rsE.length === 1 ? '' : 's') + '</span>' +
                 '</div>' +
-                '<div class="rpTlEntityBody" style="padding:12px;">' + renderWeekGridFor(entry) + '</div>' +
+                '<div class="rpTlEntityBody" style="padding:12px;overflow-x:auto;">' + renderWeekGridFor(entry) + '</div>' +
             '</div>';
         }
         if (!renderedAny) {
@@ -4986,6 +4989,119 @@
         }
         graph.innerHTML = html;
         wireTlHover();
+        // Draw cross-day arrival/departure lines once the grid has been laid out.
+        requestAnimationFrame(function () { drawTlArrivalLines(routesFor); });
+    }
+
+    function drawTlArrivalLines(routesFor) {
+        var graph = document.getElementById('rpTimelineGraph');
+        if (!graph) return;
+        var weekInput = document.getElementById('rpTimelineWeek').value;
+        if (!weekInput) return;
+        var weekStart = tlWeekStart(new Date(weekInput + 'T12:00:00'));
+        // Recompute the time axis params (must match renderTimeline).
+        // We can read them off any grid's first axis labels or derive from the visible routes.
+        var entityCards = graph.querySelectorAll('.rpTlEntityCard');
+        for (var ec = 0; ec < entityCards.length; ec++) {
+            var card = entityCards[ec];
+            var entityType = card.dataset.entityType;
+            var entityId = card.dataset.entityId;
+            if (!entityType || !entityId) continue;
+            var grid = card.querySelector('.rpTlGrid');
+            if (!grid) continue;
+            var days = grid.querySelectorAll('.rpTlDay');
+            if (days.length !== 7) continue;
+            // Clear any previous overlay from an earlier render.
+            var oldOverlay = grid.querySelector('.rpTlLineOverlay');
+            if (oldOverlay) oldOverlay.parentNode.removeChild(oldOverlay);
+
+            var rsE = routesFor({ type: entityType, id: entityId });
+            if (!rsE.length) continue;
+
+            // Derive min/max time from this entity's routes (same calc as renderTimeline,
+            // but only for this entity so the Y math matches what was rendered).
+            // Actually we want to match the shared axis used in renderWeekGridFor —
+            // reconstruct it from the first hour label's position and the grid dims.
+            var gridRect = grid.getBoundingClientRect();
+            var firstDayRect = days[0].getBoundingClientRect();
+            var contentTopInGrid = firstDayRect.top - gridRect.top;
+            var contentHeight = firstDayRect.height;
+
+            // Get minMin/maxMin from the route windows we're showing. These are the
+            // same routes used in renderWeekGridFor for this entity, so we'd need
+            // the shared axis. Read it off the axis labels' topmost label position
+            // to stay in sync with whatever renderWeekGridFor used.
+            var axis = grid.querySelector('.rpTlAxis');
+            // The axis labels have `top` in px and text like "7 AM".
+            // Collect them into a list of (topPx, minutes) pairs to invert pxPerMin/minMin.
+            var labels = axis ? axis.querySelectorAll('div') : [];
+            if (labels.length < 2) continue; // need at least 2 hour labels to compute the scale
+            function parseLabelMin(txt) {
+                var m = /^\s*(\d{1,2})\s*(AM|PM)\s*$/i.exec(txt);
+                if (!m) return null;
+                var h = parseInt(m[1], 10) % 12;
+                if (m[2].toUpperCase() === 'PM') h += 12;
+                return h * 60;
+            }
+            function parseLabelTop(el) {
+                var t = el.style.top;
+                return parseFloat(t) || 0;
+            }
+            var pA = null, pB = null;
+            for (var li = 0; li < labels.length; li++) {
+                var mins = parseLabelMin(labels[li].textContent);
+                if (mins === null) continue;
+                if (pA === null) pA = { mins: mins, top: parseLabelTop(labels[li]) };
+                else { pB = { mins: mins, top: parseLabelTop(labels[li]) }; break; }
+            }
+            if (!pA || !pB || pB.top === pA.top) continue;
+            var pxPerMin = (pB.top - pA.top) / (pB.mins - pA.mins);
+            var minMin = pA.mins - (pA.top / pxPerMin);
+
+            // Compute day center x-coordinates relative to grid.
+            var dayXs = [];
+            for (var di = 0; di < 7; di++) {
+                var dRect = days[di].getBoundingClientRect();
+                dayXs.push(dRect.left - gridRect.left + dRect.width / 2);
+            }
+
+            var svgW = gridRect.width, svgH = gridRect.height;
+            var svg = '<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:0;top:0;width:' + svgW + 'px;height:' + svgH + 'px;pointer-events:none;">';
+            for (var ri = 0; ri < rsE.length; ri++) {
+                var r = rsE[ri];
+                var rDays = r.activeDays || [0,1,2,3,4,5];
+                var points = [];
+                for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
+                    var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dayIdx);
+                    if (rDays.indexOf(colDate.getDay()) === -1) continue;
+                    var dStr = formatDate(colDate);
+                    var ev = _tlEventIndex[entityType + '|' + entityId + '|' + r._uid + '|' + dStr];
+                    if (!ev || !ev.eventMs) continue;
+                    var evDate = new Date(ev.eventMs);
+                    var eventMinInDay = evDate.getHours() * 60 + evDate.getMinutes() + evDate.getSeconds() / 60;
+                    var y = contentTopInGrid + (eventMinInDay - minMin) * pxPerMin;
+                    points.push({ x: dayXs[dayIdx], y: y });
+                }
+                if (!points.length) continue;
+                var lineColor = '#111';
+                if (points.length >= 2) {
+                    var path = 'M' + points[0].x.toFixed(1) + ',' + points[0].y.toFixed(1);
+                    for (var pi = 1; pi < points.length; pi++) path += 'L' + points[pi].x.toFixed(1) + ',' + points[pi].y.toFixed(1);
+                    svg += '<path d="' + path + '" stroke="' + lineColor + '" stroke-width="2" fill="none" opacity="0.85"/>';
+                }
+                for (var pi2 = 0; pi2 < points.length; pi2++) {
+                    svg += '<circle cx="' + points[pi2].x.toFixed(1) + '" cy="' + points[pi2].y.toFixed(1) + '" r="4" fill="#fff" stroke="' + lineColor + '" stroke-width="2"/>';
+                }
+            }
+            svg += '</svg>';
+
+            grid.style.position = 'relative';
+            var overlay = document.createElement('div');
+            overlay.className = 'rpTlLineOverlay';
+            overlay.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;';
+            overlay.innerHTML = svg;
+            grid.appendChild(overlay);
+        }
     }
 
     function updateTlWeekLabel() {
