@@ -125,7 +125,7 @@
                     <th class="rpth">Actions</th>
                 </tr></thead>
                 <tbody id="rpRoutesBody">
-                    <tr><td colspan="7" id="rpLoading">Loading routes...</td></tr>
+                    <tr><td colspan="7" id="rpLoading"><div class="rpSkelRow"></div><div class="rpSkelRow"></div><div class="rpSkelRow"></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -150,8 +150,20 @@
             <span id="rpAutoRefreshStatus"></span>
             <label id="rpChkProblemsOnlyLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
                 <input type="checkbox" id="rpChkProblemsOnly">
-                <span class="rpLbl" title="Hide routes where every assigned vehicle/driver is on track.">Problems only</span>
+                <span class="rpLbl" title="Hide routes where every vehicle/driver has arrived/departed on time. Routes with any not-yet-arrived OR late-vs-target rows remain visible.">Show only late arrivals/departures</span>
             </label>
+            <label id="rpChkCompareModeLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
+                <input type="checkbox" id="rpChkCompareMode">
+                <span class="rpLbl" title="Show last-week variance under vs Target for each row.">Compare 7d ago</span>
+            </label>
+            <span id="rpLastUpdated" class="rpLbl" style="margin-left:auto; font-size:12px; color:#888;"></span>
+        </div>
+        <div id="rpAutoCollapseWrap" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <span class="rpLbl" title="Hide routes whose window ended more than N minutes ago. Click a collapsed row to expand.">Auto-collapse completed:</span>
+            <label style="cursor:pointer"><input type="radio" name="rpAutoCollapse" value="never"> Never</label>
+            <label style="cursor:pointer"><input type="radio" name="rpAutoCollapse" value="5"> 5 min</label>
+            <label style="cursor:pointer"><input type="radio" name="rpAutoCollapse" value="15"> 15 min</label>
+            <label style="cursor:pointer"><input type="radio" name="rpAutoCollapse" value="60"> 1 hr</label>
         </div>
         <div id="rpRouteChipsWrap"><span class="rpLbl">Routes:</span> <span id="rpChipSelectAll" title="Select all routes">All</span> <span id="rpChipDeselectAll" title="Deselect all routes">None</span> <span id="rpRouteChips"></span></div>
         <div id="progressStatus"></div>
@@ -175,6 +187,7 @@
             <select id="rpDriverFilter"><option value="">All Drivers</option></select>
             <span id="rpBtnGenReport">&#x1F4CA; Generate Report</span>
             <span id="rpBtnExport">&#x1F4E5; Export Excel</span>
+            <input type="search" id="rpReportSearch" placeholder="Search rows..." style="margin-left:8px; min-width:180px;">
         </div>
         <div id="reportStatus"></div>
         <div id="rpReportSummary"></div>
@@ -329,7 +342,13 @@
         s.textContent =
             '#rp-root [role="button"]:focus-visible,#rp-root button:focus-visible,' +
             '#rp-root input:focus-visible,#rp-root select:focus-visible,' +
-            '#rp-root textarea:focus-visible{outline:2px solid #0078d4;outline-offset:2px;}';
+            '#rp-root textarea:focus-visible{outline:2px solid #0078d4;outline-offset:2px;}' +
+            // Skeleton loader shimmer
+            '@keyframes rpShimmer{0%{background-position:-200px 0}100%{background-position:calc(200px + 100%) 0}}' +
+            '#rp-root .rpSkelRow{height:14px;margin:8px 0;border-radius:4px;' +
+                'background:linear-gradient(90deg,#eee 0%,#f5f5f5 50%,#eee 100%);' +
+                'background-size:200px 100%;background-repeat:no-repeat;' +
+                'animation:rpShimmer 1.2s ease-in-out infinite;}';
         document.head.appendChild(s);
     }
 
@@ -731,6 +750,10 @@
             updateDateLabel();
             populateFilters();
             renderVehicleChips();
+            // Restore Go Live state if previously enabled.
+            if (getPref('autoRefresh', false)) {
+                startAutoRefresh();
+            }
         } catch (err) {
             showStatus('routeStatus', 'Error initializing: ' + err.message, 'error');
         }
@@ -740,7 +763,11 @@
         var today = new Date();
         var weekAgo = new Date(today);
         weekAgo.setDate(weekAgo.getDate() - 7);
+        // Always default the live-progress date to today (not the persisted one),
+        // but restore the time range the user last chose.
         document.getElementById('rpProgressDate').value = formatDate(today);
+        document.getElementById('rpProgressTimeFrom').value = getPref('timeFrom', '00:00');
+        document.getElementById('rpProgressTimeTo').value = getPref('timeTo', '23:59');
         document.getElementById('rpReportFrom').value = formatDate(weekAgo);
         document.getElementById('rpReportTo').value = formatDate(today);
     }
@@ -1070,6 +1097,24 @@
     // Each route object: {name, direction, startTime, endTime, vehicleIds, activeDays, _uid}
     // _uid is a simple unique ID for edit/delete.
 
+    // ========== USER PREFERENCES (localStorage) ==========
+    var _rpPrefsCache = null;
+    function _loadPrefs() {
+        if (_rpPrefsCache) return _rpPrefsCache;
+        try { _rpPrefsCache = JSON.parse(localStorage.getItem('rpPrefs') || '{}') || {}; }
+        catch (e) { _rpPrefsCache = {}; }
+        return _rpPrefsCache;
+    }
+    function getPref(key, defaultValue) {
+        var p = _loadPrefs();
+        return (key in p) ? p[key] : defaultValue;
+    }
+    function setPref(key, value) {
+        var p = _loadPrefs();
+        p[key] = value;
+        try { localStorage.setItem('rpPrefs', JSON.stringify(p)); } catch (e) {}
+    }
+
     function generateUid() {
         return 'r' + Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
     }
@@ -1147,6 +1192,7 @@
                 '<td class="rptd">' + assignLabel + '</td>' +
                 '<td class="rptd">' +
                     '<span class="rpActionBtn rpEditBtn" data-route-idx="' + i + '">Edit</span> ' +
+                    '<span class="rpActionBtn rpDuplicateBtn" data-route-idx="' + i + '">Duplicate</span> ' +
                     '<span class="rpActionBtn rpDeleteBtn" data-route-idx="' + i + '">Delete</span>' +
                 '</td></tr>';
         }
@@ -1302,17 +1348,65 @@
         }
     });
 
-    // Edit/Delete via event delegation
+    // Edit/Duplicate/Delete via event delegation
     document.getElementById('rpRoutesBody').addEventListener('click', function (e) {
         var el = e.target;
         if (el.classList.contains('rpEditBtn')) {
             var idx = parseInt(el.dataset.routeIdx, 10);
             editRoute(idx);
+        } else if (el.classList.contains('rpDuplicateBtn')) {
+            var idxD = parseInt(el.dataset.routeIdx, 10);
+            duplicateRoute(idxD);
         } else if (el.classList.contains('rpDeleteBtn')) {
             var idx = parseInt(el.dataset.routeIdx, 10);
             confirmDeleteRoute(idx);
         }
     });
+
+    function duplicateRoute(idx) {
+        var r = savedRoutes[idx];
+        if (!r) return;
+        // Open the create form pre-filled with the original's values (no _uid so Save creates new).
+        editingRouteId = null;
+        document.getElementById('rpRouteName').value = (r.name || '') + ' (copy)';
+        selectZone(r.zoneId, r.zoneName || '');
+        document.getElementById('rpStartTime').value = r.startTime;
+        document.getElementById('rpEndTime').value = r.endTime;
+        document.getElementById('rpTargetTimeStart').value = r.targetTimeStart || '';
+        document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || '';
+        document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
+        syncTargetTimeBounds();
+        selectedDirection = r.direction || 'inside';
+        selectedTrackBy = r.trackBy || 'vehicle';
+        setTrackByUI(selectedTrackBy);
+
+        selectedVehicles = {};
+        if (r.vehicleIds) { for (var i = 0; i < r.vehicleIds.length; i++) selectedVehicles[r.vehicleIds[i]] = true; }
+        renderVehicleChips();
+        selectedDrivers = {};
+        if (r.driverIds) { for (var j = 0; j < r.driverIds.length; j++) selectedDrivers[r.driverIds[j]] = true; }
+        renderDriverChips();
+
+        var editDays = r.activeDays || [0,1,2,3,4,5];
+        var dayChecks = document.querySelectorAll('.rpDayCheck');
+        for (var k = 0; k < dayChecks.length; k++) {
+            dayChecks[k].checked = editDays.indexOf(parseInt(dayChecks[k].value, 10)) !== -1;
+        }
+        if (selectedDirection === 'inside') {
+            forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        } else {
+            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
+            forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        }
+        document.getElementById('rpFormTitle').textContent = 'Duplicate Route from: ' + r.name;
+        document.getElementById('rpBtnSaveRoute').innerHTML = '&#x2714; Save as New';
+        forceStyle(document.getElementById('rpFormWrap'), { 'display': 'block' });
+        forceStyle(document.getElementById('rpCreateBtnWrap'), { 'display': 'none' });
+        document.getElementById('rpFormWrap').scrollIntoView({ behavior: 'smooth' });
+        document.getElementById('rpRouteName').focus();
+        document.getElementById('rpRouteName').select();
+    }
 
     function editRoute(idx) {
         var r = savedRoutes[idx];
@@ -1458,9 +1552,50 @@
 
     // ========== ROUTE PROGRESS (Tab 2) ==========
     document.getElementById('rpBtnRefresh').addEventListener('click', function () { renderProgress(); });
-    document.getElementById('rpChkProblemsOnly').addEventListener('change', function () { applyProblemsOnlyFilter(); });
+    document.getElementById('rpChkProblemsOnly').checked = !!getPref('problemsOnly', false);
+    document.getElementById('rpChkProblemsOnly').addEventListener('change', function () {
+        setPref('problemsOnly', this.checked);
+        applyProblemsOnlyFilter();
+    });
+
+    // Compare 7d-ago: restore + wire
+    document.getElementById('rpChkCompareMode').checked = !!getPref('compareMode', false);
+    document.getElementById('rpChkCompareMode').addEventListener('change', function () {
+        setPref('compareMode', this.checked);
+        if (this.checked) {
+            // Fetch in background for current view
+            var dateStr = document.getElementById('rpProgressDate').value;
+            if (dateStr) computeCompareData(savedRoutes, dateStr);
+        } else {
+            applyCompareBadges(savedRoutes);
+        }
+    });
+
+    // Auto-collapse radio: restore + wire
+    (function () {
+        var mode = getPref('autoCollapse', 'never');
+        var radios = document.querySelectorAll('input[name="rpAutoCollapse"]');
+        for (var i = 0; i < radios.length; i++) {
+            radios[i].checked = radios[i].value === mode;
+            radios[i].addEventListener('change', function () {
+                if (this.checked) {
+                    setPref('autoCollapse', this.value);
+                    // Clear per-card force-expand so new collapse rule applies.
+                    var cards = document.querySelectorAll('#rpProgressContent .rpRouteCard');
+                    for (var j = 0; j < cards.length; j++) delete cards[j].dataset.forceExpanded;
+                    applyAutoCollapse();
+                }
+            });
+        }
+    })();
 
     var selectedRouteChips = {}; // _uid -> true (all selected by default)
+    var _chipsRestored = false;
+    function saveChipPref() {
+        var arr = [];
+        for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k) && selectedRouteChips[k]) arr.push(k); }
+        setPref('selectedChips', arr);
+    }
 
     function renderRouteChips() {
         var container = document.getElementById('rpRouteChips');
@@ -1468,11 +1603,19 @@
             container.innerHTML = '<span style="color:#888;font-size:13px;">No routes created</span>';
             return;
         }
-        // On first render, select all
+        // Restore from prefs on first render if available; else select all.
         var anySelected = false;
         for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k)) { anySelected = true; break; } }
-        if (!anySelected) {
-            for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
+        if (!anySelected && !_chipsRestored) {
+            _chipsRestored = true;
+            var saved = getPref('selectedChips', null);
+            if (saved && saved.length) {
+                for (var si = 0; si < saved.length; si++) selectedRouteChips[saved[si]] = true;
+            } else {
+                for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
+            }
+        } else if (!anySelected) {
+            for (var i2 = 0; i2 < savedRoutes.length; i2++) selectedRouteChips[savedRoutes[i2]._uid] = true;
         }
         var now = new Date();
         var currentMin = now.getHours() * 60 + now.getMinutes();
@@ -1562,18 +1705,21 @@
         var uid = chip.dataset.uid;
         if (selectedRouteChips[uid]) delete selectedRouteChips[uid];
         else selectedRouteChips[uid] = true;
+        saveChipPref();
         renderRouteChips();
         renderProgress();
     });
 
     document.getElementById('rpChipSelectAll').addEventListener('click', function () {
         for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
+        saveChipPref();
         renderRouteChips();
         renderProgress();
     });
 
     document.getElementById('rpChipDeselectAll').addEventListener('click', function () {
         selectedRouteChips = {};
+        saveChipPref();
         renderRouteChips();
         renderProgress();
     });
@@ -1596,6 +1742,12 @@
         updateDateLabel();
         renderProgress();
     });
+    document.getElementById('rpProgressTimeFrom').addEventListener('change', function () {
+        setPref('timeFrom', this.value); renderProgress();
+    });
+    document.getElementById('rpProgressTimeTo').addEventListener('change', function () {
+        setPref('timeTo', this.value); renderProgress();
+    });
     // Set initial label after dates are set
     setTimeout(updateDateLabel, 100);
 
@@ -1603,8 +1755,10 @@
     document.getElementById('rpBtnAutoRefresh').addEventListener('click', function () {
         if (autoRefreshActive) {
             stopAutoRefresh();
+            setPref('autoRefresh', false);
         } else {
             startAutoRefresh();
+            setPref('autoRefresh', true);
         }
     });
 
@@ -1690,7 +1844,7 @@
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
-            var rCompleted = 0, rTotal = 0;
+            var rCompleted = 0, rTotal = 0, rLate = 0;
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -1721,6 +1875,7 @@
                 var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                 augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
                     var elapsedInWindow = Math.max(0, (windowToMs - windowFromMs) / 60000);
@@ -1766,7 +1921,10 @@
                         statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                     }
                     vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                    if (goodDir) { completedCount++; rCompleted++; } else { missedCount++; }
+                    if (goodDir) {
+                        completedCount++; rCompleted++;
+                        if (isLateVsTarget(eventMs, r, dateStr)) rLate++;
+                    } else { missedCount++; }
                 }
 
                 if (statusCell) {
@@ -1775,7 +1933,6 @@
                 if (timeCell) {
                     timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
                 }
-                var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                 if (eventCell) {
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
                 }
@@ -1788,11 +1945,13 @@
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
             }
-            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
+            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction };
         }
 
         applyRouteProgressBadges(liveRouteCounts);
         updateEtaBars(now.getTime());
+        applyAutoCollapse();
+        updateLastUpdated();
 
         // Update summary cards inline
         var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
@@ -2007,7 +2166,7 @@
                     '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance to Zone' : '') + '</th>' +
                     '</tr></thead><tbody>';
 
-                var rCompleted = 0, rTotal = 0;
+                var rCompleted = 0, rTotal = 0, rLate = 0;
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="7" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -2054,6 +2213,7 @@
                         var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                         augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                        var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
                         var lastStopLng = presence.lastLng;
@@ -2094,7 +2254,10 @@
                                 statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
                             }
                             vStatusClass = goodDir ? 'rpStCompleted' : 'rpStMissed';
-                            if (goodDir) { completedCount++; rCompleted++; sortOrder = 1; } else { missedCount++; sortOrder = 0; }
+                            if (goodDir) {
+                                completedCount++; rCompleted++; sortOrder = 1;
+                                if (isLateVsTarget(eventMs, r, dateStr)) rLate++;
+                            } else { missedCount++; sortOrder = 0; }
                         }
 
                         var distCol;
@@ -2113,7 +2276,6 @@
                             ? '<td class="rptd">' + (currentVehicleName || '<span style="color:#aaa">-</span>') + '</td>'
                             : '<td class="rptd" style="color:#ccc;">—</td>';
 
-                        var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
                         var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
 
@@ -2135,7 +2297,7 @@
                     vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
                     for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
-                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
+                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction };
                 html += '</tbody></table></div>';
             }
 
@@ -2146,6 +2308,12 @@
             // Paint any cached sparklines instantly, then kick off a compute to refresh.
             applySparklines(null);
             computeSparklines(dayFilteredRoutes, dateStr).then(function () { styleSparklines(); });
+            applyAutoCollapse();
+            updateLastUpdated();
+            if (document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked) {
+                applyCompareBadges(dayFilteredRoutes);
+                computeCompareData(dayFilteredRoutes, dateStr);
+            }
             lastProgressHash = getProgressHash();
 
             // Summary cards
@@ -2309,6 +2477,9 @@
     }
 
     document.getElementById('rpBtnGenReport').addEventListener('click', function () { generateReport(); });
+    document.getElementById('rpReportSearch').addEventListener('input', function () {
+        renderReportTable();
+    });
 
     async function generateReport() {
         var fromDate = document.getElementById('rpReportFrom').value;
@@ -2498,6 +2669,15 @@
         if (activeReportFilter === 'completed') filtered = filtered.filter(function (r) { return r.status === 'Completed'; });
         else if (activeReportFilter === 'incomplete') filtered = filtered.filter(function (r) { return r.status === 'Incomplete'; });
         else if (activeReportFilter === 'missed') filtered = filtered.filter(function (r) { return r.status === 'Missed'; });
+        var searchEl = document.getElementById('rpReportSearch');
+        var q = searchEl ? String(searchEl.value || '').trim().toLowerCase() : '';
+        if (q) {
+            filtered = filtered.filter(function (r) {
+                var hay = [r.routeName, r.vehicleName, r.driverName, r.date, r.zoneName, r.direction, r.window, r.targetRange || '', r.status]
+                    .join(' ').toLowerCase();
+                return hay.indexOf(q) !== -1;
+            });
+        }
         return filtered;
     }
 
@@ -3351,18 +3531,212 @@
             var uid = nodes[i].dataset.routeUid;
             var c = counts[uid];
             if (!c) { nodes[i].innerHTML = ''; continue; }
-            nodes[i].innerHTML = formatRouteProgressBadge(c.completed, c.total, c.direction);
+            nodes[i].innerHTML = formatRouteProgressBadge(c.completed, c.total, c.direction, c.late || 0);
         }
-        // Mark cards as "all good" for the Problems-only filter
+        // Mark cards as "all good" for the "late arrivals/departures only" filter.
+        // A card is "all good" only when everyone has arrived/departed AND none are late vs target.
         var cards = document.querySelectorAll('#rpProgressContent .rpRouteCard');
         for (var j = 0; j < cards.length; j++) {
             var cUid = cards[j].dataset.routeUid;
             var ct = cUid ? counts[cUid] : null;
-            var allGood = ct && ct.total > 0 && ct.completed === ct.total;
+            var allGood = ct && ct.total > 0 && ct.completed === ct.total && !(ct.late > 0);
             cards[j].dataset.allGood = allGood ? '1' : '0';
         }
         stylePerRouteProgressBadges();
         applyProblemsOnlyFilter();
+    }
+
+    // ========== COMPARE 7-DAYS-AGO ==========
+    // Keyed by routeUid + '|' + assignedId; value: { variance: number|null, eventMs: ms|null }
+    var _compareCache = {};
+    var _compareRunId = 0;
+
+    function formatCompareCellHtml(entry, route) {
+        if (!entry) return '<span style="color:#aaa;font-size:11px;">7d: —</span>';
+        if (!entry.eventMs) return '<span style="color:#888;font-size:11px;">7d: No-show</span>';
+        var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
+        var v = entry.variance;
+        if (v === null) return '<span style="color:#888;font-size:11px;">7d: —</span>';
+        if (Math.abs(v) <= grace) return '<span style="color:#28a745;font-size:11px;font-weight:600;">7d: On time</span>';
+        if (v > 0) return '<span style="color:#dc3545;font-size:11px;font-weight:600;">7d: Late ' + formatMinutesHM(v) + '</span>';
+        return '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d: Early ' + formatMinutesHM(-v) + '</span>';
+    }
+
+    function applyCompareBadges(routes) {
+        var compareOn = !!(document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked);
+        var rows = document.querySelectorAll('#rpProgressContent tr[data-row-uid]');
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var vCell = row.querySelector('.rpVarianceCell');
+            if (!vCell) continue;
+            // Remove any prior compare line
+            var prior = vCell.querySelector('.rpCompareLine');
+            if (prior) prior.parentNode.removeChild(prior);
+            if (!compareOn) continue;
+            var uid = row.dataset.rowUid || '';
+            var parts = uid.split('-');
+            if (parts.length < 2) continue;
+            var routeUid = parts[0];
+            var aId = parts.slice(1).join('-');
+            var route = null;
+            if (routes) { for (var k = 0; k < routes.length; k++) if (routes[k]._uid === routeUid) { route = routes[k]; break; } }
+            if (!route) route = findRouteByUid(routeUid);
+            if (!route) continue;
+            var entry = _compareCache[routeUid + '|' + aId];
+            var line = document.createElement('div');
+            line.className = 'rpCompareLine';
+            line.style.setProperty('margin-top', '2px', 'important');
+            line.innerHTML = formatCompareCellHtml(entry, route);
+            vCell.appendChild(line);
+        }
+    }
+
+    async function computeCompareData(routes, baseDateStr) {
+        var runId = ++_compareRunId;
+        if (!routes || !routes.length) return;
+        var base = new Date(baseDateStr + 'T00:00:00');
+        var prev = new Date(base); prev.setDate(prev.getDate() - 7);
+        var prevStr = formatDate(prev);
+        var dayStart = new Date(prevStr + 'T00:00:00');
+        var dayEnd = new Date(prevStr + 'T00:00:00'); dayEnd.setDate(dayEnd.getDate() + 1);
+        var trips = [];
+        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: dayStart.toISOString(), toDate: dayEnd.toISOString() } }); }
+        catch (e) { return; }
+        if (runId !== _compareRunId) return;
+        var deviceIds = collectRouteDeviceIds(routes, trips);
+        var logsByDevice = {};
+        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, dayStart.toISOString(), dayEnd.toISOString()); } catch (e) {}
+        if (runId !== _compareRunId) return;
+
+        var prevDow = new Date(prevStr + 'T12:00:00').getDay();
+        for (var ri = 0; ri < routes.length; ri++) {
+            var r = routes[ri];
+            var rDays = r.activeDays || [0,1,2,3,4,5];
+            if (rDays.indexOf(prevDow) === -1) continue;
+            var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+            var isDriverRoute = r.trackBy === 'driver';
+            var aIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
+            var lookup = isDriverRoute ? cachedDrivers : cachedDevices;
+            var startMin = timeToMinutes(r.startTime);
+            var endMin = timeToMinutes(r.endTime);
+            var wFromMs = new Date(prevStr + 'T00:00:00').getTime() + startMin * 60000;
+            var wToMs = new Date(prevStr + 'T00:00:00').getTime() + endMin * 60000;
+            for (var ai = 0; ai < aIds.length; ai++) {
+                var aId = aIds[ai];
+                if (!lookup[aId]) continue;
+                var dayDevIds;
+                if (isDriverRoute) {
+                    var set = {};
+                    for (var ti = 0; ti < trips.length; ti++) {
+                        var tr = trips[ti];
+                        if (!tr.driver || tr.driver.id !== aId) continue;
+                        if (!tr.device || !tr.device.id) continue;
+                        var s = tr.stop ? new Date(tr.stop) : null;
+                        if (!s || formatDate(s) !== prevStr) continue;
+                        set[tr.device.id] = true;
+                    }
+                    dayDevIds = Object.keys(set);
+                } else {
+                    dayDevIds = [aId];
+                }
+                var effLogs = isDriverRoute
+                    ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, aId))
+                    : logsByDevice;
+                var merged = mergeDeviceLogs(effLogs, dayDevIds);
+                var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
+                augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
+                var evMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                var variance = computeTargetVarianceMin(evMs, r, prevStr);
+                _compareCache[r._uid + '|' + aId] = { eventMs: evMs, variance: variance };
+            }
+        }
+        if (runId !== _compareRunId) return;
+        applyCompareBadges(routes);
+    }
+
+    // ========== AUTO-COLLAPSE COMPLETED ROUTES ==========
+    // Options: 'never' | '5' | '15' | '60' (minutes after window end).
+    function applyAutoCollapse() {
+        var mode = getPref('autoCollapse', 'never');
+        var dateStr = document.getElementById('rpProgressDate').value;
+        var todayStr = formatDate(new Date());
+        var isToday = dateStr === todayStr;
+        var now = new Date();
+        var container = document.getElementById('rpProgressContent');
+        if (!container) return;
+        var cards = container.querySelectorAll('.rpRouteCard');
+        for (var i = 0; i < cards.length; i++) {
+            var card = cards[i];
+            var uid = card.dataset.routeUid;
+            // User can click a collapsed summary line to force-expand.
+            if (card.dataset.forceExpanded === '1') { expandCard(card); continue; }
+            if (mode === 'never' || !isToday) { expandCard(card); continue; }
+            var r = findRouteByUid(uid);
+            if (!r) { expandCard(card); continue; }
+            var endMin = timeToMinutes(r.endTime);
+            var currentMinutes = now.getHours() * 60 + now.getMinutes();
+            var minsPastEnd = currentMinutes - endMin;
+            var threshold = parseInt(mode, 10);
+            if (isFinite(threshold) && minsPastEnd >= threshold) collapseCard(card, r);
+            else expandCard(card);
+        }
+    }
+
+    function findRouteByUid(uid) {
+        if (!uid) return null;
+        for (var i = 0; i < savedRoutes.length; i++) if (savedRoutes[i]._uid === uid) return savedRoutes[i];
+        return null;
+    }
+
+    function collapseCard(card, route) {
+        var etaBar = card.querySelector('.rpEtaBarWrap');
+        var tbl = card.querySelector('.rpProgressTable');
+        if (etaBar) etaBar.style.setProperty('display', 'none', 'important');
+        if (tbl) tbl.style.setProperty('display', 'none', 'important');
+        card.dataset.collapsed = '1';
+        var head = card.querySelector('.rpRouteCardHead');
+        if (head && !head.dataset.a11yHint) {
+            head.dataset.a11yHint = '1';
+            head.title = 'Click to expand';
+            head.style.setProperty('cursor', 'pointer', 'important');
+        }
+    }
+
+    function expandCard(card) {
+        var etaBar = card.querySelector('.rpEtaBarWrap');
+        var tbl = card.querySelector('.rpProgressTable');
+        if (etaBar) etaBar.style.removeProperty('display');
+        if (tbl) tbl.style.removeProperty('display');
+        card.dataset.collapsed = '0';
+        var head = card.querySelector('.rpRouteCardHead');
+        if (head && head.dataset.a11yHint) {
+            head.removeAttribute('title');
+            head.style.removeProperty('cursor');
+            delete head.dataset.a11yHint;
+        }
+    }
+
+    // Click anywhere on the header of a collapsed card to force-expand it.
+    document.addEventListener('click', function (e) {
+        var head = e.target.closest && e.target.closest('#rpProgressContent .rpRouteCardHead');
+        if (!head) return;
+        var card = head.parentElement;
+        if (!card || card.dataset.collapsed !== '1') return;
+        card.dataset.forceExpanded = '1';
+        expandCard(card);
+    });
+
+    // ========== LAST UPDATED INDICATOR ==========
+    function updateLastUpdated() {
+        var el = document.getElementById('rpLastUpdated');
+        if (!el) return;
+        var d = new Date();
+        var hh = d.getHours();
+        var mm = ('0' + d.getMinutes()).slice(-2);
+        var ss = ('0' + d.getSeconds()).slice(-2);
+        var ampm = hh >= 12 ? 'PM' : 'AM';
+        var h12 = hh % 12 || 12;
+        el.textContent = 'Updated ' + h12 + ':' + mm + ':' + ss + ' ' + ampm;
     }
 
     function applyProblemsOnlyFilter() {
@@ -3386,7 +3760,7 @@
                 notice.id = 'rpProblemsFilterNotice';
                 container.insertBefore(notice, container.firstChild);
             }
-            notice.textContent = hidden + ' route' + (hidden === 1 ? '' : 's') + ' hidden (all on track).';
+            notice.textContent = hidden + ' route' + (hidden === 1 ? '' : 's') + ' hidden (all on time).';
             forceStyle(notice, {
                 'padding': '8px 12px', 'background': '#e8f4fd', 'color': '#0c5460',
                 'border-radius': '6px', 'margin-bottom': '12px', 'font-size': '12px'
@@ -3605,16 +3979,19 @@
 
     // Badge HTML for per-route completion like "3/5 arrived".
     // total excludes removed/unknown members. direction: 'inside' | 'outside'.
-    function formatRouteProgressBadge(completed, total, direction) {
+    function formatRouteProgressBadge(completed, total, direction, late) {
         var verb = direction === 'outside' ? 'departed' : 'arrived';
         if (!total) {
             return '<span class="rpRouteProgressCount rpRouteProgressEmpty">0/0 ' + verb + '</span>';
         }
         var cls = 'rpRouteProgressPartial';
-        if (completed === total) cls = 'rpRouteProgressFull';
-        else if (completed === 0) cls = 'rpRouteProgressNone';
-        return '<span class="rpRouteProgressCount ' + cls + '" title="' + completed + ' of ' + total + ' ' + (total === 1 ? (direction === 'outside' ? 'has' : 'has') : 'have') + ' ' + verb + '">' +
-            completed + '/' + total + ' ' + verb + '</span>';
+        if (completed === 0) cls = 'rpRouteProgressNone';
+        else if (completed === total && !(late > 0)) cls = 'rpRouteProgressFull';
+        else if (completed === total && late > 0) cls = 'rpRouteProgressPartial';
+        var lateSuffix = (late && late > 0) ? ' <span class="rpRouteProgressLate" title="' + late + ' late vs target">(' + late + ' late)</span>' : '';
+        var title = completed + ' of ' + total + ' ' + (total === 1 ? 'has' : 'have') + ' ' + verb + (late > 0 ? ', ' + late + ' late vs target' : '');
+        return '<span class="rpRouteProgressCount ' + cls + '" title="' + title + '">' +
+            completed + '/' + total + ' ' + verb + lateSuffix + '</span>';
     }
 
     // Read target window from a route. Returns { start, end } as HH:MM strings, or nulls.
@@ -3645,6 +4022,16 @@
         if (eventMs < startMs) return Math.round((eventMs - startMs) / 60000); // negative
         if (eventMs > endMs) return Math.round((eventMs - endMs) / 60000);     // positive
         return 0;
+    }
+
+    // Returns true if an event is late vs the target window after grace.
+    // Used to classify "arrived but late" as a problem for filtering.
+    function isLateVsTarget(eventMs, route, dateStr) {
+        if (!eventMs || !routeHasTarget(route)) return false;
+        var v = computeTargetVarianceMin(eventMs, route, dateStr);
+        if (v === null) return false;
+        var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
+        return v > grace;
     }
 
     // Variance vs target window. Returns HTML for the "vs Target" cell.
