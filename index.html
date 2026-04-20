@@ -1471,8 +1471,9 @@
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
             var isLive = isToday && currentMin >= startMin && currentMin <= endMin;
-            html += '<span class="rpRouteChip' + (active ? ' rpRouteChipActive' : '') + (isLive ? ' rpRouteChipLive' : '') + '" data-uid="' + r._uid + '">' +
-                escapeHtml(r.name) + ' <span style="opacity:0.7">(' + formatWindow(r.startTime, r.endTime) + ')</span></span>';
+            var icon = active ? '<span class="rpChipIcon">&#x2713;</span>' : '<span class="rpChipIcon">&#x2715;</span>';
+            html += '<span class="rpRouteChip' + (active ? ' rpRouteChipActive' : '') + (isLive ? ' rpRouteChipLive' : '') + '" data-uid="' + r._uid + '" aria-pressed="' + (active ? 'true' : 'false') + '">' +
+                icon + escapeHtml(r.name) + ' <span class="rpChipWindow">(' + formatWindow(r.startTime, r.endTime) + ')</span></span>';
         }
         container.innerHTML = html;
         styleRouteChips();
@@ -1491,14 +1492,51 @@
         for (var i = 0; i < chips.length; i++) {
             var isActive = chips[i].classList.contains('rpRouteChipActive');
             var isLive = chips[i].classList.contains('rpRouteChipLive');
-            forceStyle(chips[i], {
-                'display': 'inline-block', 'padding': '6px 14px', 'border-radius': '20px',
-                'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer', 'user-select': 'none',
-                'border': isLive && isActive ? '2px solid #28a745' : (isActive ? '2px solid #0078d4' : '2px solid #ccc'),
-                'background': isActive ? (isLive ? '#d4edda' : '#e8f0fe') : '#f0f0f0',
-                'color': isActive ? (isLive ? '#155724' : '#0078d4') : '#999',
-                'box-shadow': isLive && isActive ? '0 0 6px rgba(40,167,69,0.3)' : 'none'
+            // Selected chips: solid color fill + white text. Unselected: outlined,
+            // greyed, and faded with a dashed border so the difference reads at a glance.
+            var styles;
+            if (isActive && isLive) {
+                styles = {
+                    'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                    'padding': '6px 14px', 'border-radius': '20px',
+                    'font-size': '13px', 'font-weight': '700', 'cursor': 'pointer', 'user-select': 'none',
+                    'border': '2px solid #1e7e34', 'background': '#28a745', 'color': '#fff',
+                    'box-shadow': '0 0 0 2px rgba(40,167,69,0.25)', 'opacity': '1'
+                };
+            } else if (isActive) {
+                styles = {
+                    'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                    'padding': '6px 14px', 'border-radius': '20px',
+                    'font-size': '13px', 'font-weight': '700', 'cursor': 'pointer', 'user-select': 'none',
+                    'border': '2px solid #005a9e', 'background': '#0078d4', 'color': '#fff',
+                    'box-shadow': '0 1px 3px rgba(0,120,212,0.35)', 'opacity': '1'
+                };
+            } else {
+                styles = {
+                    'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                    'padding': '6px 14px', 'border-radius': '20px',
+                    'font-size': '13px', 'font-weight': '500', 'cursor': 'pointer', 'user-select': 'none',
+                    'border': '2px dashed #bbb', 'background': '#fff', 'color': '#888',
+                    'box-shadow': 'none', 'opacity': '0.65'
+                };
+            }
+            forceStyle(chips[i], styles);
+        }
+        // Inline icon and window suffix styling
+        var icons = document.querySelectorAll('.rpRouteChip .rpChipIcon');
+        for (var ic = 0; ic < icons.length; ic++) {
+            var parentActive = icons[ic].parentElement && icons[ic].parentElement.classList.contains('rpRouteChipActive');
+            forceStyle(icons[ic], {
+                'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
+                'width': '16px', 'height': '16px', 'border-radius': '50%',
+                'font-size': '11px', 'font-weight': '700', 'line-height': '1',
+                'background': parentActive ? 'rgba(255,255,255,0.25)' : '#eee',
+                'color': parentActive ? '#fff' : '#bbb'
             });
+        }
+        var wins = document.querySelectorAll('.rpRouteChip .rpChipWindow');
+        for (var w = 0; w < wins.length; w++) {
+            forceStyle(wins[w], { 'opacity': '0.85', 'font-weight': '500', 'font-size': '12px' });
         }
     }
 
@@ -2128,10 +2166,14 @@
         var cards = document.querySelectorAll('.rpRouteCard');
         for (var i = 0; i < cards.length; i++) {
             var isActive = cards[i].classList.contains('rpRouteActive');
+            // Same border width on every card so inner table widths line up
+            // across cards. Active state uses color + glow, not extra width.
             forceStyle(cards[i], {
-                'background': '#fff', 'border': isActive ? '2px solid #28a745' : '1px solid #e0e0e0',
+                'background': '#fff',
+                'border': '1px solid ' + (isActive ? '#28a745' : '#e0e0e0'),
                 'border-radius': '8px', 'margin-bottom': '16px', 'overflow': 'hidden',
-                'box-shadow': isActive ? '0 0 8px rgba(40,167,69,0.25)' : '0 1px 4px rgba(0,0,0,0.05)'
+                'box-sizing': 'border-box',
+                'box-shadow': isActive ? '0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.25)' : '0 1px 4px rgba(0,0,0,0.05)'
             });
         }
         var heads = document.querySelectorAll('.rpRouteCardHead');
@@ -2148,6 +2190,19 @@
         for (var i = 0; i < infos.length; i++) forceStyle(infos[i], { 'font-size': '16px', 'color': '#777', 'margin-left': 'auto' });
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
+        // Force fixed col widths with !important so they line up across cards.
+        var colWidths = { 'rpColName': '18%', 'rpColCurVeh': '14%', 'rpColStatus': '11%',
+            'rpColEvent': '15%', 'rpColVariance': '14%', 'rpColTime': '14%', 'rpColDist': '14%' };
+        for (var cls in colWidths) {
+            if (!colWidths.hasOwnProperty(cls)) continue;
+            var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
+            for (var k = 0; k < cols.length; k++) forceStyle(cols[k], { 'width': colWidths[cls] });
+        }
+        // Cells truncate cleanly instead of pushing column widths.
+        var ptds = document.querySelectorAll('#rpProgressContent .rpProgressTable .rptd, #rpProgressContent .rpProgressTable .rpth');
+        for (var p = 0; p < ptds.length; p++) {
+            forceStyle(ptds[p], { 'overflow': 'hidden', 'text-overflow': 'ellipsis', 'word-break': 'break-word' });
+        }
         var smTh = document.querySelectorAll('.rpthSm');
         for (var i = 0; i < smTh.length; i++) forceStyle(smTh[i], { 'font-size': '12px', 'padding': '8px 12px' });
         var tds = document.querySelectorAll('#rpProgressContent .rptd');
