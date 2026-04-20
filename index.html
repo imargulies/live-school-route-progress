@@ -1609,7 +1609,7 @@
         deleteRouteIdx = idx;
         var r = savedRoutes[idx];
         if (!r) return;
-        document.getElementById('rpModalMsg').textContent = 'Are you sure you want to delete the route "' + r.name + '"? This cannot be undone.';
+        document.getElementById('rpModalMsg').textContent = 'Delete the route "' + r.name + '"? You\u2019ll have a few seconds to undo after confirming.';
         forceStyle(document.getElementById('rpModal'), { 'display': 'flex' });
     }
 
@@ -1617,6 +1617,8 @@
         if (deleteRouteIdx === null) return;
         var r = savedRoutes[deleteRouteIdx];
         if (!r) return;
+        // Snapshot the route object so Undo can re-save it verbatim.
+        var snapshot = JSON.parse(JSON.stringify(r));
         try {
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
             if (!zone) throw new Error('Zone not found');
@@ -1627,13 +1629,29 @@
                 typeName: 'Zone',
                 entity: { id: zone.id, comment: updatedComment }
             });
-            showStatus('routeStatus', 'Route deleted.', 'success');
             await loadZones();
             await loadRoutes();
             populateFilters();
             renderProgress();
+            showUndoToast('Route "' + r.name + '" deleted.', function () {
+                // Re-save the snapshot into the zone's routes list.
+                (async function () {
+                    try {
+                        var z2 = cachedZones.find(function (z) { return z.id === snapshot.zoneId; });
+                        if (!z2) throw new Error('Zone not found');
+                        var parsed2 = parseRoutesFromComment(z2.comment);
+                        parsed2.routes.push(snapshot);
+                        var c2 = writeRoutesToComment(z2.comment, parsed2.routes);
+                        await apiCall('Set', { typeName: 'Zone', entity: { id: z2.id, comment: c2 } });
+                        await loadZones(); await loadRoutes(); populateFilters(); renderProgress();
+                        showStatus('routeStatus', 'Route restored.', 'success');
+                    } catch (err) {
+                        showErrorBanner('Could not restore route: ' + err.message);
+                    }
+                })();
+            });
         } catch (err) {
-            showStatus('routeStatus', 'Error deleting: ' + err.message, 'error');
+            showErrorBanner('Could not delete route: ' + err.message, { onRetry: function () { document.getElementById('rpModalConfirm').click(); } });
         }
         deleteRouteIdx = null;
         forceStyle(document.getElementById('rpModal'), { 'display': 'none' });
@@ -1985,7 +2003,7 @@
         var logsByDevice = {};
         try {
             logsByDevice = await fetchLogRecordsByDevice(allDeviceIds, logFromIso, logToIso);
-        } catch (logErr) { logsByDevice = {}; }
+        } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
 
         // Update each vehicle row inline
         var totalAssign = 0, completedCount = 0, missedCount = 0, notStartedCount = 0;
@@ -2210,7 +2228,7 @@
             var logsByDevice = {};
             try {
                 logsByDevice = await fetchLogRecordsByDevice(allDeviceIds, logFromIso, logToIso);
-            } catch (logErr) { logsByDevice = {}; }
+            } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
 
             // Sort routes by proximity to current time
             // Filter routes by active day
@@ -2721,7 +2739,7 @@
                     new Date(fromDate).toISOString(),
                     toDatePlusOne.toISOString()
                 );
-            } catch (logErr) { reportLogsByDevice = {}; }
+            } catch (logErr) { reportLogsByDevice = {}; showErrorBanner('Could not load GPS logs for the report: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
 
             reportData = [];
             var dateStart = new Date(fromDate);
@@ -4961,6 +4979,79 @@
         var bytes = new Uint8Array(binary.length);
         for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         return new TextDecoder().decode(bytes);
+    }
+
+    // ========== GLOBAL ERROR BANNER ==========
+    // Shows a dismissable, sticky top-of-app banner when something fails.
+    function showErrorBanner(msg, opts) {
+        opts = opts || {};
+        var id = 'rpErrorBanner';
+        var el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            document.body.appendChild(el);
+            forceStyle(el, {
+                'position': 'fixed', 'top': '12px', 'left': '50%', 'transform': 'translateX(-50%)',
+                'max-width': 'calc(100% - 24px)', 'width': '520px', 'z-index': '10001',
+                'background': '#f8d7da', 'color': '#721c24', 'border': '1px solid #f5c6cb',
+                'border-radius': '8px', 'padding': '10px 14px',
+                'display': 'flex', 'gap': '12px', 'align-items': 'center',
+                'box-shadow': '0 6px 20px rgba(0,0,0,0.15)',
+                'font-size': '13px', 'font-weight': '600'
+            });
+        }
+        var retryHtml = opts.onRetry ? '<span class="rpErrRetry" role="button" tabindex="0" style="color:#0078d4;cursor:pointer;font-weight:700;">Retry</span>' : '';
+        el.innerHTML = '<span style="flex:1;">\u26A0\uFE0F ' + escapeHtml(msg) + '</span>' +
+            retryHtml +
+            '<span class="rpErrClose" role="button" tabindex="0" aria-label="Dismiss" style="cursor:pointer;font-weight:700;opacity:0.7;">\u2715</span>';
+        el.style.display = 'flex';
+        var closeBtn = el.querySelector('.rpErrClose');
+        if (closeBtn) closeBtn.onclick = function () { el.style.display = 'none'; };
+        var retryBtn = el.querySelector('.rpErrRetry');
+        if (retryBtn && opts.onRetry) retryBtn.onclick = function () {
+            el.style.display = 'none';
+            try { opts.onRetry(); } catch (e) {}
+        };
+        if (opts.autoDismissMs) {
+            setTimeout(function () { if (el.parentNode) el.style.display = 'none'; }, opts.autoDismissMs);
+        }
+    }
+
+    // ========== UNDO TOAST ==========
+    // Shows a toast with an "Undo" action for a bounded time.
+    var _undoTimer = null;
+    function showUndoToast(msg, onUndo, ms) {
+        ms = ms || 5000;
+        var id = 'rpUndoToast';
+        var el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            document.body.appendChild(el);
+            forceStyle(el, {
+                'position': 'fixed', 'bottom': '24px', 'left': '50%', 'transform': 'translateX(-50%)',
+                'z-index': '10001', 'background': '#2d3436', 'color': '#fff',
+                'border-radius': '8px', 'padding': '10px 14px',
+                'display': 'flex', 'gap': '16px', 'align-items': 'center',
+                'box-shadow': '0 6px 20px rgba(0,0,0,0.25)',
+                'font-size': '13px', 'font-weight': '600'
+            });
+        }
+        el.innerHTML = '<span>' + escapeHtml(msg) + '</span>' +
+            '<span class="rpUndoBtn" role="button" tabindex="0" style="cursor:pointer;color:#74b9ff;font-weight:700;">Undo</span>' +
+            '<span class="rpUndoClose" role="button" tabindex="0" aria-label="Dismiss" style="cursor:pointer;opacity:0.7;">\u2715</span>';
+        el.style.display = 'flex';
+        clearTimeout(_undoTimer);
+        _undoTimer = setTimeout(function () { el.style.display = 'none'; onUndo = null; }, ms);
+        var undoBtn = el.querySelector('.rpUndoBtn');
+        if (undoBtn) undoBtn.onclick = function () {
+            if (onUndo) { try { onUndo(); } catch (e) {} }
+            el.style.display = 'none';
+            clearTimeout(_undoTimer);
+        };
+        var closeBtn = el.querySelector('.rpUndoClose');
+        if (closeBtn) closeBtn.onclick = function () { el.style.display = 'none'; clearTimeout(_undoTimer); };
     }
 
     function showStatus(id, msg, type) {
