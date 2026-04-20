@@ -4355,15 +4355,18 @@
         var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="max-width:100%;display:block;">';
         // Background
         svg += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fafbfc"/>';
-        // Scheduled window band
+        // Scheduled window band, labeled with its start and end times on the right edge.
         var schedTop = yFor(startMin), schedBot = yFor(endMin);
         svg += '<rect x="' + padL + '" y="' + schedTop + '" width="' + innerW + '" height="' + (schedBot - schedTop) + '" fill="rgba(0,120,212,0.10)" stroke="rgba(0,120,212,0.35)" stroke-width="1"/>';
-        // Target window band (if set)
+        svg += '<text x="' + (padL + 6) + '" y="' + (schedTop + 11) + '" font-size="10" fill="#0078d4" font-weight="700">Start ' + formatTime12(route.startTime) + '</text>';
+        svg += '<text x="' + (padL + 6) + '" y="' + (schedBot - 4) + '" font-size="10" fill="#0078d4" font-weight="700">End ' + formatTime12(route.endTime) + '</text>';
+        // Target window band (if set), labeled with its own start/end.
         if (routeHasTarget(route)) {
             var tb = routeTargetBounds(route);
             var tsMin = timeToMinutes(tb.start), teMin = timeToMinutes(tb.end);
             var tgTop = yFor(tsMin), tgBot = yFor(teMin);
             svg += '<rect x="' + padL + '" y="' + tgTop + '" width="' + innerW + '" height="' + Math.max(2, tgBot - tgTop) + '" fill="rgba(214,48,49,0.18)" stroke="rgba(214,48,49,0.55)" stroke-width="1"/>';
+            svg += '<text x="' + (W - padR - 6) + '" y="' + (tgTop - 2) + '" font-size="10" fill="#d63031" font-weight="700" text-anchor="end">Target ' + formatTime12(tb.start) + (tb.start !== tb.end ? ' \u2013 ' + formatTime12(tb.end) : '') + '</text>';
         }
         // Y-axis hour gridlines
         var firstHour = Math.ceil(yMin / 60) * 60;
@@ -4395,7 +4398,14 @@
             svg += '<path d="' + pathD + '" stroke="#0078d4" stroke-width="2" fill="none"/>';
         }
         for (var dp = 0; dp < pathPts.length; dp++) {
-            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="4" fill="#0078d4" stroke="#fff" stroke-width="1.5"/>';
+            var pDate = new Date(pathPts[dp].data.eventMs);
+            var pH = pDate.getHours() % 12 || 12;
+            var pM = ('0' + pDate.getMinutes()).slice(-2);
+            var pAp = pDate.getHours() >= 12 ? 'PM' : 'AM';
+            var tip = formatDateFriendly(pathPts[dp].data.dateStr) + ' \u2022 ' + pH + ':' + pM + ' ' + pAp;
+            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="4" fill="#0078d4" stroke="#fff" stroke-width="1.5">' +
+                '<title>' + tip + '</title>' +
+                '</circle>';
         }
         // Missed days (route ran, no event): red X near the bottom of the chart.
         // Inactive days (route doesn't run this weekday): grey dash in the same place.
