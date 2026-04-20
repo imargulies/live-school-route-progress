@@ -3937,6 +3937,58 @@
     var _sparklineRunId = 0;
     var _sparklineOpenUid = null;
     var _sparklineInFlightForUid = {};
+    // Progress state while computing — keyed by route uid so a cross-route compute can report per-route.
+    var _sparklineStage = {}; // uid -> { stage: 'fetchTrips'|'fetchLogs'|'compute', current?, total? }
+
+    function renderSparklineLoading(uid) {
+        if (_sparklineOpenUid !== uid) return;
+        var chart = document.getElementById('rpSparklineChart');
+        var list = document.getElementById('rpSparklineList');
+        if (!chart) return;
+        var s = _sparklineStage[uid];
+        var label = 'Loading…';
+        var pct = null;
+        if (s) {
+            if (s.stage === 'fetchTrips') label = 'Fetching trips…';
+            else if (s.stage === 'fetchLogs') label = 'Fetching GPS logs…';
+            else if (s.stage === 'compute') {
+                label = 'Computing day ' + s.current + ' of ' + s.total;
+                if (s.total) pct = Math.round((s.current / s.total) * 100);
+            }
+        }
+        chart.innerHTML = '<div class="rpSparkLoading">' +
+            '<div class="rpSpinner"></div>' +
+            '<div class="rpSparkLoadingText">' + label +
+                (pct !== null ? ' <span class="rpSparkLoadingPct">' + pct + '%</span>' : '') +
+            '</div>' +
+            '</div>';
+        forceStyle(chart.querySelector('.rpSparkLoading'), {
+            'display': 'flex', 'flex-direction': 'column', 'align-items': 'center',
+            'justify-content': 'center', 'gap': '12px', 'padding': '30px 16px'
+        });
+        forceStyle(chart.querySelector('.rpSparkLoadingText'), {
+            'font-size': '13px', 'color': '#555', 'font-weight': '600'
+        });
+        var pctEl = chart.querySelector('.rpSparkLoadingPct');
+        if (pctEl) forceStyle(pctEl, { 'color': '#0078d4', 'margin-left': '4px' });
+        if (list) list.innerHTML = '<div style="color:#aaa;text-align:center;font-size:12px;">Hang tight — this only takes a few seconds.</div>';
+        injectSparklineStyles();
+    }
+
+    var _sparklineStylesInjected = false;
+    function injectSparklineStyles() {
+        if (_sparklineStylesInjected) return;
+        _sparklineStylesInjected = true;
+        var s = document.createElement('style');
+        s.textContent =
+            '@keyframes rpSpin { to { transform: rotate(360deg); } }' +
+            '#rpSparklinePopup .rpSpinner{' +
+                'width:32px;height:32px;border-radius:50%;' +
+                'border:3px solid #eef2f6;border-top-color:#0078d4;' +
+                'animation:rpSpin 0.85s linear infinite;' +
+            '}';
+        document.head.appendChild(s);
+    }
 
     function sparklineSvg(values, width, height) {
         width = width || 280; height = height || 60;
@@ -4020,10 +4072,11 @@
         var name = route ? route.name : 'Route';
         var title = document.getElementById('rpSparklineTitle');
         title.textContent = 'On-time trend: ' + name;
-        var chart = document.getElementById('rpSparklineChart');
-        chart.innerHTML = vals.length ? sparklineSvg(vals, 380, 80) : '<div style="color:#aaa;padding:8px;">Loading...</div>';
         var list = document.getElementById('rpSparklineList');
+        popup.style.display = '';
         if (vals.length) {
+            var chart = document.getElementById('rpSparklineChart');
+            chart.innerHTML = sparklineSvg(vals, 380, 80);
             var listHtml = '<div style="margin-top:8px;font-size:12px;color:#555;">Last ' + vals.length + ' active day' + (vals.length === 1 ? '' : 's') + ' (inactive weekdays excluded)</div>' +
                 '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">';
             for (var i = vals.length - 1; i >= 0; i--) {
@@ -4038,7 +4091,8 @@
             listHtml += '</table>';
             list.innerHTML = listHtml;
         } else {
-            list.innerHTML = '<div style="color:#aaa;margin-top:8px;">No data yet. Computing…</div>';
+            // Loading state: spinner + progress.
+            renderSparklineLoading(routeUid);
             // Kick off a compute for just this route if we don't already have one in flight.
             if (route && !_sparklineInFlightForUid[routeUid]) {
                 _sparklineInFlightForUid[routeUid] = true;
@@ -4049,12 +4103,13 @@
                 }, function () {
                     _sparklineInFlightForUid[routeUid] = false;
                     if (_sparklineOpenUid === routeUid) {
-                        list.innerHTML = '<div style="color:#dc3545;margin-top:8px;">Could not load trend data.</div>';
+                        var chart = document.getElementById('rpSparklineChart');
+                        if (chart) chart.innerHTML = '<div style="color:#dc3545;padding:20px;text-align:center;">Could not load trend data.</div>';
+                        if (list) list.innerHTML = '';
                     }
                 });
             }
         }
-        popup.style.display = '';
     }
 
     function closeSparklinePopup() {
@@ -4101,11 +4156,24 @@
         var toDate = new Date(refDate); toDate.setDate(toDate.getDate() + 1); // exclusive end
         var fromIso = fromDate.toISOString();
         var toIso = toDate.toISOString();
+        // Progress: fetch trips
+        for (var spi = 0; spi < routes.length; spi++) {
+            _sparklineStage[routes[spi]._uid] = { stage: 'fetchTrips' };
+            if (_sparklineOpenUid === routes[spi]._uid) renderSparklineLoading(routes[spi]._uid);
+        }
+        // Yield so the loading UI paints before the fetch kicks off.
+        await new Promise(function (res) { setTimeout(res, 0); });
         var trips;
         try {
             trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } });
         } catch (e) { return; }
         if (runId !== _sparklineRunId) return;
+        // Progress: fetch logs
+        for (var spl = 0; spl < routes.length; spl++) {
+            _sparklineStage[routes[spl]._uid] = { stage: 'fetchLogs' };
+            if (_sparklineOpenUid === routes[spl]._uid) renderSparklineLoading(routes[spl]._uid);
+        }
+        await new Promise(function (res) { setTimeout(res, 0); });
         var deviceIds = collectRouteDeviceIds(routes, trips);
         var logsByDevice = {};
         try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
@@ -4119,6 +4187,8 @@
             var assignedIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
             var activeDates = lastActiveDaysForRoute(r, referenceDateStr, wantActive, lookback);
             var values = [];
+            _sparklineStage[r._uid] = { stage: 'compute', current: 0, total: activeDates.length };
+            if (_sparklineOpenUid === r._uid) renderSparklineLoading(r._uid);
             for (var d = 0; d < activeDates.length; d++) {
                 var dStr = activeDates[d];
                 var startMinR = timeToMinutes(r.startTime);
@@ -4176,8 +4246,15 @@
                 }
                 var rate = totalAssigned > 0 ? (onTime / totalAssigned) : null;
                 values.push({ dateStr: dStr, rate: rate });
+                _sparklineStage[r._uid] = { stage: 'compute', current: d + 1, total: activeDates.length };
+                if (_sparklineOpenUid === r._uid) {
+                    renderSparklineLoading(r._uid);
+                    // Yield so the loader can repaint with the new percentage.
+                    await new Promise(function (res) { setTimeout(res, 0); });
+                }
             }
             _sparklineCache[r._uid] = values;
+            delete _sparklineStage[r._uid];
             changedSet[r._uid] = true;
         }
         if (runId !== _sparklineRunId) return;
@@ -4415,22 +4492,25 @@
         var lookup = kind === 'vehicle' ? cachedDevices : cachedDrivers;
         var selected = kind === 'vehicle' ? _tlVehicles : _tlDrivers;
         q = (q || '').trim().toLowerCase();
-        if (!q) { dd.style.display = 'none'; return; }
+        // Build a sorted list of candidates (alphabetical by name). Empty query
+        // shows all unselected entries so clicking the box reveals the full list.
+        var ids = Object.keys(lookup).sort(function (a, b) {
+            return String(lookup[a]).localeCompare(String(lookup[b]));
+        });
         var html = '';
-        var ids = Object.keys(lookup);
         var count = 0;
-        for (var i = 0; i < ids.length && count < 20; i++) {
+        for (var i = 0; i < ids.length && count < 50; i++) {
             var id = ids[i];
             if (selected[id]) continue;
-            if (String(lookup[id]).toLowerCase().indexOf(q) === -1) continue;
+            if (q && String(lookup[id]).toLowerCase().indexOf(q) === -1) continue;
             html += '<div class="rpTlSearchItem" data-id="' + id + '" data-type="' + kind + '" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;">' + escapeHtml(lookup[id]) + '</div>';
             count++;
         }
-        if (!html) html = '<div style="padding:6px 10px;color:#888;">No matches.</div>';
+        if (!html) html = '<div style="padding:6px 10px;color:#888;">No ' + (kind === 'vehicle' ? 'vehicles' : 'drivers') + ' available.</div>';
         dd.innerHTML = html;
         forceStyle(dd, {
             'display': 'block', 'position': 'absolute', 'top': '100%', 'left': '0',
-            'width': '280px', 'max-height': '240px', 'overflow-y': 'auto',
+            'width': '280px', 'max-height': '280px', 'overflow-y': 'auto',
             'background': '#fff', 'border': '1px solid #ccc', 'border-radius': '0 0 4px 4px',
             'box-shadow': '0 4px 12px rgba(0,0,0,0.15)', 'z-index': '200'
         });
@@ -4577,7 +4657,8 @@
         var input = document.getElementById(searchId);
         var dd = document.getElementById(ddId);
         input.addEventListener('input', function () { tlRenderDropdown(kind, this.value); });
-        input.addEventListener('focus', function () { if (this.value) tlRenderDropdown(kind, this.value); });
+        input.addEventListener('focus', function () { tlRenderDropdown(kind, this.value); });
+        input.addEventListener('click', function () { tlRenderDropdown(kind, this.value); });
         dd.addEventListener('click', function (e) {
             var it = e.target.closest('.rpTlSearchItem');
             if (!it) return;
