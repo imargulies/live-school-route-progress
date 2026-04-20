@@ -139,7 +139,10 @@
         <div id="rpDesc2">View today's route status. See which buses have started their route, which are still out when they should have returned, and which are parked on time. Routes closest to the current time are shown first.</div>
         <div id="rpToolbar2">
             <span class="rpLbl">Date:</span>
-            <input type="date" id="rpProgressDate">
+            <span id="rpProgressDateWrap" style="position:relative;display:inline-block;">
+                <span id="rpProgressDateBtn" role="button" tabindex="0">02-Feb-2026 &#x25BE;</span>
+                <input type="date" id="rpProgressDate">
+            </span>
             <span id="rpProgressDateLabel"></span>
             <span class="rpLbl" style="margin-left:12px;">From:</span>
             <input type="time" id="rpProgressTimeFrom" value="00:00">
@@ -332,6 +335,9 @@
         // Responsive layout
         wireResponsive();
         applyResponsiveStyles();
+
+        // Custom date box styling
+        styleProgressDateBox();
     }
 
     var _rpFocusStylesInjected = false;
@@ -757,6 +763,26 @@
         } catch (err) {
             showStatus('routeStatus', 'Error initializing: ' + err.message, 'error');
         }
+    }
+
+    function styleProgressDateBox() {
+        var wrap = document.getElementById('rpProgressDateWrap');
+        var btn = document.getElementById('rpProgressDateBtn');
+        var input = document.getElementById('rpProgressDate');
+        if (!wrap || !btn || !input) return;
+        forceStyle(wrap, { 'position': 'relative', 'display': 'inline-block' });
+        forceStyle(btn, {
+            'display': 'inline-block', 'padding': '8px 12px',
+            'border': '1px solid #ccc', 'border-radius': '4px',
+            'background': '#fff', 'color': '#333', 'font-size': '13px',
+            'font-weight': '600', 'cursor': 'pointer', 'user-select': 'none',
+            'min-width': '140px', 'text-align': 'center'
+        });
+        // Hide the native input visually but keep it clickable/focusable over the button.
+        forceStyle(input, {
+            'position': 'absolute', 'inset': '0', 'width': '100%', 'height': '100%',
+            'opacity': '0', 'cursor': 'pointer', 'border': 'none', 'padding': '0', 'margin': '0'
+        });
     }
 
     function setDefaultDates() {
@@ -1729,18 +1755,32 @@
     function updateDateLabel() {
         var dateStr = document.getElementById('rpProgressDate').value;
         var label = document.getElementById('rpProgressDateLabel');
-        if (!dateStr) { label.textContent = ''; return; }
+        var btn = document.getElementById('rpProgressDateBtn');
+        if (!dateStr) { if (label) label.textContent = ''; if (btn) btn.innerHTML = 'Pick date &#x25BE;'; return; }
         var d = new Date(dateStr + 'T12:00:00');
+        var todayStr = formatDate(new Date());
+        var isToday = dateStr === todayStr;
         var dayName = DAY_FULL[d.getDay()];
-        var mon = MONTHS_FULL[d.getMonth()];
-        var day = d.getDate();
+        var monShort = MONTHS[d.getMonth()];
+        var dayNum = d.getDate();
         var year = d.getFullYear();
-        label.textContent = dayName + ', ' + mon + ' ' + day + ', ' + year;
-        forceStyle(label, { 'font-size': '14px', 'font-weight': '600', 'color': '#0078d4' });
+        // Date box: "02-Feb-2026" always. If today, the trailing label says "Today";
+        // otherwise it says "Friday, April 17, 2026" as before.
+        if (btn) btn.innerHTML = ('0' + dayNum).slice(-2) + '-' + monShort + '-' + year + ' &#x25BE;';
+        if (label) {
+            if (isToday) label.textContent = 'Today';
+            else label.textContent = dayName + ', ' + MONTHS_FULL[d.getMonth()] + ' ' + dayNum + ', ' + year;
+            forceStyle(label, { 'font-size': '14px', 'font-weight': '600', 'color': isToday ? '#28a745' : '#0078d4' });
+        }
     }
     document.getElementById('rpProgressDate').addEventListener('change', function () {
         updateDateLabel();
         renderProgress();
+    });
+    document.getElementById('rpProgressDateBtn').addEventListener('click', function () {
+        var input = document.getElementById('rpProgressDate');
+        if (input.showPicker) { try { input.showPicker(); return; } catch (e) {} }
+        input.focus();
     });
     document.getElementById('rpProgressTimeFrom').addEventListener('change', function () {
         setPref('timeFrom', this.value); renderProgress();
