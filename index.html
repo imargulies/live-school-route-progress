@@ -58,9 +58,11 @@
                     <input type="time" id="rpEndTime" value="17:00">
                 </div>
                 <div class="rpFormRow">
-                    <span class="rpLbl" title="Target time within the window (e.g. expected arrival or departure). Used to compute Early/Late variance on the Progress tab.">Target Time:</span>
-                    <input type="time" id="rpTargetTime" value="">
-                    <span style="font-size:12px;color:#888;">(must be within the start/end window)</span>
+                    <span class="rpLbl" title="Target arrival/departure window within the route. Used to compute Early/Late and On time on the Progress tab.">Target Window:</span>
+                    <input type="time" id="rpTargetTimeStart" value="">
+                    <span style="font-size:12px;color:#666;">to</span>
+                    <input type="time" id="rpTargetTimeEnd" value="">
+                    <span style="font-size:12px;color:#888;">(both must be within Start/End)</span>
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl" title="Within ±N minutes of the target counts as On time.">On-time Grace:</span>
@@ -1139,7 +1141,7 @@
                     (r.direction === 'inside' ? 'Should be at the zone' : 'Should have left the zone') + '">' +
                     (r.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location') + '</span></td>' +
                 '<td class="rptd">' + formatWindow(r.startTime, r.endTime) +
-                    (r.targetTime ? ' <span class="rpTargetInline" title="Target time">· target ' + formatTime12(r.targetTime) + '</span>' : '') +
+                    (routeHasTarget(r) ? ' <span class="rpTargetInline" title="Target window">· target ' + formatTargetRange(r) + '</span>' : '') +
                     '</td>' +
                 '<td class="rptd">' + daysText + '</td>' +
                 '<td class="rptd">' + assignLabel + '</td>' +
@@ -1204,7 +1206,8 @@
         var zoneName = zoneObj ? zoneObj.name : '';
         var startTime = document.getElementById('rpStartTime').value;
         var endTime = document.getElementById('rpEndTime').value;
-        var targetTime = document.getElementById('rpTargetTime').value;
+        var targetTimeStart = document.getElementById('rpTargetTimeStart').value;
+        var targetTimeEnd = document.getElementById('rpTargetTimeEnd').value;
         var graceMinRaw = parseInt(document.getElementById('rpGraceMin').value, 10);
         var graceMin = isNaN(graceMinRaw) ? 0 : Math.max(0, Math.min(120, graceMinRaw));
         var vehicleIds = Object.keys(selectedVehicles);
@@ -1213,12 +1216,22 @@
         if (!name) { showStatus('routeStatus', 'Please enter a route name.', 'error'); return; }
         if (!zoneId) { showStatus('routeStatus', 'Please select a zone.', 'error'); return; }
         if (!startTime || !endTime) { showStatus('routeStatus', 'Please set start and end times.', 'error'); return; }
-        if (targetTime) {
-            var tMin = timeToMinutes(targetTime);
+        // Target window: either both empty or both set; both within Start/End; Start <= End.
+        if ((targetTimeStart && !targetTimeEnd) || (!targetTimeStart && targetTimeEnd)) {
+            showStatus('routeStatus', 'Please fill in both Target Window times, or leave both blank.', 'error');
+            return;
+        }
+        if (targetTimeStart && targetTimeEnd) {
             var sMin = timeToMinutes(startTime);
             var eMin = timeToMinutes(endTime);
-            if (tMin < sMin || tMin > eMin) {
-                showStatus('routeStatus', 'Target time must be within the route start and end times.', 'error');
+            var tsMin = timeToMinutes(targetTimeStart);
+            var teMin = timeToMinutes(targetTimeEnd);
+            if (tsMin < sMin || tsMin > eMin || teMin < sMin || teMin > eMin) {
+                showStatus('routeStatus', 'Target Window must be within the route Start and End times.', 'error');
+                return;
+            }
+            if (tsMin > teMin) {
+                showStatus('routeStatus', 'Target Window start must be at or before the end.', 'error');
                 return;
             }
         }
@@ -1237,7 +1250,8 @@
             name: name, direction: selectedDirection,
             trackBy: selectedTrackBy,
             startTime: startTime, endTime: endTime,
-            targetTime: targetTime || '',
+            targetTimeStart: targetTimeStart || '',
+            targetTimeEnd: targetTimeEnd || '',
             graceMin: graceMin,
             vehicleIds: selectedTrackBy === 'vehicle' ? vehicleIds : [],
             driverIds: selectedTrackBy === 'driver' ? driverIds : [],
@@ -1311,7 +1325,9 @@
 
         document.getElementById('rpStartTime').value = r.startTime;
         document.getElementById('rpEndTime').value = r.endTime;
-        document.getElementById('rpTargetTime').value = r.targetTime || '';
+        // Backward compat: older routes stored a single targetTime; treat as a zero-length window.
+        document.getElementById('rpTargetTimeStart').value = r.targetTimeStart || r.targetTime || '';
+        document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || r.targetTime || '';
         document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
         syncTargetTimeBounds();
         selectedDirection = r.direction || 'inside';
@@ -1370,7 +1386,8 @@
 
         document.getElementById('rpStartTime').value = '08:00';
         document.getElementById('rpEndTime').value = '17:00';
-        document.getElementById('rpTargetTime').value = '';
+        document.getElementById('rpTargetTimeStart').value = '';
+        document.getElementById('rpTargetTimeEnd').value = '';
         document.getElementById('rpGraceMin').value = 0;
         syncTargetTimeBounds();
         selectedDirection = 'inside';
@@ -1766,7 +1783,7 @@
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
-                var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, r.targetTime, r.graceMin);
+                var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
             }
             liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, direction: r.direction };
@@ -1925,8 +1942,8 @@
                 }
 
                 var isActiveRoute = isToday && currentMinutes >= startMin && currentMinutes <= endMin;
-                var targetBadge = r.targetTime
-                    ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' time">Target: ' + formatTime12(r.targetTime) + '</span>'
+                var targetBadge = routeHasTarget(r)
+                    ? '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' window">Target: ' + formatTargetRange(r) + '</span>'
                     : '';
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 var sparklineHolder = '<span class="rpSparkline" data-route-uid="' + r._uid + '" title="14-day on-time trend"><span class="rpSparklineLoading">14d …</span></span>';
@@ -1957,9 +1974,9 @@
                 var eventColTip = r.direction === 'outside'
                     ? 'When the vehicle left the zone (relative to now)'
                     : 'When the vehicle first entered the zone (relative to now)';
-                var targetColTip = r.targetTime
-                    ? 'Minutes early or late vs target ' + formatTime12(r.targetTime)
-                    : 'No target time set for this route';
+                var targetColTip = routeHasTarget(r)
+                    ? 'Minutes early or late vs target window ' + formatTargetRange(r)
+                    : 'No target window set for this route';
                 // Standardize: every route card uses the same 7 columns at the same widths,
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
@@ -2092,7 +2109,7 @@
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
                         var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
 
-                        var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, r.targetTime, r.graceMin);
+                        var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '">' +
@@ -2425,11 +2442,8 @@
                         else status = 'Missed';
 
                         var eventMsR = r.direction === 'outside' ? presenceR.departedAtMs : presenceR.arrivedAtMs;
-                        var varianceMin = null;
-                        if (r.targetTime && eventMsR) {
-                            var targetMsR = new Date(dayStr + 'T00:00:00').getTime() + timeToMinutes(r.targetTime) * 60000;
-                            varianceMin = Math.round((eventMsR - targetMsR) / 60000);
-                        }
+                        var varianceMin = computeTargetVarianceMin(eventMsR, r, dayStr);
+                        var tb = routeTargetBounds(r);
                         reportData.push({
                             routeName: r.name, routeId: r._uid,
                             vehicleId: vehicleId, vehicleName: vehicleName,
@@ -2437,7 +2451,9 @@
                             date: dayStr, zoneName: r.zoneName || '',
                             direction: r.direction === 'inside' ? 'Arrived' : 'Departed',
                             window: formatWindow(r.startTime, r.endTime),
-                            targetTime: r.targetTime || '',
+                            targetTimeStart: tb.start || '',
+                            targetTimeEnd: tb.end || '',
+                            targetRange: formatTargetRange(r),
                             graceMin: r.graceMin || 0,
                             varianceMin: varianceMin,
                             durationMin: zoneMinutes, status: status
@@ -2486,9 +2502,10 @@
         for (var i = 0; i < filtered.length; i++) {
             var r = filtered[i];
             var stClass = r.status === 'Completed' ? 'rpStCompleted' : (r.status === 'Incomplete' ? 'rpStProgress' : 'rpStMissed');
-            var targetCell = r.targetTime ? formatTime12(r.targetTime) : '<span style="color:#aaa">-</span>';
+            var hasTarget = !!(r.targetTimeStart && r.targetTimeEnd);
+            var targetCell = hasTarget ? (r.targetRange || (formatTime12(r.targetTimeStart) + ' – ' + formatTime12(r.targetTimeEnd))) : '<span style="color:#aaa">-</span>';
             var varianceCellHtml;
-            if (!r.targetTime) varianceCellHtml = '<span style="color:#aaa">-</span>';
+            if (!hasTarget) varianceCellHtml = '<span style="color:#aaa">-</span>';
             else if (r.varianceMin === null || r.varianceMin === undefined) varianceCellHtml = '<span style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
             else if (Math.abs(r.varianceMin) <= (r.graceMin || 0)) {
                 var vSuffix = r.varianceMin === 0 ? '' : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (r.varianceMin > 0 ? '+' : '') + r.varianceMin + 'm)</span>';
@@ -2614,9 +2631,10 @@
             if (r.status === 'Completed') style = 2;
             else if (r.status === 'Incomplete') style = 3;
             else if (r.status === 'Missed') style = 4;
-            var targetCol = r.targetTime ? formatTime12(r.targetTime) : '';
+            var xHasTarget = !!(r.targetTimeStart && r.targetTimeEnd);
+            var targetCol = xHasTarget ? (r.targetRange || (formatTime12(r.targetTimeStart) + ' - ' + formatTime12(r.targetTimeEnd))) : '';
             var varianceCol;
-            if (!r.targetTime) varianceCol = '';
+            if (!xHasTarget) varianceCol = '';
             else if (r.varianceMin === null || r.varianceMin === undefined) varianceCol = 'No-show';
             else varianceCol = r.varianceMin;
             var cells = [r.routeName, r.vehicleName, r.driverName || '', r.date, r.zoneName, r.direction, r.window, targetCol, varianceCol, r.durationMin, r.status];
@@ -2819,16 +2837,20 @@
     function syncTargetTimeBounds() {
         var s = document.getElementById('rpStartTime');
         var e = document.getElementById('rpEndTime');
-        var t = document.getElementById('rpTargetTime');
-        if (!s || !e || !t) return;
-        if (s.value) t.min = s.value; else t.removeAttribute('min');
-        if (e.value) t.max = e.value; else t.removeAttribute('max');
-        if (t.value) {
-            var tMin = timeToMinutes(t.value);
-            var sMin = timeToMinutes(s.value);
-            var eMin = timeToMinutes(e.value);
-            if (tMin < sMin || tMin > eMin) t.value = '';
-        }
+        var ts = document.getElementById('rpTargetTimeStart');
+        var te = document.getElementById('rpTargetTimeEnd');
+        if (!s || !e || !ts || !te) return;
+        var sVal = s.value, eVal = e.value;
+        // Bound both inputs to the route window.
+        if (sVal) { ts.min = sVal; te.min = sVal; } else { ts.removeAttribute('min'); te.removeAttribute('min'); }
+        if (eVal) { ts.max = eVal; te.max = eVal; } else { ts.removeAttribute('max'); te.removeAttribute('max'); }
+        // Drop values that fall outside the route window.
+        var sMin = timeToMinutes(sVal), eMin = timeToMinutes(eVal);
+        if (ts.value) { var tsMin = timeToMinutes(ts.value); if (tsMin < sMin || tsMin > eMin) ts.value = ''; }
+        if (te.value) { var teMin = timeToMinutes(te.value); if (teMin < sMin || teMin > eMin) te.value = ''; }
+        // Further constrain targetEnd to be >= targetStart.
+        if (ts.value) te.min = ts.value;
+        if (te.value) ts.max = te.value;
     }
 
     function pointInPolygon(lat, lng, pts) {
@@ -3194,10 +3216,11 @@
         var startMin = timeToMinutes(route.startTime);
         var endMin = timeToMinutes(route.endTime);
         var windowLen = Math.max(0, endMin - startMin);
-        var targetPct = null;
-        if (route.targetTime) {
-            var tMin = timeToMinutes(route.targetTime);
-            if (windowLen > 0) targetPct = Math.max(0, Math.min(100, ((tMin - startMin) / windowLen) * 100));
+        var tb = routeTargetBounds(route);
+        var targetStartPct = null, targetEndPct = null;
+        if (tb.start && tb.end && windowLen > 0) {
+            targetStartPct = Math.max(0, Math.min(100, ((timeToMinutes(tb.start) - startMin) / windowLen) * 100));
+            targetEndPct = Math.max(0, Math.min(100, ((timeToMinutes(tb.end) - startMin) / windowLen) * 100));
         }
         var dayStartMs = new Date(dateStr + 'T00:00:00').getTime();
         var windowFromMs = dayStartMs + startMin * 60000;
@@ -3208,22 +3231,24 @@
             else if (nowMs > windowFromMs) elapsedPct = ((nowMs - windowFromMs) / (windowToMs - windowFromMs)) * 100;
         }
         var elapsedRounded = Math.round(elapsedPct);
-        var targetMarker = targetPct !== null
-            ? '<div class="rpEtaBarTarget" style="left:' + targetPct + '%" title="Target: ' + formatTime12(route.targetTime) + '"></div>'
-            : '';
+        // Render a shaded band for the target window (zero-length -> single tick).
+        var targetMarker = '';
+        if (targetStartPct !== null) {
+            var width = Math.max(0.5, targetEndPct - targetStartPct);
+            targetMarker = '<div class="rpEtaBarTarget" style="left:' + targetStartPct + '%;width:' + width + '%" title="Target window: ' + formatTargetRange(route) + '"></div>';
+        }
         var rightLabel = nowMs >= windowToMs
             ? 'Window ended'
             : (nowMs < windowFromMs ? 'Not started' : elapsedRounded + '% elapsed');
         return '<div class="rpEtaBarWrap" data-route-uid="' + route._uid + '" ' +
-                'data-start-ms="' + windowFromMs + '" data-end-ms="' + windowToMs + '" ' +
-                'data-target-pct="' + (targetPct === null ? '' : targetPct) + '">' +
+                'data-start-ms="' + windowFromMs + '" data-end-ms="' + windowToMs + '">' +
                 '<div class="rpEtaBarTrack">' +
                     '<div class="rpEtaBarFill" style="width:' + elapsedPct + '%"></div>' +
                     targetMarker +
                 '</div>' +
                 '<div class="rpEtaBarLabels">' +
                     '<span>' + formatTime12(route.startTime) + '</span>' +
-                    (route.targetTime ? '<span class="rpEtaBarTargetLabel">Target ' + formatTime12(route.targetTime) + '</span>' : '<span></span>') +
+                    (routeHasTarget(route) ? '<span class="rpEtaBarTargetLabel">Target ' + formatTargetRange(route) + '</span>' : '<span></span>') +
                     '<span>' + formatTime12(route.endTime) + '</span>' +
                 '</div>' +
                 '<div class="rpEtaBarStatus">' + rightLabel + '</div>' +
@@ -3274,9 +3299,12 @@
         // Target marker: overflow isn't hidden for markers; re-wrap via absolute positioning on wrap
         var targets = document.querySelectorAll('.rpEtaBarTarget');
         for (var i = 0; i < targets.length; i++) {
+            // Shaded band spanning the target window inside the track.
             forceStyle(targets[i], {
-                'position': 'absolute', 'top': '-4px', 'bottom': '-4px', 'width': '2px',
-                'background': '#d63031', 'transform': 'translateX(-1px)', 'z-index': '2'
+                'position': 'absolute', 'top': '-2px', 'bottom': '-2px',
+                'background': 'rgba(214, 48, 49, 0.22)',
+                'border-left': '2px solid #d63031', 'border-right': '2px solid #d63031',
+                'box-sizing': 'border-box', 'z-index': '2'
             });
         }
         var lbls = document.querySelectorAll('.rpEtaBarLabels');
@@ -3517,12 +3545,15 @@
                     var passed = (r.direction === 'inside' && (presence.everInZone || presence.isCurrentlyInZone)) ||
                                  (r.direction === 'outside' && !presence.isCurrentlyInZone && presence.hasData);
                     var good;
-                    if (r.targetTime) {
+                    if (routeHasTarget(r)) {
                         if (!evMs) { good = false; }
                         else {
-                            var targetMs = new Date(dStr + 'T00:00:00').getTime() + timeToMinutes(r.targetTime) * 60000;
-                            var diff = Math.abs((evMs - targetMs) / 60000);
-                            good = diff <= ((r.graceMin || 0));
+                            var sparkBounds = routeTargetBounds(r);
+                            var dayMs = new Date(dStr + 'T00:00:00').getTime();
+                            var tStartMs = dayMs + timeToMinutes(sparkBounds.start) * 60000;
+                            var tEndMs = dayMs + timeToMinutes(sparkBounds.end) * 60000;
+                            var graceMs = Math.max(0, parseInt(r.graceMin, 10) || 0) * 60000;
+                            good = evMs >= tStartMs - graceMs && evMs <= tEndMs + graceMs;
                         }
                     } else {
                         good = passed;
@@ -3571,32 +3602,77 @@
             completed + '/' + total + ' ' + verb + '</span>';
     }
 
-    // Variance vs target. Returns HTML for the "vs Target" cell.
+    // Read target window from a route with backward compat for single targetTime.
+    // Returns { start, end } as HH:MM strings, or nulls if not set.
+    function routeTargetBounds(route) {
+        if (!route) return { start: null, end: null };
+        var s = route.targetTimeStart || route.targetTime || '';
+        var e = route.targetTimeEnd || route.targetTime || '';
+        return { start: s || null, end: e || null };
+    }
+    function routeHasTarget(route) {
+        var b = routeTargetBounds(route);
+        return !!(b.start && b.end);
+    }
+    // "2:45 PM – 3:15 PM" (or "2:45 PM" if zero-length).
+    function formatTargetRange(route) {
+        var b = routeTargetBounds(route);
+        if (!b.start || !b.end) return '';
+        if (b.start === b.end) return formatTime12(b.start);
+        return formatTime12(b.start) + ' – ' + formatTime12(b.end);
+    }
+
+    // Signed variance in minutes vs target window (0 if inside window).
+    // Positive = after window end (late), negative = before window start (early), null if no event/target.
+    function computeTargetVarianceMin(eventMs, route, dateStr) {
+        if (!eventMs || !routeHasTarget(route)) return null;
+        var b = routeTargetBounds(route);
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var startMs = dayMs + timeToMinutes(b.start) * 60000;
+        var endMs = dayMs + timeToMinutes(b.end) * 60000;
+        if (eventMs < startMs) return Math.round((eventMs - startMs) / 60000); // negative
+        if (eventMs > endMs) return Math.round((eventMs - endMs) / 60000);     // positive
+        return 0;
+    }
+
+    // Variance vs target window. Returns HTML for the "vs Target" cell.
     //   eventMs:   timestamp of arrival (inside) or departure (outside), or null
-    //   route:     route object (reads targetTime, direction)
+    //   route:     route object (reads targetTimeStart/End or legacy targetTime, direction, graceMin)
     //   dateStr:   YYYY-MM-DD of the route's occurrence
     //   nowMs:     current time, for live "Late Xm" ticking before window end
     //   windowEnded: true if the route's window is over (past the end time)
     function formatTargetVariance(eventMs, route, dateStr, nowMs, windowEnded) {
-        if (!route || !route.targetTime) {
+        if (!route || !routeHasTarget(route)) {
             return '<span style="color:#aaa">No target</span>';
         }
-        var targetMs = new Date(dateStr + 'T00:00:00').getTime() + timeToMinutes(route.targetTime) * 60000;
+        var b = routeTargetBounds(route);
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var targetStartMs = dayMs + timeToMinutes(b.start) * 60000;
+        var targetEndMs = dayMs + timeToMinutes(b.end) * 60000;
+        var grace = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
         if (eventMs) {
-            var diffMin = Math.round((eventMs - targetMs) / 60000);
-            var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
-            if (Math.abs(diffMin) <= grace) {
-                var suffix = diffMin === 0 ? '' : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (diffMin > 0 ? '+' : '') + diffMin + 'm)</span>';
+            if (eventMs >= targetStartMs - grace && eventMs <= targetEndMs + grace) {
+                // Inside the tolerant window; show a subtle offset from nearest edge.
+                var offsetMin = 0;
+                if (eventMs < targetStartMs) offsetMin = Math.round((eventMs - targetStartMs) / 60000);
+                else if (eventMs > targetEndMs) offsetMin = Math.round((eventMs - targetEndMs) / 60000);
+                var suffix = offsetMin === 0
+                    ? ''
+                    : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (offsetMin > 0 ? '+' : '') + offsetMin + 'm)</span>';
                 return '<span style="color:#28a745;font-weight:600;">On time</span>' + suffix;
             }
-            if (diffMin > 0) return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(diffMin) + '</span>';
-            return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-diffMin) + '</span>';
+            if (eventMs > targetEndMs) {
+                var lateMin = Math.round((eventMs - targetEndMs) / 60000);
+                return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>';
+            }
+            var earlyMin = Math.round((targetStartMs - eventMs) / 60000);
+            return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(earlyMin) + '</span>';
         }
         if (windowEnded) {
             return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
         }
-        if (nowMs && nowMs > targetMs) {
-            var overdueMin = Math.round((nowMs - targetMs) / 60000);
+        if (nowMs && nowMs > targetEndMs + grace) {
+            var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
             var verb = route.direction === 'outside' ? 'no departure yet' : 'no arrival yet';
             return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ')</span></span>';
         }
