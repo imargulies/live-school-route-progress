@@ -1573,7 +1573,7 @@
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
                 }
                 if (varianceCell) {
-                    varianceCell.innerHTML = formatTargetVariance(eventMs, r.targetTime, dateStr);
+                    varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
                 }
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
@@ -1884,7 +1884,7 @@
 
                         var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
-                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r.targetTime, dateStr) + '</td>';
+                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
 
                         vehRows.push({
                             sortOrder: sortOrder,
@@ -2258,7 +2258,7 @@
             var targetCell = r.targetTime ? formatTime12(r.targetTime) : '<span style="color:#aaa">-</span>';
             var varianceCellHtml;
             if (!r.targetTime) varianceCellHtml = '<span style="color:#aaa">-</span>';
-            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCellHtml = '<span style="color:#aaa">No data</span>';
+            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCellHtml = '<span style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
             else if (r.varianceMin === 0) varianceCellHtml = '<span style="color:#28a745;font-weight:600;">On time</span>';
             else if (r.varianceMin > 0) varianceCellHtml = '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(r.varianceMin) + '</span>';
             else varianceCellHtml = '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-r.varianceMin) + '</span>';
@@ -2383,7 +2383,7 @@
             var targetCol = r.targetTime ? formatTime12(r.targetTime) : '';
             var varianceCol;
             if (!r.targetTime) varianceCol = '';
-            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCol = '';
+            else if (r.varianceMin === null || r.varianceMin === undefined) varianceCol = 'No-show';
             else varianceCol = r.varianceMin;
             var cells = [r.routeName, r.vehicleName, r.driverName || '', r.date, r.zoneName, r.direction, r.window, targetCol, varianceCol, r.durationMin, r.status];
             for (var c = 0; c < cells.length; c++) ssIdx(String(cells[c]));
@@ -3099,25 +3099,32 @@
             completed + '/' + total + ' ' + verb + '</span>';
     }
 
-    // Compute variance vs target time for a given event timestamp.
-    // Returns { html, sortKey } where html is the cell content and sortKey
-    // sorts by absolute lateness (most late first, then early, then on time).
-    function formatTargetVariance(eventMs, targetTimeStr, dateStr) {
-        if (!targetTimeStr) {
+    // Variance vs target. Returns HTML for the "vs Target" cell.
+    //   eventMs:   timestamp of arrival (inside) or departure (outside), or null
+    //   route:     route object (reads targetTime, direction)
+    //   dateStr:   YYYY-MM-DD of the route's occurrence
+    //   nowMs:     current time, for live "Late Xm" ticking before window end
+    //   windowEnded: true if the route's window is over (past the end time)
+    function formatTargetVariance(eventMs, route, dateStr, nowMs, windowEnded) {
+        if (!route || !route.targetTime) {
             return '<span style="color:#aaa">No target</span>';
         }
-        if (!eventMs) {
-            return '<span style="color:#aaa">-</span>';
+        var targetMs = new Date(dateStr + 'T00:00:00').getTime() + timeToMinutes(route.targetTime) * 60000;
+        if (eventMs) {
+            var diffMin = Math.round((eventMs - targetMs) / 60000);
+            if (diffMin === 0) return '<span style="color:#28a745;font-weight:600;">On time</span>';
+            if (diffMin > 0) return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(diffMin) + '</span>';
+            return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-diffMin) + '</span>';
         }
-        var targetMs = new Date(dateStr + 'T00:00:00').getTime() + timeToMinutes(targetTimeStr) * 60000;
-        var diffMin = Math.round((eventMs - targetMs) / 60000);
-        if (diffMin === 0) {
-            return '<span style="color:#28a745;font-weight:600;">On time</span>';
+        if (windowEnded) {
+            return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
         }
-        if (diffMin > 0) {
-            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(diffMin) + '</span>';
+        if (nowMs && nowMs > targetMs) {
+            var overdueMin = Math.round((nowMs - targetMs) / 60000);
+            var verb = route.direction === 'outside' ? 'no departure yet' : 'no arrival yet';
+            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ')</span></span>';
         }
-        return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-diffMin) + '</span>';
+        return '<span style="color:#aaa">Pending</span>';
     }
 
     // Unicode-safe base64 encode/decode
