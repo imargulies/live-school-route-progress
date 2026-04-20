@@ -2419,7 +2419,11 @@
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '">' +
-                                '<td class="rptd">' + escapeHtml(aName) + '</td>' +
+                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span> ' +
+                                    '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
+                                        'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
+                                        'data-entity-type="' + (isDriverRoute ? 'driver' : 'vehicle') + '">&#x1F4C8;</span>' +
+                                '</td>' +
                                 curVehCol +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
@@ -4163,6 +4167,292 @@
         var uid = btn.dataset.routeUid;
         if (uid) openSparklinePopup(uid);
     });
+
+    // ========== PER-ROW HISTORICAL TIMELINE POPUP ==========
+    // Shows, for one (entity, route) pair, the actual arrival/departure times over the
+    // last 14 active days against the scheduled and target windows.
+    var _rowTlRunId = 0;
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('.rpRowTlBtn');
+        if (!btn) return;
+        openRowTimelinePopup(btn.dataset.routeUid, btn.dataset.assignedId, btn.dataset.entityType);
+    });
+
+    function ensureRowTlPopup() {
+        var p = document.getElementById('rpRowTlPopup');
+        if (p) return p;
+        p = document.createElement('div');
+        p.id = 'rpRowTlPopup';
+        p.innerHTML =
+            '<div id="rpRowTlBackdrop"></div>' +
+            '<div id="rpRowTlBox" role="dialog" aria-modal="true">' +
+                '<div id="rpRowTlHead">' +
+                    '<span id="rpRowTlTitle"></span>' +
+                    '<span id="rpRowTlClose" role="button" tabindex="0" aria-label="Close">&#x2715;</span>' +
+                '</div>' +
+                '<div id="rpRowTlChart"></div>' +
+                '<div id="rpRowTlLegend"></div>' +
+                '<div id="rpRowTlList"></div>' +
+            '</div>';
+        document.body.appendChild(p);
+        forceStyle(p, { 'position': 'fixed', 'inset': '0', 'z-index': '9999', 'display': 'none' });
+        forceStyle(document.getElementById('rpRowTlBackdrop'), {
+            'position': 'absolute', 'inset': '0', 'background': 'rgba(0,0,0,0.4)'
+        });
+        forceStyle(document.getElementById('rpRowTlBox'), {
+            'position': 'relative', 'max-width': '560px', 'margin': '50px auto',
+            'background': '#fff', 'border-radius': '10px', 'box-shadow': '0 10px 40px rgba(0,0,0,0.25)',
+            'padding': '18px 20px', 'font-family': 'inherit'
+        });
+        forceStyle(document.getElementById('rpRowTlHead'), {
+            'display': 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '10px'
+        });
+        forceStyle(document.getElementById('rpRowTlTitle'), { 'font-weight': '700', 'font-size': '15px' });
+        forceStyle(document.getElementById('rpRowTlClose'), {
+            'cursor': 'pointer', 'font-size': '18px', 'color': '#888', 'padding': '4px 8px', 'border-radius': '4px'
+        });
+        document.getElementById('rpRowTlClose').addEventListener('click', closeRowTlPopup);
+        document.getElementById('rpRowTlBackdrop').addEventListener('click', closeRowTlPopup);
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape' && p.style.display !== 'none') closeRowTlPopup();
+        });
+        return p;
+    }
+
+    function closeRowTlPopup() {
+        var p = document.getElementById('rpRowTlPopup');
+        if (p) p.style.display = 'none';
+    }
+
+    function openRowTimelinePopup(routeUid, assignedId, entityType) {
+        var route = findRouteByUid(routeUid);
+        if (!route) return;
+        var lookup = entityType === 'driver' ? cachedDrivers : cachedDevices;
+        var name = lookup[assignedId] || assignedId;
+        var popup = ensureRowTlPopup();
+        popup.style.display = '';
+        document.getElementById('rpRowTlTitle').textContent =
+            (entityType === 'driver' ? 'Driver' : 'Vehicle') + ': ' + name + ' \u2014 ' + route.name;
+        var chart = document.getElementById('rpRowTlChart');
+        var list = document.getElementById('rpRowTlList');
+        var legend = document.getElementById('rpRowTlLegend');
+        chart.innerHTML = '<div style="padding:30px;text-align:center;">' +
+            '<div class="rpSpinner" style="margin:0 auto 10px;"></div>' +
+            '<div style="color:#555;font-size:13px;">Loading historical times…</div></div>';
+        legend.innerHTML = '';
+        list.innerHTML = '';
+        injectSparklineStyles();
+
+        var runId = ++_rowTlRunId;
+        var dateStr = document.getElementById('rpProgressDate').value || formatDate(new Date());
+        computeRowTimelineData(route, assignedId, entityType, dateStr).then(function (data) {
+            if (runId !== _rowTlRunId) return;
+            renderRowTimelineChart(route, data);
+        }, function () {
+            if (runId !== _rowTlRunId) return;
+            chart.innerHTML = '<div style="color:#dc3545;padding:20px;text-align:center;">Could not load historical data.</div>';
+        });
+    }
+
+    async function computeRowTimelineData(route, assignedId, entityType, referenceDateStr) {
+        // Reuse the same 14-active-day window as the sparkline.
+        var dates = lastActiveDaysForRoute(route, referenceDateStr, 14, 28);
+        if (!dates.length) return [];
+        var earliest = dates[0];
+        var fromDate = new Date(earliest + 'T00:00:00');
+        var refDate = new Date(referenceDateStr + 'T00:00:00');
+        var toDate = new Date(refDate); toDate.setDate(toDate.getDate() + 1);
+        var fromIso = fromDate.toISOString(), toIso = toDate.toISOString();
+        var trips = [];
+        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } }); }
+        catch (e) { throw e; }
+        var deviceIds = collectRouteDeviceIds([route], trips);
+        var logsByDevice = {};
+        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        var zone = cachedZones.find(function (z) { return z.id === route.zoneId; });
+        var isDriver = entityType === 'driver' || route.trackBy === 'driver';
+        var out = [];
+        for (var d = 0; d < dates.length; d++) {
+            var dStr = dates[d];
+            var sM = timeToMinutes(route.startTime);
+            var eM = timeToMinutes(route.endTime);
+            var wFromMs = new Date(dStr + 'T00:00:00').getTime() + sM * 60000;
+            var wToMs = new Date(dStr + 'T00:00:00').getTime() + eM * 60000;
+            var todayStr = formatDate(new Date());
+            var nowMs = Date.now();
+            if (dStr === todayStr) wToMs = Math.min(wToMs, nowMs);
+            var dayDevIds;
+            if (isDriver) {
+                var set = {};
+                for (var ti = 0; ti < trips.length; ti++) {
+                    var tr = trips[ti];
+                    if (!tr.driver || tr.driver.id !== assignedId) continue;
+                    if (!tr.device || !tr.device.id) continue;
+                    var s = tr.stop ? new Date(tr.stop) : null;
+                    if (!s || formatDate(s) !== dStr) continue;
+                    set[tr.device.id] = true;
+                }
+                dayDevIds = Object.keys(set);
+            } else {
+                dayDevIds = [assignedId];
+            }
+            var effLogs = isDriver
+                ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, assignedId))
+                : logsByDevice;
+            var merged = mergeDeviceLogs(effLogs, dayDevIds);
+            var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
+            augmentPresenceWithTrips(presence, trips, isDriver ? assignedId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
+            var evMs = route.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+            out.push({ dateStr: dStr, eventMs: evMs });
+        }
+        return out;
+    }
+
+    function renderRowTimelineChart(route, data) {
+        var chart = document.getElementById('rpRowTlChart');
+        var legend = document.getElementById('rpRowTlLegend');
+        var list = document.getElementById('rpRowTlList');
+        if (!data || !data.length) {
+            chart.innerHTML = '<div style="color:#888;padding:20px;text-align:center;">No historical data in the last 14 active days.</div>';
+            return;
+        }
+        // Y-axis range: route window expanded by 30 min on each side, or hug the actual
+        // event times if they stray outside.
+        var startMin = timeToMinutes(route.startTime);
+        var endMin = timeToMinutes(route.endTime);
+        var yMin = startMin - 30, yMax = endMin + 30;
+        for (var i = 0; i < data.length; i++) {
+            if (!data[i].eventMs) continue;
+            var ed = new Date(data[i].eventMs);
+            var m = ed.getHours() * 60 + ed.getMinutes();
+            if (m < yMin) yMin = m - 10;
+            if (m > yMax) yMax = m + 10;
+        }
+        yMin = Math.max(0, yMin);
+        yMax = Math.min(24 * 60, yMax);
+        var span = Math.max(60, yMax - yMin);
+
+        var W = 500, H = 240, padL = 56, padR = 12, padT = 10, padB = 36;
+        var innerW = W - padL - padR, innerH = H - padT - padB;
+        var n = data.length;
+        var dx = n > 1 ? innerW / (n - 1) : 0;
+        function yFor(minFromMidnight) { return padT + ((minFromMidnight - yMin) / span) * innerH; }
+        function xFor(i) { return padL + (n === 1 ? innerW / 2 : i * dx); }
+
+        var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="max-width:100%;display:block;">';
+        // Background
+        svg += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fafbfc"/>';
+        // Scheduled window band
+        var schedTop = yFor(startMin), schedBot = yFor(endMin);
+        svg += '<rect x="' + padL + '" y="' + schedTop + '" width="' + innerW + '" height="' + (schedBot - schedTop) + '" fill="rgba(0,120,212,0.10)" stroke="rgba(0,120,212,0.35)" stroke-width="1"/>';
+        // Target window band (if set)
+        if (routeHasTarget(route)) {
+            var tb = routeTargetBounds(route);
+            var tsMin = timeToMinutes(tb.start), teMin = timeToMinutes(tb.end);
+            var tgTop = yFor(tsMin), tgBot = yFor(teMin);
+            svg += '<rect x="' + padL + '" y="' + tgTop + '" width="' + innerW + '" height="' + Math.max(2, tgBot - tgTop) + '" fill="rgba(214,48,49,0.18)" stroke="rgba(214,48,49,0.55)" stroke-width="1"/>';
+        }
+        // Y-axis hour gridlines
+        var firstHour = Math.ceil(yMin / 60) * 60;
+        for (var hm = firstHour; hm <= yMax; hm += 60) {
+            var yy = yFor(hm);
+            var hh12 = ((Math.floor(hm / 60) + 11) % 12) + 1;
+            var ampm = Math.floor(hm / 60) >= 12 ? 'PM' : 'AM';
+            svg += '<line x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '" stroke="#eee" stroke-dasharray="2,3"/>';
+            svg += '<text x="' + (padL - 6) + '" y="' + (yy + 3) + '" font-size="10" fill="#888" text-anchor="end">' + hh12 + ' ' + ampm + '</text>';
+        }
+        // X-axis date labels (rotated)
+        for (var j = 0; j < n; j++) {
+            var xx = xFor(j);
+            var d = new Date(data[j].dateStr + 'T12:00:00');
+            var lbl = ('0' + d.getDate()).slice(-2) + '-' + MONTHS[d.getMonth()];
+            svg += '<text x="' + xx + '" y="' + (H - padB + 14) + '" font-size="10" fill="#666" text-anchor="middle" transform="rotate(-45 ' + xx + ',' + (H - padB + 14) + ')">' + lbl + '</text>';
+        }
+        // Connecting line of event times (skipping days with no event)
+        var pathPts = [];
+        for (var k = 0; k < n; k++) {
+            if (!data[k].eventMs) continue;
+            var ev = new Date(data[k].eventMs);
+            var mFromMid = ev.getHours() * 60 + ev.getMinutes() + ev.getSeconds() / 60;
+            pathPts.push({ x: xFor(k), y: yFor(mFromMid), data: data[k] });
+        }
+        if (pathPts.length >= 2) {
+            var pathD = 'M' + pathPts[0].x.toFixed(1) + ',' + pathPts[0].y.toFixed(1);
+            for (var p = 1; p < pathPts.length; p++) pathD += 'L' + pathPts[p].x.toFixed(1) + ',' + pathPts[p].y.toFixed(1);
+            svg += '<path d="' + pathD + '" stroke="#0078d4" stroke-width="2" fill="none"/>';
+        }
+        for (var dp = 0; dp < pathPts.length; dp++) {
+            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="4" fill="#0078d4" stroke="#fff" stroke-width="1.5"/>';
+        }
+        // Missed days: draw a red X at the bottom of the chart
+        for (var mi = 0; mi < n; mi++) {
+            if (data[mi].eventMs) continue;
+            var mx = xFor(mi);
+            var my = padT + innerH - 6;
+            svg += '<text x="' + mx + '" y="' + my + '" font-size="12" fill="#dc3545" font-weight="700" text-anchor="middle">\u2715</text>';
+        }
+        svg += '</svg>';
+        chart.innerHTML = svg;
+
+        // Legend
+        var legendHtml =
+            '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#555;margin:8px 0 4px;align-items:center;">' +
+            '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+                '<span style="display:inline-block;width:16px;height:10px;background:rgba(0,120,212,0.18);border:1px solid rgba(0,120,212,0.55);"></span>Scheduled window' +
+            '</span>' +
+            (routeHasTarget(route) ? '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+                '<span style="display:inline-block;width:16px;height:10px;background:rgba(214,48,49,0.18);border:1px solid rgba(214,48,49,0.55);"></span>Target window' +
+            '</span>' : '') +
+            '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+                '<span style="display:inline-block;width:14px;height:2px;background:#0078d4;"></span>' +
+                '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0078d4;border:1.5px solid #fff;margin-left:-4px;box-shadow:0 0 0 1px #0078d4;"></span>' +
+                ' Actual ' + (route.direction === 'outside' ? 'departure' : 'arrival') +
+            '</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+                '<span style="color:#dc3545;font-weight:700;">\u2715</span>No event' +
+            '</span>' +
+            '</div>';
+        legend.innerHTML = legendHtml;
+
+        // Per-date list
+        var rows = '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:12px;">';
+        for (var r = data.length - 1; r >= 0; r--) {
+            var rd = data[r];
+            var timeStr;
+            if (rd.eventMs) {
+                var ed2 = new Date(rd.eventMs);
+                var h12 = ed2.getHours() % 12 || 12;
+                var mm = ('0' + ed2.getMinutes()).slice(-2);
+                var ap = ed2.getHours() >= 12 ? 'PM' : 'AM';
+                timeStr = '<span style="color:#0078d4;font-weight:600;">' + h12 + ':' + mm + ' ' + ap + '</span>';
+            } else {
+                timeStr = '<span style="color:#dc3545;font-weight:700;">No event</span>';
+            }
+            rows += '<tr><td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;">' + formatDateFriendly(rd.dateStr) + '</td>' +
+                '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:right;">' + timeStr + '</td></tr>';
+        }
+        rows += '</table>';
+        list.innerHTML = rows;
+    }
+
+    // Style the per-row timeline button so it looks like a small pill inside the name cell.
+    (function styleRowTlButtons() {
+        // Installed as a one-shot MutationObserver so buttons added later get styled too.
+        function styleExisting() {
+            var btns = document.querySelectorAll('.rpRowTlBtn');
+            for (var i = 0; i < btns.length; i++) {
+                forceStyle(btns[i], {
+                    'display': 'inline-block', 'padding': '1px 6px', 'margin-left': '6px',
+                    'border-radius': '10px', 'background': '#fff', 'border': '1px solid #d0d0d0',
+                    'font-size': '11px', 'line-height': '1', 'cursor': 'pointer', 'user-select': 'none',
+                    'vertical-align': 'middle'
+                });
+            }
+        }
+        document.addEventListener('DOMContentLoaded', styleExisting);
+        setInterval(styleExisting, 2000); // lightweight re-style for dynamically inserted rows
+    })();
 
     // Collect the last N active weekday dates for a route, looking back up to `lookback` days.
     function lastActiveDaysForRoute(route, referenceDateStr, want, lookback) {
