@@ -160,7 +160,6 @@
                 <input type="checkbox" id="rpChkCompareMode">
                 <span class="rpLbl" title="Show last-week variance under vs Target for each row.">Compare 7d ago</span>
             </label>
-            <span id="rpLastUpdated" class="rpLbl" style="margin-left:auto; font-size:12px; color:#888;"></span>
         </div>
         <div id="rpAutoCollapseWrap" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
             <span class="rpLbl" title="Hide routes whose window ended more than N minutes ago. Click a collapsed row to expand.">Auto-collapse completed:</span>
@@ -173,6 +172,7 @@
         <div id="progressStatus"></div>
         <div id="rpProgressCards"></div>
         <div id="rpProgressContent"></div>
+        <div id="rpLastUpdated" style="text-align:right;font-size:12px;color:#888;margin-top:12px;"></div>
     </div>
 </div>
 
@@ -3818,17 +3818,29 @@
     });
 
     // ========== LAST UPDATED INDICATOR ==========
+    var _lastUpdatedMs = null;
     function updateLastUpdated() {
+        _lastUpdatedMs = Date.now();
+        refreshLastUpdatedText();
+    }
+    function refreshLastUpdatedText() {
         var el = document.getElementById('rpLastUpdated');
         if (!el) return;
-        var d = new Date();
-        var hh = d.getHours();
-        var mm = ('0' + d.getMinutes()).slice(-2);
-        var ss = ('0' + d.getSeconds()).slice(-2);
-        var ampm = hh >= 12 ? 'PM' : 'AM';
-        var h12 = hh % 12 || 12;
-        el.textContent = 'Updated ' + h12 + ':' + mm + ':' + ss + ' ' + ampm;
+        if (!_lastUpdatedMs) { el.textContent = ''; return; }
+        var diffMin = Math.floor((Date.now() - _lastUpdatedMs) / 60000);
+        var ago;
+        if (diffMin < 1) ago = 'just now';
+        else if (diffMin < 60) ago = diffMin + 'min ago';
+        else {
+            var h = Math.floor(diffMin / 60);
+            var m = diffMin % 60;
+            ago = m > 0 ? (h + 'H ' + m + 'min ago') : (h + 'H ago');
+        }
+        el.textContent = 'Updated ' + ago;
     }
+    // Re-format the "updated X ago" label once a minute so it stays current
+    // even when no render/refresh is happening.
+    setInterval(refreshLastUpdatedText, 60000);
 
     function applyProblemsOnlyFilter() {
         var on = !!(document.getElementById('rpChkProblemsOnly') && document.getElementById('rpChkProblemsOnly').checked);
