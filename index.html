@@ -2206,7 +2206,12 @@
         var titles = document.querySelectorAll('.rpRouteCardTitle');
         for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '18px', 'color': '#333' });
         var infos = document.querySelectorAll('.rpRouteCardInfo');
-        for (var i = 0; i < infos.length; i++) forceStyle(infos[i], { 'font-size': '16px', 'color': '#777', 'margin-left': 'auto' });
+        for (var i = 0; i < infos.length; i++) forceStyle(infos[i], {
+            'font-size': '16px', 'font-weight': '600', 'color': '#1a1a1a',
+            'background': '#e8f4fd', 'border': '1px solid #b8daff',
+            'padding': '4px 12px', 'border-radius': '14px',
+            'margin-left': 'auto'
+        });
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
