@@ -163,6 +163,10 @@
                 <input type="checkbox" id="rpChkCompareMode">
                 <span class="rpLbl" title="Show last-week variance under vs Target for each row.">Compare 7d ago</span>
             </label>
+            <label id="rpChkNotifyLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
+                <input type="checkbox" id="rpChkNotify">
+                <span class="rpLbl" title="Show a browser notification the first time a row becomes Late or No-show during the current day. One per row per day.">Notify on problems</span>
+            </label>
         </div>
         <div id="rpAutoCollapseWrap" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
             <span class="rpLbl" title="Hide routes whose window ended more than N minutes ago. Click a collapsed row to expand.">Auto-collapse completed:</span>
@@ -747,6 +751,7 @@
     // ========== GLOBALS ==========
     var api = null;
     var state = null;
+    var geotabDb = ''; // populated from api.getSession() on init; used to build map links
     var cachedZones = [];
     var cachedDevices = {};
     var cachedDrivers = {};
@@ -798,6 +803,14 @@
     // ========== INIT ==========
     async function initAddin() {
         try {
+            // Capture the Geotab database name so we can build deep links to the live map.
+            try {
+                if (api && typeof api.getSession === 'function') {
+                    api.getSession(function (credentials /*, server */) {
+                        if (credentials && credentials.database) geotabDb = String(credentials.database);
+                    });
+                }
+            } catch (e) {}
             await loadZones();
             await loadDevices();
             await loadDrivers();
@@ -2110,7 +2123,16 @@
                 }
                 // A row counts as a "problem" for the filter when it's late vs target,
                 // overdue, no-show, or not arrived / not departed after the window ended.
-                if (isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir)) rLate++;
+                var _problem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
+                if (_problem) rLate++;
+                // Fire a browser notification once per (row, day, kind) when a row
+                // crosses into No-show or Late, if the user opted in.
+                if (_problem && isToday) {
+                    var notifKind;
+                    if (pastWindow && !eventMs) notifKind = 'noshow';
+                    else notifKind = 'late';
+                    maybeFireNotification(r, aLookup[aId] || aId, notifKind, dateStr);
+                }
 
                 if (statusCell) {
                     statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>';
@@ -2395,6 +2417,7 @@
                         totalAssign++;
                         rTotal++;
                         var currentVehicleName = '';
+                        var currentVehicleId = '';
 
                         // Collect relevant device IDs and the latest vehicle the driver used (for driver mode).
                         var rowDeviceIds = resolveDeviceIdsForAssigned(r, aId, trips, startMin, endMin);
@@ -2408,8 +2431,12 @@
                                 if (stopMsT > latestTripMs) {
                                     latestTripMs = stopMsT;
                                     currentVehicleName = cachedDevices[trip.device.id] || trip.device.id;
+                                    currentVehicleId = trip.device.id;
                                 }
                             }
+                        } else {
+                            currentVehicleId = aId;
+                            currentVehicleName = cachedDevices[aId] || aId;
                         }
 
                         // Compute presence from GPS logs (catches drive-throughs, not just stops).
@@ -2500,6 +2527,7 @@
                                     '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
                                         'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
                                         'data-entity-type="' + (isDriverRoute ? 'driver' : 'vehicle') + '">&#x1F4C8;</span>' +
+                                    mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') +
                                 '</td>' +
                                 curVehCol +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
@@ -3420,6 +3448,22 @@
     //           arrivedAtMs, departedAtMs }.
     // arrivedAtMs: timestamp of the first in-zone log within the window.
     // departedAtMs: timestamp of the latest transition from in-zone to out-of-zone within the window.
+    // Build a Geotab live-map deep link for a single vehicle id, e.g.
+    //   https://my.geotab.com/<db>/#map,drivers:all,liveVehicleIds:!(<vehicleId>)
+    // Returns '' if we don't know the database or no vehicle id.
+    function geotabMapLink(vehicleId) {
+        if (!geotabDb || !vehicleId) return '';
+        return 'https://my.geotab.com/' + encodeURIComponent(geotabDb) + '/#map,drivers:all,liveVehicleIds:!(' + encodeURIComponent(vehicleId) + ')';
+    }
+
+    // Little pin icon button linking to the live map for a given vehicle id.
+    function mapLinkButton(vehicleId, title) {
+        var href = geotabMapLink(vehicleId);
+        if (!href) return '';
+        return '<a class="rpMapLink" href="' + href + '" target="_blank" rel="noopener" title="' + (title || 'Open live map') + '" ' +
+            'style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;background:#fff;border:1px solid #d0d0d0;color:#0078d4;font-size:11px;line-height:1;cursor:pointer;text-decoration:none;vertical-align:middle;">\u{1F4CD} Map</a>';
+    }
+
     // Cell HTML for Current Location (lat, lng) and Engine status (from latest log speed).
     function formatLocationCell(lat, lng) {
         if (typeof lat !== 'number' || typeof lng !== 'number') return '<span style="color:#bbb;">\u2014</span>';
@@ -5060,6 +5104,49 @@
         for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         return new TextDecoder().decode(bytes);
     }
+
+    // ========== BROWSER NOTIFICATIONS ==========
+    // Fires one notification per (route, assignedId, day, kind) when a row crosses into
+    // Late or No-show. User opts in via the "Notify on problems" checkbox.
+    var _notifiedKeys = {};
+    function notificationsEnabled() {
+        var el = document.getElementById('rpChkNotify');
+        if (!el || !el.checked) return false;
+        if (typeof Notification === 'undefined') return false;
+        return Notification.permission === 'granted';
+    }
+    function maybeFireNotification(route, entityName, kind, dateStr) {
+        if (!notificationsEnabled()) return;
+        var key = route._uid + '|' + entityName + '|' + dateStr + '|' + kind;
+        if (_notifiedKeys[key]) return;
+        _notifiedKeys[key] = true;
+        var title = kind === 'noshow' ? 'No-show: ' + entityName : 'Late: ' + entityName;
+        var body = route.name + ' \u2014 ' + (route.direction === 'outside' ? 'departure' : 'arrival') + ' from ' + (route.zoneName || 'zone');
+        try {
+            var n = new Notification(title, { body: body, tag: key, icon: undefined });
+            setTimeout(function () { try { n.close(); } catch (e) {} }, 10000);
+        } catch (e) {}
+    }
+    function resetNotificationsForDay() { _notifiedKeys = {}; }
+    // When user toggles on the checkbox, request permission.
+    document.getElementById('rpChkNotify').addEventListener('change', function () {
+        if (!this.checked) return;
+        if (typeof Notification === 'undefined') {
+            showErrorBanner('This browser does not support notifications.', { autoDismissMs: 5000 });
+            this.checked = false;
+            return;
+        }
+        if (Notification.permission === 'granted') return;
+        if (Notification.permission === 'denied') {
+            showErrorBanner('Notifications are blocked for this site. Enable them in your browser\u2019s site settings.', { autoDismissMs: 7000 });
+            this.checked = false;
+            return;
+        }
+        var self = this;
+        Notification.requestPermission().then(function (perm) {
+            if (perm !== 'granted') self.checked = false;
+        });
+    });
 
     // ========== GLOBAL ERROR BANNER ==========
     // Shows a dismissable, sticky top-of-app banner when something fails.
