@@ -4554,6 +4554,149 @@
 
     // Render the weekly grid. 7 day columns, time on vertical axis.
     var _tlRunId = 0;
+    // Exposed so the hover tooltip handler can look up event info by card.
+    var _tlEventIndex = {};
+
+    function tlBuildTooltipHtml(entry, route, dateStr) {
+        var DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        var daysArr = route.activeDays || [0,1,2,3,4,5];
+        var activeDays = daysArr.map(function (d) { return DAY_NAMES[d]; }).join(', ');
+        var targetLabel = routeHasTarget(route)
+            ? formatTargetRange(route) + (route.graceMin ? ' <span style="color:#888;">(\u00B1' + route.graceMin + ' min grace)</span>' : '')
+            : '<span style="color:#aaa;">None</span>';
+        var ev = _tlEventIndex[entry.type + '|' + entry.id + '|' + route._uid + '|' + dateStr];
+        var statusHtml;
+        var statusColor = '#333';
+        if (!ev) {
+            statusHtml = '<span style="color:#888;">No data</span>';
+        } else if (ev.future) {
+            statusColor = '#607d8b';
+            statusHtml = '<span style="color:#607d8b;font-weight:600;">Scheduled (future)</span>';
+        } else if (ev.missed) {
+            statusColor = '#dc3545';
+            statusHtml = '<span style="background:#dc3545;color:#fff;padding:2px 10px;border-radius:10px;font-weight:700;letter-spacing:0.5px;">MISSED</span>';
+        } else if (ev.eventMs) {
+            var d = new Date(ev.eventMs);
+            var h12 = d.getHours() % 12 || 12;
+            var mm = ('0' + d.getMinutes()).slice(-2);
+            var ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+            var verb = route.direction === 'outside' ? 'Departed' : 'Arrived';
+            var varianceBadge = '';
+            if (routeHasTarget(route)) {
+                var b = routeTargetBounds(route);
+                var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+                var tsMs = dayMs + timeToMinutes(b.start) * 60000;
+                var teMs = dayMs + timeToMinutes(b.end) * 60000;
+                var graceMs = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
+                if (ev.eventMs >= tsMs - graceMs && ev.eventMs <= teMs + graceMs) {
+                    statusColor = '#28a745';
+                    varianceBadge = '<span style="background:#28a745;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;">On time</span>';
+                } else if (ev.eventMs > teMs) {
+                    statusColor = '#dc3545';
+                    varianceBadge = '<span style="background:#dc3545;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;">' + formatMinutesHM(Math.round((ev.eventMs - teMs) / 60000)) + ' late</span>';
+                } else {
+                    statusColor = '#e67e22';
+                    varianceBadge = '<span style="background:#e67e22;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px;">' + formatMinutesHM(Math.round((tsMs - ev.eventMs) / 60000)) + ' early</span>';
+                }
+            } else {
+                statusColor = '#28a745';
+            }
+            statusHtml = '<span style="color:' + statusColor + ';font-weight:700;">' + verb + ' ' + h12 + ':' + mm + ' ' + ampm + '</span>' +
+                (varianceBadge ? ' ' + varianceBadge : '');
+        } else if (ev.pending) {
+            statusColor = '#888';
+            statusHtml = '<span style="color:#888;">Pending — no event yet</span>';
+        } else {
+            statusHtml = '<span style="color:#888;">No data</span>';
+        }
+        var zoneName = route.zoneName || '\u2014';
+        var entityName = entry.type === 'driver' ? (cachedDrivers[entry.id] || entry.id) : (cachedDevices[entry.id] || entry.id);
+        var typeLabel = entry.type === 'driver' ? 'Driver' : 'Vehicle';
+        var tracking = route.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location';
+        function row(k, v) {
+            return '<tr><td style="padding:3px 14px 3px 0;color:#888;vertical-align:top;white-space:nowrap;">' + k + '</td>' +
+                '<td style="padding:3px 0;vertical-align:top;">' + v + '</td></tr>';
+        }
+        return '<div style="font-weight:700;font-size:15px;color:#1a1a1a;margin-bottom:6px;">' + escapeHtml(route.name) + '</div>' +
+            '<div style="font-size:12px;color:#555;margin-bottom:10px;">' + formatDateFriendly(dateStr) + '</div>' +
+            '<table style="font-size:12px;border-collapse:collapse;line-height:1.35;">' +
+                row('Status:', statusHtml) +
+                row(typeLabel + ':', escapeHtml(entityName)) +
+                row('Zone:', escapeHtml(zoneName)) +
+                row('Tracking:', tracking) +
+                row('Scheduled:', formatWindow(route.startTime, route.endTime)) +
+                row('Target:', targetLabel) +
+                row('Active days:', activeDays) +
+            '</table>';
+    }
+
+    function ensureTlTooltip() {
+        var el = document.getElementById('rpTlTooltip');
+        if (el) return el;
+        el = document.createElement('div');
+        el.id = 'rpTlTooltip';
+        document.body.appendChild(el);
+        forceStyle(el, {
+            'position': 'absolute', 'z-index': '9998', 'display': 'none',
+            'background': '#fff', 'border': '1px solid #d0d7de', 'border-radius': '8px',
+            'box-shadow': '0 10px 30px rgba(0,0,0,0.18)', 'padding': '12px 14px',
+            'min-width': '260px', 'max-width': '360px',
+            'font-family': '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+            'pointer-events': 'none'
+        });
+        return el;
+    }
+
+    function positionTlTooltip(tip, cardEl) {
+        var r = cardEl.getBoundingClientRect();
+        var sx = window.scrollX || window.pageXOffset;
+        var sy = window.scrollY || window.pageYOffset;
+        // Temporarily show to measure
+        tip.style.display = 'block';
+        tip.style.left = '-9999px';
+        tip.style.top = '0';
+        var tw = tip.offsetWidth, th = tip.offsetHeight;
+        var vw = window.innerWidth, vh = window.innerHeight;
+        // Prefer to the right of the card
+        var left = r.right + 12;
+        if (left + tw > sx + vw - 8) left = Math.max(8, r.left - tw - 12); // flip to left
+        if (left < 8) left = 8;
+        var top = r.top + Math.max(0, (r.height - th) / 2);
+        if (top + th > sy + vh - 8) top = Math.max(8, sy + vh - th - 8);
+        if (top < 8) top = 8;
+        tip.style.left = (left + sx) + 'px';
+        tip.style.top = (top + sy) + 'px';
+    }
+
+    function tlHideTooltip() {
+        var t = document.getElementById('rpTlTooltip');
+        if (t) t.style.display = 'none';
+    }
+
+    var _tlHoverWired = false;
+    function wireTlHover() {
+        if (_tlHoverWired) return;
+        _tlHoverWired = true;
+        document.addEventListener('mouseover', function (e) {
+            var card = e.target.closest ? e.target.closest('#rpTimelineGraph .rpTlCard') : null;
+            if (!card) return;
+            var html = card.getAttribute('data-tip-html');
+            if (!html) return;
+            var tip = ensureTlTooltip();
+            tip.innerHTML = html;
+            positionTlTooltip(tip, card);
+        });
+        document.addEventListener('mouseout', function (e) {
+            var card = e.target.closest ? e.target.closest('#rpTimelineGraph .rpTlCard') : null;
+            if (!card) return;
+            var related = e.relatedTarget;
+            if (related && card.contains(related)) return;
+            tlHideTooltip();
+        });
+        // Hide on scroll so it doesn't float over wrong content
+        window.addEventListener('scroll', tlHideTooltip, true);
+    }
+
     async function renderTimeline() {
         var runId = ++_tlRunId;
         var graph = document.getElementById('rpTimelineGraph');
@@ -4626,6 +4769,7 @@
         // Key: entry.type + '|' + entry.id + '|' + routeUid + '|' + dateStr
         // Value: { eventMs, missed, hasData, pending }
         var eventIndex = {};
+        _tlEventIndex = eventIndex; // expose to hover tooltip
         var todayStr = formatDate(new Date());
         var nowMs = Date.now();
         for (var ei2 = 0; ei2 < selected.length; ei2++) {
@@ -4790,14 +4934,21 @@
                         line2Html = '<span style="opacity:0.9">Pending (' + formatWindow(rr2.startTime, rr2.endTime) + ')</span>';
                     }
                     var label = escapeHtml(rr2.name);
-                    var titleText = label + ' — scheduled ' + formatWindow(rr2.startTime, rr2.endTime) +
-                        (routeHasTarget(rr2) ? ' — target ' + formatTargetRange(rr2) : '');
-                    inner += '<div class="rpTlCard" title="' + titleText + '" ' +
+                    // Build the detail tooltip HTML now and stash it on the card.
+                    // Use a safe attribute encoding since the HTML contains quotes/angle brackets.
+                    var tipHtml = tlBuildTooltipHtml(entry, rr2, colDateStr);
+                    var tipAttr = tipHtml
+                        .replace(/&/g, '&amp;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+                    inner += '<div class="rpTlCard" ' +
+                        'data-tip-html="' + tipAttr + '" ' +
                         'style="position:absolute;top:' + cardTop + 'px;height:' + cardH + 'px;' +
                         'left:4px;right:4px;' +
                         'background:' + bg + ';color:#fff;border-radius:4px;padding:4px 6px;' +
                         'font-size:11px;line-height:1.2;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.15);' +
-                        'box-sizing:border-box;border:1px solid rgba(0,0,0,0.15);border-left:3px solid ' + routeColor + ';">' +
+                        'box-sizing:border-box;border:1px solid rgba(0,0,0,0.15);border-left:3px solid ' + routeColor + ';cursor:default;">' +
                         '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
                         '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2Html + '</div>' +
                         (targetLine ? '<div style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + targetLine + '</div>' : '') +
@@ -4834,6 +4985,7 @@
             return;
         }
         graph.innerHTML = html;
+        wireTlHover();
     }
 
     function updateTlWeekLabel() {
