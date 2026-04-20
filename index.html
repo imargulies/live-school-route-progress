@@ -4256,8 +4256,14 @@
     }
 
     async function computeRowTimelineData(route, assignedId, entityType, referenceDateStr) {
-        // Reuse the same 14-active-day window as the sparkline.
-        var dates = lastActiveDaysForRoute(route, referenceDateStr, 14, 28);
+        // Last 14 calendar days ending at the reference date (inclusive).
+        // Days the route doesn't run are still shown on the X axis as inactive gaps.
+        var refDate = new Date(referenceDateStr + 'T00:00:00');
+        var dates = [];
+        for (var off = 13; off >= 0; off--) {
+            var d = new Date(refDate); d.setDate(d.getDate() - off);
+            dates.push(formatDate(d));
+        }
         if (!dates.length) return [];
         var earliest = dates[0];
         var fromDate = new Date(earliest + 'T00:00:00');
@@ -4272,9 +4278,15 @@
         try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
         var zone = cachedZones.find(function (z) { return z.id === route.zoneId; });
         var isDriver = entityType === 'driver' || route.trackBy === 'driver';
+        var rDays = route.activeDays || [0,1,2,3,4,5];
         var out = [];
         for (var d = 0; d < dates.length; d++) {
             var dStr = dates[d];
+            var dow = new Date(dStr + 'T12:00:00').getDay();
+            if (rDays.indexOf(dow) === -1) {
+                out.push({ dateStr: dStr, eventMs: null, inactive: true });
+                continue;
+            }
             var sM = timeToMinutes(route.startTime);
             var eM = timeToMinutes(route.endTime);
             var wFromMs = new Date(dStr + 'T00:00:00').getTime() + sM * 60000;
@@ -4385,12 +4397,17 @@
         for (var dp = 0; dp < pathPts.length; dp++) {
             svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="4" fill="#0078d4" stroke="#fff" stroke-width="1.5"/>';
         }
-        // Missed days: draw a red X at the bottom of the chart
+        // Missed days (route ran, no event): red X near the bottom of the chart.
+        // Inactive days (route doesn't run this weekday): grey dash in the same place.
         for (var mi = 0; mi < n; mi++) {
             if (data[mi].eventMs) continue;
             var mx = xFor(mi);
             var my = padT + innerH - 6;
-            svg += '<text x="' + mx + '" y="' + my + '" font-size="12" fill="#dc3545" font-weight="700" text-anchor="middle">\u2715</text>';
+            if (data[mi].inactive) {
+                svg += '<text x="' + mx + '" y="' + my + '" font-size="12" fill="#bbb" text-anchor="middle">\u2013</text>';
+            } else {
+                svg += '<text x="' + mx + '" y="' + my + '" font-size="12" fill="#dc3545" font-weight="700" text-anchor="middle">\u2715</text>';
+            }
         }
         svg += '</svg>';
         chart.innerHTML = svg;
@@ -4412,6 +4429,9 @@
             '<span style="display:inline-flex;align-items:center;gap:6px;">' +
                 '<span style="color:#dc3545;font-weight:700;">\u2715</span>No event' +
             '</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+                '<span style="color:#bbb;font-weight:700;">\u2013</span>Not scheduled' +
+            '</span>' +
             '</div>';
         legend.innerHTML = legendHtml;
 
@@ -4426,6 +4446,8 @@
                 var mm = ('0' + ed2.getMinutes()).slice(-2);
                 var ap = ed2.getHours() >= 12 ? 'PM' : 'AM';
                 timeStr = '<span style="color:#0078d4;font-weight:600;">' + h12 + ':' + mm + ' ' + ap + '</span>';
+            } else if (rd.inactive) {
+                timeStr = '<span style="color:#aaa;">Not scheduled</span>';
             } else {
                 timeStr = '<span style="color:#dc3545;font-weight:700;">No event</span>';
             }
