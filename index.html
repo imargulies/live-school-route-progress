@@ -1820,11 +1820,28 @@
         updateDateLabel();
         renderProgress();
     });
-    document.getElementById('rpProgressDateBtn').addEventListener('click', function () {
+    (function () {
+        // Force the native date picker to open on any click in the date box area.
+        // The input sits transparently on top of the visible button; browsers don't
+        // always open the picker on click alone, so we call showPicker() explicitly.
+        function openDatePicker(e) {
+            var input = document.getElementById('rpProgressDate');
+            if (!input) return;
+            if (input.showPicker) {
+                try { input.showPicker(); if (e) { e.preventDefault(); e.stopPropagation(); } return; } catch (err) {}
+            }
+            input.focus();
+        }
+        var wrap = document.getElementById('rpProgressDateWrap');
         var input = document.getElementById('rpProgressDate');
-        if (input.showPicker) { try { input.showPicker(); return; } catch (e) {} }
-        input.focus();
-    });
+        if (wrap) wrap.addEventListener('click', openDatePicker);
+        if (input) {
+            input.addEventListener('click', openDatePicker);
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { openDatePicker(e); }
+            });
+        }
+    })();
     document.getElementById('rpProgressTimeFrom').addEventListener('change', function () {
         setPref('timeFrom', this.value); renderProgress();
     });
