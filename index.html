@@ -1592,7 +1592,10 @@
         label.textContent = dayName + ', ' + mon + ' ' + day + ', ' + year;
         forceStyle(label, { 'font-size': '14px', 'font-weight': '600', 'color': '#0078d4' });
     }
-    document.getElementById('rpProgressDate').addEventListener('change', updateDateLabel);
+    document.getElementById('rpProgressDate').addEventListener('change', function () {
+        updateDateLabel();
+        renderProgress();
+    });
     // Set initial label after dates are set
     setTimeout(updateDateLabel, 100);
 
