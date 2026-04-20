@@ -2079,6 +2079,7 @@
                 }
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
+                row.dataset.eventMs = eventMs || '';
             }
             liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
         }
@@ -2425,7 +2426,7 @@
                         var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '">' +
                                 '<td class="rptd"><span>' + escapeHtml(aName) + '</span> ' +
                                     '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
                                         'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
@@ -3654,13 +3655,13 @@
         var lbls = document.querySelectorAll('.rpEtaBarLabels');
         for (var i = 0; i < lbls.length; i++) {
             forceStyle(lbls[i], {
-                'display': 'flex', 'justify-content': 'space-between', 'margin-top': '4px',
-                'font-size': '11px', 'color': '#888'
+                'display': 'flex', 'justify-content': 'space-between', 'margin-top': '6px',
+                'font-size': '13px', 'color': '#333', 'font-weight': '600'
             });
         }
         var tLbls = document.querySelectorAll('.rpEtaBarTargetLabel');
         for (var i = 0; i < tLbls.length; i++) {
-            forceStyle(tLbls[i], { 'color': '#d63031', 'font-weight': '600' });
+            forceStyle(tLbls[i], { 'color': '#d63031', 'font-weight': '700', 'font-size': '13px' });
         }
         var sts = document.querySelectorAll('.rpEtaBarStatus');
         for (var i = 0; i < sts.length; i++) {
@@ -3940,6 +3941,44 @@
     // Re-format the "updated X ago" label once a minute so it stays current
     // even when no render/refresh is happening.
     setInterval(refreshLastUpdatedText, 60000);
+
+    // Standalone ticker: refreshes the "X min ago" event labels and the live
+    // "Late N min (no arrival yet)" / "No-show" variance text without doing an
+    // API call. Runs every 30 seconds so minute counters tick up in real time
+    // even when Go Live is off.
+    function refreshRelativeTimesOnly() {
+        var panel = document.getElementById('tab-progress');
+        if (!panel) return;
+        // If tab isn't visible, skip (cheap).
+        if (panel.style.display === 'none') return;
+        var dateStr = document.getElementById('rpProgressDate').value;
+        if (!dateStr) return;
+        var now = Date.now();
+        var todayStr = formatDate(new Date());
+        var isToday = dateStr === todayStr;
+        var dayBaseMs = new Date(dateStr + 'T00:00:00').getTime();
+        var rows = document.querySelectorAll('#rpProgressContent tr[data-row-uid]');
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var uid = row.dataset.rowUid || '';
+            var dashIdx = uid.indexOf('-');
+            if (dashIdx < 0) continue;
+            var routeUid = uid.substring(0, dashIdx);
+            var r = null;
+            for (var k = 0; k < savedRoutes.length; k++) if (savedRoutes[k]._uid === routeUid) { r = savedRoutes[k]; break; }
+            if (!r) continue;
+            var raw = row.dataset.eventMs;
+            var eventMs = raw ? parseInt(raw, 10) : null;
+            if (!eventMs) eventMs = null;
+            var eventCell = row.querySelector('.rpEventCell');
+            if (eventCell) eventCell.innerHTML = formatTimeWithAgo(eventMs, now);
+            var endMin = timeToMinutes(r.endTime);
+            var pastWindow = isToday ? (now >= dayBaseMs + endMin * 60000) : true;
+            var varianceCell = row.querySelector('.rpVarianceCell');
+            if (varianceCell) varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow);
+        }
+    }
+    setInterval(refreshRelativeTimesOnly, 30000);
 
     function applyProblemsOnlyFilter() {
         var on = !!(document.getElementById('rpChkProblemsOnly') && document.getElementById('rpChkProblemsOnly').checked);
