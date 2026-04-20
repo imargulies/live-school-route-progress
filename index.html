@@ -2153,7 +2153,7 @@
                     targetBadge = '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' window">Target: ' + formatTargetRange(r) + lenSuffix + '</span>';
                 }
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
-                var sparklineHolder = '<span class="rpSparkline" data-route-uid="' + r._uid + '" title="14-day on-time trend"><span class="rpSparklineLoading">14d …</span></span>';
+                var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">&#x1F4C8; Trend</span>';
                 var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
@@ -3851,13 +3851,14 @@
         row.dataset.sig = newSig;
     }
 
-    // ========== 14-DAY ON-TIME SPARKLINE ==========
-    // Cached values per route: { uid: [ {dateStr, rate|null}, ... ] }
+    // ========== 14-ACTIVE-DAY ON-TIME TREND (popup) ==========
+    // Cached values per route: { uid: [ {dateStr, rate}, ... ] } — only the route's active weekdays.
     var _sparklineCache = {};
     var _sparklineRunId = 0;
 
-    function sparklineSvg(values) {
-        var width = 80, height = 20, pad = 2;
+    function sparklineSvg(values, width, height) {
+        width = width || 280; height = height || 60;
+        var pad = 8;
         var innerW = width - pad * 2, innerH = height - pad * 2;
         var n = values.length;
         var dx = n > 1 ? innerW / (n - 1) : 0;
@@ -3871,45 +3872,130 @@
             var y = pad + (1 - rate) * innerH;
             path += (path === '' ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
             var color = rate >= 0.9 ? '#28a745' : (rate >= 0.6 ? '#e67e22' : '#dc3545');
-            dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="1.8" fill="' + color + '"/>';
+            dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.5" fill="' + color + '"/>';
         }
-        if (!hasAny) return '<span style="color:#aaa;font-size:11px;">no history</span>';
-        return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle">' +
-            '<rect x="0" y="0" width="' + width + '" height="' + height + '" fill="none"/>' +
-            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="1.2" fill="none"/>' : '') +
+        if (!hasAny) return '<div style="color:#aaa;padding:8px;">No history yet.</div>';
+        // Gridlines at 50% and 100%
+        var g50 = pad + 0.5 * innerH, g100 = pad;
+        return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">' +
+            '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eee"/>' +
+            '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eee" stroke-dasharray="2,2"/>' +
+            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2" fill="none"/>' : '') +
             dots +
             '</svg>';
     }
 
-    function sparklineTitle(values) {
-        var lines = ['14-day on-time trend'];
-        for (var i = 0; i < values.length; i++) {
-            var v = values[i];
-            var pct = v.rate === null || v.rate === undefined ? '—' : Math.round(v.rate * 100) + '%';
-            lines.push(formatDateFriendly(v.dateStr) + ': ' + pct);
+    // No-op inline applier; kept for call-site compatibility. Buttons paint themselves.
+    function applySparklines(/* routeUidSet */) {}
+
+    // Open the trend popup for a given route.
+    function openSparklinePopup(routeUid) {
+        var route = findRouteByUid(routeUid);
+        var popup = document.getElementById('rpSparklinePopup');
+        if (!popup) {
+            popup = document.createElement('div');
+            popup.id = 'rpSparklinePopup';
+            popup.innerHTML =
+                '<div id="rpSparklineBackdrop"></div>' +
+                '<div id="rpSparklineBox" role="dialog" aria-modal="true">' +
+                    '<div id="rpSparklineHead">' +
+                        '<span id="rpSparklineTitle"></span>' +
+                        '<span id="rpSparklineClose" role="button" tabindex="0" aria-label="Close">&#x2715;</span>' +
+                    '</div>' +
+                    '<div id="rpSparklineChart"></div>' +
+                    '<div id="rpSparklineList"></div>' +
+                '</div>';
+            document.body.appendChild(popup);
+            forceStyle(popup, { 'position': 'fixed', 'inset': '0', 'z-index': '9999' });
+            forceStyle(document.getElementById('rpSparklineBackdrop'), {
+                'position': 'absolute', 'inset': '0', 'background': 'rgba(0,0,0,0.4)'
+            });
+            forceStyle(document.getElementById('rpSparklineBox'), {
+                'position': 'relative', 'max-width': '420px', 'margin': '60px auto',
+                'background': '#fff', 'border-radius': '10px', 'box-shadow': '0 10px 40px rgba(0,0,0,0.25)',
+                'padding': '16px', 'font-family': 'inherit'
+            });
+            forceStyle(document.getElementById('rpSparklineHead'), {
+                'display': 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '10px'
+            });
+            forceStyle(document.getElementById('rpSparklineTitle'), { 'font-weight': '700', 'font-size': '15px' });
+            forceStyle(document.getElementById('rpSparklineClose'), {
+                'cursor': 'pointer', 'font-size': '18px', 'color': '#888', 'padding': '4px 8px',
+                'border-radius': '4px', 'user-select': 'none'
+            });
+            document.getElementById('rpSparklineClose').addEventListener('click', closeSparklinePopup);
+            document.getElementById('rpSparklineBackdrop').addEventListener('click', closeSparklinePopup);
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && popup && popup.style.display !== 'none') closeSparklinePopup();
+            });
         }
-        return lines.join('\n');
+        var vals = _sparklineCache[routeUid] || [];
+        var name = route ? route.name : 'Route';
+        var title = document.getElementById('rpSparklineTitle');
+        title.textContent = 'On-time trend: ' + name;
+        var chart = document.getElementById('rpSparklineChart');
+        chart.innerHTML = vals.length ? sparklineSvg(vals, 380, 80) : '<div style="color:#aaa;padding:8px;">Loading...</div>';
+        var list = document.getElementById('rpSparklineList');
+        if (vals.length) {
+            var listHtml = '<div style="margin-top:8px;font-size:12px;color:#555;">Last ' + vals.length + ' active day' + (vals.length === 1 ? '' : 's') + ' (inactive weekdays excluded)</div>' +
+                '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">';
+            for (var i = vals.length - 1; i >= 0; i--) {
+                var v = vals[i];
+                var pct = v.rate === null || v.rate === undefined ? '—' : Math.round(v.rate * 100) + '%';
+                var color = v.rate === null ? '#aaa' : (v.rate >= 0.9 ? '#28a745' : (v.rate >= 0.6 ? '#e67e22' : '#dc3545'));
+                listHtml += '<tr>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;">' + formatDateFriendly(v.dateStr) + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:right;color:' + color + ';font-weight:600;">' + pct + '</td>' +
+                    '</tr>';
+            }
+            listHtml += '</table>';
+            list.innerHTML = listHtml;
+        } else {
+            list.innerHTML = '<div style="color:#aaa;margin-top:8px;">No data yet. Computing…</div>';
+        }
+        popup.style.display = '';
     }
 
-    function applySparklines(routeUidSet) {
-        var nodes = document.querySelectorAll('#rpProgressContent .rpSparkline');
-        for (var i = 0; i < nodes.length; i++) {
-            var uid = nodes[i].dataset.routeUid;
-            if (routeUidSet && !routeUidSet[uid]) continue;
-            var vals = _sparklineCache[uid];
-            if (!vals) continue;
-            nodes[i].innerHTML = sparklineSvg(vals);
-            nodes[i].setAttribute('title', sparklineTitle(vals));
-        }
+    function closeSparklinePopup() {
+        var popup = document.getElementById('rpSparklinePopup');
+        if (popup) popup.style.display = 'none';
     }
 
-    // Compute 14-day trend for the given routes. Runs async; updates inline when done.
+    // Wire clicks on any sparkline trigger button in the progress content.
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest && e.target.closest('.rpSparklineBtn');
+        if (!btn) return;
+        var uid = btn.dataset.routeUid;
+        if (uid) openSparklinePopup(uid);
+    });
+
+    // Collect the last N active weekday dates for a route, looking back up to `lookback` days.
+    function lastActiveDaysForRoute(route, referenceDateStr, want, lookback) {
+        var rDays = route.activeDays || [0,1,2,3,4,5];
+        var refDate = new Date(referenceDateStr + 'T00:00:00');
+        var out = [];
+        for (var off = 1; out.length < want && off <= lookback; off++) {
+            var d = new Date(refDate); d.setDate(d.getDate() - off);
+            if (rDays.indexOf(d.getDay()) !== -1) out.push(formatDate(d));
+        }
+        return out.reverse();
+    }
+
+    // Compute trend across the last 14 active days (skipping days the route doesn't run).
     async function computeSparklines(routes, referenceDateStr) {
         var runId = ++_sparklineRunId;
         if (!routes || !routes.length) return;
-        var daysBack = 14;
+        var wantActive = 14;
+        var lookback = 60;
+        // Find the earliest date any route needs, to bound the fetch window.
+        var earliestDate = null;
+        for (var rii = 0; rii < routes.length; rii++) {
+            var dates = lastActiveDaysForRoute(routes[rii], referenceDateStr, wantActive, lookback);
+            if (dates.length && (!earliestDate || dates[0] < earliestDate)) earliestDate = dates[0];
+        }
+        if (!earliestDate) return;
+        var fromDate = new Date(earliestDate + 'T00:00:00');
         var refDate = new Date(referenceDateStr + 'T00:00:00');
-        var fromDate = new Date(refDate); fromDate.setDate(fromDate.getDate() - daysBack);
         var toDate = new Date(refDate); toDate.setDate(toDate.getDate() + 1); // exclusive end
         var fromIso = fromDate.toISOString();
         var toIso = toDate.toISOString();
@@ -3927,15 +4013,12 @@
         for (var ri = 0; ri < routes.length; ri++) {
             var r = routes[ri];
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
-            var rDays = r.activeDays || [0,1,2,3,4,5];
             var isDriverRoute = r.trackBy === 'driver';
             var assignedIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
+            var activeDates = lastActiveDaysForRoute(r, referenceDateStr, wantActive, lookback);
             var values = [];
-            for (var d = 0; d < daysBack; d++) {
-                var day = new Date(refDate); day.setDate(day.getDate() - (daysBack - 1 - d));
-                var dStr = formatDate(day);
-                var dow = new Date(dStr + 'T12:00:00').getDay();
-                if (rDays.indexOf(dow) === -1) { values.push({ dateStr: dStr, rate: null }); continue; }
+            for (var d = 0; d < activeDates.length; d++) {
+                var dStr = activeDates[d];
                 var startMinR = timeToMinutes(r.startTime);
                 var endMinR = timeToMinutes(r.endTime);
                 var wFromMs = new Date(dStr + 'T00:00:00').getTime() + startMinR * 60000;
@@ -4000,19 +4083,14 @@
     }
 
     function styleSparklines() {
-        var nodes = document.querySelectorAll('.rpSparkline');
-        for (var i = 0; i < nodes.length; i++) {
-            forceStyle(nodes[i], {
-                'display': 'inline-block', 'padding': '2px 6px',
-                'background': '#fff', 'border-radius': '4px',
-                'border': '1px solid #eee', 'line-height': '0'
-            });
-        }
-        var loads = document.querySelectorAll('.rpSparklineLoading');
-        for (var i = 0; i < loads.length; i++) {
-            forceStyle(loads[i], {
-                'font-size': '11px', 'color': '#aaa', 'line-height': '1',
-                'display': 'inline-block', 'padding': '2px 4px'
+        var btns = document.querySelectorAll('.rpSparklineBtn');
+        for (var i = 0; i < btns.length; i++) {
+            forceStyle(btns[i], {
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '4px',
+                'padding': '4px 10px', 'border-radius': '14px',
+                'background': '#fff', 'border': '1px solid #d0d0d0',
+                'color': '#0078d4', 'font-size': '12px', 'font-weight': '600',
+                'cursor': 'pointer', 'user-select': 'none'
             });
         }
     }
