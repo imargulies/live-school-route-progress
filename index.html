@@ -1525,13 +1525,14 @@
     });
 
     var DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     function updateDateLabel() {
         var dateStr = document.getElementById('rpProgressDate').value;
         var label = document.getElementById('rpProgressDateLabel');
         if (!dateStr) { label.textContent = ''; return; }
         var d = new Date(dateStr + 'T12:00:00');
         var dayName = DAY_FULL[d.getDay()];
-        var mon = MONTHS[d.getMonth()];
+        var mon = MONTHS_FULL[d.getMonth()];
         var day = d.getDate();
         var year = d.getFullYear();
         label.textContent = dayName + ', ' + mon + ' ' + day + ', ' + year;
