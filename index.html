@@ -2052,6 +2052,8 @@
                 var distCell = row.querySelector('.rpDistCell');
                 var eventCell = row.querySelector('.rpEventCell');
                 var varianceCell = row.querySelector('.rpVarianceCell');
+                var locationCell = row.querySelector('.rpLocationCell');
+                var engineCell = row.querySelector('.rpEngineCell');
 
                 // Compute new status
                 var vStatus, vStatusClass, statusTip;
@@ -2100,6 +2102,8 @@
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
+                if (locationCell) locationCell.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
+                if (engineCell) engineCell.innerHTML = formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime());
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
                 row.dataset.eventMs = eventMs || '';
@@ -2322,17 +2326,19 @@
                 var targetColTip = routeHasTarget(r)
                     ? 'Minutes early or late vs target window ' + formatTargetRange(r)
                     : 'No target window set for this route';
-                // Standardize: every route card uses the same 7 columns at the same widths,
+                // Standardize: every route card uses the same 9 columns at the same widths,
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
                     '<colgroup>' +
-                        '<col class="rpColName" style="width:18%">' +
-                        '<col class="rpColCurVeh" style="width:14%">' +
-                        '<col class="rpColStatus" style="width:11%">' +
-                        '<col class="rpColEvent" style="width:15%">' +
-                        '<col class="rpColVariance" style="width:14%">' +
-                        '<col class="rpColTime" style="width:14%">' +
-                        '<col class="rpColDist" style="width:14%">' +
+                        '<col class="rpColName" style="width:14%">' +
+                        '<col class="rpColCurVeh" style="width:11%">' +
+                        '<col class="rpColStatus" style="width:10%">' +
+                        '<col class="rpColEvent" style="width:13%">' +
+                        '<col class="rpColVariance" style="width:13%">' +
+                        '<col class="rpColTime" style="width:11%">' +
+                        '<col class="rpColDist" style="width:8%">' +
+                        '<col class="rpColLoc" style="width:12%">' +
+                        '<col class="rpColEngine" style="width:8%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
@@ -2341,13 +2347,15 @@
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
-                    '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance to Zone' : '') + '</th>' +
+                    '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
+                    '<th class="rpth rpthSm" title="Latest known GPS coordinates. Click to open in Google Maps.">Location</th>' +
+                    '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary, No signal = no recent log.">Engine</th>' +
                     '</tr></thead><tbody>';
 
                 var rCompleted = 0, rTotal = 0, rLate = 0;
                 var rArrivedNames = [];
                 if (!assignedIds.length) {
-                    html += '<tr><td colspan="7" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
+                    html += '<tr><td colspan="9" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
                     var vehRows = [];
                     for (var vi = 0; vi < assignedIds.length; vi++) {
@@ -2355,7 +2363,7 @@
                         var aName = idLookup[aId];
 
                         if (!aName) {
-                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="7"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
+                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="9"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
                         }
 
@@ -2474,6 +2482,8 @@
                                 varianceCell +
                                 '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
+                                '<td class="rptd rpLocationCell">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</td>' +
+                                '<td class="rptd rpEngineCell">' + formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime()) + '</td>' +
                                 '</tr>'
                         });
                     }
@@ -2575,8 +2585,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '18%', 'rpColCurVeh': '14%', 'rpColStatus': '11%',
-            'rpColEvent': '15%', 'rpColVariance': '14%', 'rpColTime': '14%', 'rpColDist': '14%' };
+        var colWidths = { 'rpColName': '14%', 'rpColCurVeh': '11%', 'rpColStatus': '10%',
+            'rpColEvent': '13%', 'rpColVariance': '13%', 'rpColTime': '11%', 'rpColDist': '8%',
+            'rpColLoc': '12%', 'rpColEngine': '8%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -3311,8 +3322,25 @@
     //           arrivedAtMs, departedAtMs }.
     // arrivedAtMs: timestamp of the first in-zone log within the window.
     // departedAtMs: timestamp of the latest transition from in-zone to out-of-zone within the window.
+    // Cell HTML for Current Location (lat, lng) and Engine status (from latest log speed).
+    function formatLocationCell(lat, lng) {
+        if (typeof lat !== 'number' || typeof lng !== 'number') return '<span style="color:#bbb;">\u2014</span>';
+        var latS = lat.toFixed(5), lngS = lng.toFixed(5);
+        var maps = 'https://www.google.com/maps?q=' + latS + ',' + lngS;
+        return '<a href="' + maps + '" target="_blank" rel="noopener" style="color:#0078d4;text-decoration:none;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:11px;" title="Open in Google Maps">' +
+            latS + ', ' + lngS +
+            '</a>';
+    }
+    function formatEngineCell(speed, lastLogMs, nowMs) {
+        if (typeof speed !== 'number' || !lastLogMs) return '<span style="color:#bbb;">\u2014</span>';
+        var stale = nowMs && (nowMs - lastLogMs) > 15 * 60000; // no log in 15 min
+        if (stale) return '<span style="background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="No GPS update in 15+ min">No signal</span>';
+        if (speed > 3) return '<span style="background:#d4edda;color:#155724;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Speed: ' + Math.round(speed) + ' km/h">On \u2022 ' + Math.round(speed) + ' km/h</span>';
+        return '<span style="background:#e9ecef;color:#555;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Stationary">Stopped</span>';
+    }
+
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
-        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, arrivedAtMs: null, departedAtMs: null };
+        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null };
         if (!logs || !logs.length || !zonePoints || !zonePoints.length) return out;
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
@@ -3341,6 +3369,8 @@
             prevMs = t; prevIn = inZ;
             out.lastLat = lg.latitude;
             out.lastLng = lg.longitude;
+            out.lastSpeed = (typeof lg.speed === 'number') ? lg.speed : null;
+            out.lastLogMs = t;
             out.isCurrentlyInZone = inZ;
         }
         out.zoneMinutes = zoneSec / 60;
