@@ -1325,9 +1325,8 @@
 
         document.getElementById('rpStartTime').value = r.startTime;
         document.getElementById('rpEndTime').value = r.endTime;
-        // Backward compat: older routes stored a single targetTime; treat as a zero-length window.
-        document.getElementById('rpTargetTimeStart').value = r.targetTimeStart || r.targetTime || '';
-        document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || r.targetTime || '';
+        document.getElementById('rpTargetTimeStart').value = r.targetTimeStart || '';
+        document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || '';
         document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
         syncTargetTimeBounds();
         selectedDirection = r.direction || 'inside';
@@ -3602,13 +3601,10 @@
             completed + '/' + total + ' ' + verb + '</span>';
     }
 
-    // Read target window from a route with backward compat for single targetTime.
-    // Returns { start, end } as HH:MM strings, or nulls if not set.
+    // Read target window from a route. Returns { start, end } as HH:MM strings, or nulls.
     function routeTargetBounds(route) {
         if (!route) return { start: null, end: null };
-        var s = route.targetTimeStart || route.targetTime || '';
-        var e = route.targetTimeEnd || route.targetTime || '';
-        return { start: s || null, end: e || null };
+        return { start: route.targetTimeStart || null, end: route.targetTimeEnd || null };
     }
     function routeHasTarget(route) {
         var b = routeTargetBounds(route);
@@ -3637,7 +3633,7 @@
 
     // Variance vs target window. Returns HTML for the "vs Target" cell.
     //   eventMs:   timestamp of arrival (inside) or departure (outside), or null
-    //   route:     route object (reads targetTimeStart/End or legacy targetTime, direction, graceMin)
+    //   route:     route object (reads targetTimeStart/End, direction, graceMin)
     //   dateStr:   YYYY-MM-DD of the route's occurrence
     //   nowMs:     current time, for live "Late Xm" ticking before window end
     //   windowEnded: true if the route's window is over (past the end time)
