@@ -2088,6 +2088,11 @@
         updateEtaBars(now.getTime());
         applyAutoCollapse();
         updateLastUpdated();
+        // Re-apply the "7d ago" sub-line if Compare mode is on, since we just
+        // overwrote every variance cell's innerHTML above.
+        if (document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked) {
+            applyCompareBadges(savedRoutes);
+        }
 
         // Update summary cards inline
         var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
@@ -3976,6 +3981,11 @@
             var pastWindow = isToday ? (now >= dayBaseMs + endMin * 60000) : true;
             var varianceCell = row.querySelector('.rpVarianceCell');
             if (varianceCell) varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow);
+        }
+        // Re-apply the "7d ago" sub-line if Compare mode is on, since we just
+        // overwrote every variance cell's innerHTML above.
+        if (document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked) {
+            applyCompareBadges(savedRoutes);
         }
     }
     setInterval(refreshRelativeTimesOnly, 30000);
