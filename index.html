@@ -4517,7 +4517,9 @@
     }
 
     // Render the weekly grid. 7 day columns, time on vertical axis.
-    function renderTimeline() {
+    var _tlRunId = 0;
+    async function renderTimeline() {
+        var runId = ++_tlRunId;
         var graph = document.getElementById('rpTimelineGraph');
         if (!graph) return;
         updateTlWeekLabel();
@@ -4558,6 +4560,101 @@
         if (maxMin - minMin < 120) maxMin = Math.min(24 * 60, minMin + 120);
         var spanMin = maxMin - minMin;
 
+        // Fetch trips + logs for the week so we can compute actual event times.
+        // Indeterminate loading state (replaced by the grid once fetched).
+        graph.innerHTML = '<div style="padding:30px;text-align:center;color:#888;">' +
+            '<div class="rpSpinner" style="margin:0 auto 12px;"></div>' +
+            '<div style="font-size:13px;">Loading timeline data for the week…</div>' +
+            '</div>';
+        injectSparklineStyles(); // reuses .rpSpinner keyframe/class
+
+        var weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7); // exclusive
+        var fromIso = weekStart.toISOString();
+        var toIso = weekEnd.toISOString();
+        var trips = [];
+        try { trips = await apiCall('Get', { typeName: 'Trip', search: { fromDate: fromIso, toDate: toIso } }); }
+        catch (e) { trips = []; }
+        if (runId !== _tlRunId) return;
+        // Collect device ids across all selected entities (for drivers, map through trips).
+        var routeUniverse = [];
+        for (var se = 0; se < selected.length; se++) {
+            var rrs = routesFor(selected[se]);
+            for (var rr3 = 0; rr3 < rrs.length; rr3++) if (routeUniverse.indexOf(rrs[rr3]) === -1) routeUniverse.push(rrs[rr3]);
+        }
+        var deviceIds = collectRouteDeviceIds(routeUniverse, trips);
+        var logsByDevice = {};
+        try { logsByDevice = await fetchLogRecordsByDevice(deviceIds, fromIso, toIso); } catch (e) {}
+        if (runId !== _tlRunId) return;
+
+        // Compute event info for (entry, day, route).
+        // Key: entry.type + '|' + entry.id + '|' + routeUid + '|' + dateStr
+        // Value: { eventMs, missed, hasData, pending }
+        var eventIndex = {};
+        var todayStr = formatDate(new Date());
+        var nowMs = Date.now();
+        for (var ei2 = 0; ei2 < selected.length; ei2++) {
+            var entry = selected[ei2];
+            var rsE = routesFor(entry);
+            for (var ri2 = 0; ri2 < rsE.length; ri2++) {
+                var rr4 = rsE[ri2];
+                var rDays2 = rr4.activeDays || [0,1,2,3,4,5];
+                var zone = cachedZones.find(function (z) { return z.id === rr4.zoneId; });
+                var isDriverRoute = rr4.trackBy === 'driver';
+                for (var dci = 0; dci < 7; dci++) {
+                    var colDate2 = new Date(weekStart); colDate2.setDate(colDate2.getDate() + dci);
+                    var dow2 = colDate2.getDay();
+                    if (rDays2.indexOf(dow2) === -1) continue;
+                    var dStr = formatDate(colDate2);
+                    var startMinR = timeToMinutes(rr4.startTime);
+                    var endMinR = timeToMinutes(rr4.endTime);
+                    var wFromMs = new Date(dStr + 'T00:00:00').getTime() + startMinR * 60000;
+                    var wToMs = new Date(dStr + 'T00:00:00').getTime() + endMinR * 60000;
+                    var future = dStr > todayStr || (dStr === todayStr && nowMs < wFromMs);
+                    if (future) {
+                        eventIndex[entry.type + '|' + entry.id + '|' + rr4._uid + '|' + dStr] = { future: true };
+                        continue;
+                    }
+                    if (dStr === todayStr) wToMs = Math.min(wToMs, nowMs);
+                    // Resolve the day's device ids for this driver (or the vehicle itself).
+                    var dayDevIds;
+                    if (isDriverRoute) {
+                        if (entry.type !== 'driver' || entry.id !== undefined) {
+                            // This route tracks drivers. Only process this entry if it's a driver.
+                            if (entry.type !== 'driver') continue;
+                        }
+                        var set = {};
+                        for (var ti = 0; ti < trips.length; ti++) {
+                            var tr = trips[ti];
+                            if (!tr.driver || tr.driver.id !== entry.id) continue;
+                            if (!tr.device || !tr.device.id) continue;
+                            var sD = tr.stop ? new Date(tr.stop) : null;
+                            if (!sD || formatDate(sD) !== dStr) continue;
+                            set[tr.device.id] = true;
+                        }
+                        dayDevIds = Object.keys(set);
+                    } else {
+                        if (entry.type !== 'vehicle') continue;
+                        dayDevIds = [entry.id];
+                    }
+                    var effLogs = isDriverRoute
+                        ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, entry.id))
+                        : logsByDevice;
+                    var merged = mergeDeviceLogs(effLogs, dayDevIds);
+                    var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
+                    augmentPresenceWithTrips(presence, trips, isDriverRoute ? entry.id : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
+                    var evMs = rr4.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                    var windowEndedNow = nowMs > (new Date(dStr + 'T00:00:00').getTime() + endMinR * 60000);
+                    var missed = !evMs && windowEndedNow;
+                    var pending = !evMs && !windowEndedNow;
+                    eventIndex[entry.type + '|' + entry.id + '|' + rr4._uid + '|' + dStr] = {
+                        eventMs: evMs, missed: missed, pending: pending, hasData: presence.hasData
+                    };
+                }
+            }
+        }
+        if (runId !== _tlRunId) return;
+
+        // Now build the grid using actual event times (or "Missed").
         var DAY_HDR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         var graphHeight = 640;
         var pxPerMin = graphHeight / spanMin;
@@ -4586,6 +4683,7 @@
         for (var dcol = 0; dcol < 7; dcol++) {
             var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dcol);
             var dow = colDate.getDay();
+            var colDateStr = formatDate(colDate);
             html += '<div class="rpTlDay" style="position:relative;background:#fff;min-height:' + graphHeight + 'px;">';
             for (var g = firstHour; g <= maxMin; g += 60) {
                 var gtop = (g - minMin) * pxPerMin;
@@ -4593,8 +4691,8 @@
             }
             var colCount = Math.max(1, selected.length);
             for (var ei = 0; ei < selected.length; ei++) {
-                var entry = selected[ei];
-                var rs2 = routesFor(entry);
+                var entry2 = selected[ei];
+                var rs2 = routesFor(entry2);
                 for (var rj = 0; rj < rs2.length; rj++) {
                     var rr2 = rs2[rj];
                     var rDays = rr2.activeDays || [0,1,2,3,4,5];
@@ -4603,21 +4701,57 @@
                     var e2 = timeToMinutes(rr2.endTime);
                     var cardTop = (s2 - minMin) * pxPerMin;
                     var cardH = Math.max(20, (e2 - s2) * pxPerMin);
-                    var color = tlColorFor(entry.type, entry.id);
+                    var routeColor = tlColorFor(entry2.type, entry2.id);
                     var leftPct = (ei / colCount) * 100;
                     var widthPct = (1 / colCount) * 100;
+                    var tipName = escapeHtml((entry2.type === 'driver' ? cachedDrivers[entry2.id] : cachedDevices[entry2.id]) || entry2.id);
+                    var typeLabel = entry2.type === 'driver' ? 'Driver' : 'Vehicle';
+
+                    // Look up event info.
+                    var ev = eventIndex[entry2.type + '|' + entry2.id + '|' + rr2._uid + '|' + colDateStr];
+                    var bg = routeColor;
+                    var line2Html = '';
+                    var eventVerb = rr2.direction === 'outside' ? 'Departed' : 'Arrived';
+                    if (!ev) {
+                        line2Html = '<span style="opacity:0.9">' + formatWindow(rr2.startTime, rr2.endTime) + '</span>';
+                    } else if (ev.future) {
+                        bg = '#b0bec5';
+                        line2Html = '<span style="opacity:0.9">Scheduled ' + formatWindow(rr2.startTime, rr2.endTime) + '</span>';
+                    } else if (ev.missed) {
+                        bg = '#dc3545';
+                        line2Html = '<span style="font-weight:700;letter-spacing:0.5px;">MISSED</span>';
+                    } else if (ev.eventMs) {
+                        // Recolor by on-time/late vs target.
+                        if (routeHasTarget(rr2)) {
+                            var b = routeTargetBounds(rr2);
+                            var tsMs = new Date(colDateStr + 'T00:00:00').getTime() + timeToMinutes(b.start) * 60000;
+                            var teMs = new Date(colDateStr + 'T00:00:00').getTime() + timeToMinutes(b.end) * 60000;
+                            var graceMs = Math.max(0, parseInt(rr2.graceMin, 10) || 0) * 60000;
+                            if (ev.eventMs >= tsMs - graceMs && ev.eventMs <= teMs + graceMs) bg = '#28a745';
+                            else if (ev.eventMs > teMs) bg = '#dc3545';
+                            else bg = '#e67e22';
+                        } else {
+                            bg = '#28a745';
+                        }
+                        var evDate = new Date(ev.eventMs);
+                        var eh = evDate.getHours();
+                        var em = ('0' + evDate.getMinutes()).slice(-2);
+                        var eAmpm = eh >= 12 ? 'PM' : 'AM';
+                        var eh12 = eh % 12 || 12;
+                        line2Html = '<span style="font-weight:700;">' + eventVerb + ' ' + eh12 + ':' + em + ' ' + eAmpm + '</span>';
+                    } else if (ev.pending) {
+                        bg = '#9e9e9e';
+                        line2Html = '<span style="opacity:0.9">Pending (' + formatWindow(rr2.startTime, rr2.endTime) + ')</span>';
+                    }
                     var label = escapeHtml(rr2.name);
-                    var subLabel = formatWindow(rr2.startTime, rr2.endTime);
-                    var tipName = escapeHtml((entry.type === 'driver' ? cachedDrivers[entry.id] : cachedDevices[entry.id]) || entry.id);
-                    var typeLabel = entry.type === 'driver' ? 'Driver' : 'Vehicle';
-                    html += '<div class="rpTlCard" title="' + typeLabel + ': ' + tipName + ' — ' + label + ' (' + subLabel + ')" ' +
+                    html += '<div class="rpTlCard" title="' + typeLabel + ': ' + tipName + ' — ' + label + ' (scheduled ' + formatWindow(rr2.startTime, rr2.endTime) + ')" ' +
                         'style="position:absolute;top:' + cardTop + 'px;height:' + cardH + 'px;' +
                         'left:calc(' + leftPct + '% + 2px);width:calc(' + widthPct + '% - 4px);' +
-                        'background:' + color + ';color:#fff;border-radius:4px;padding:4px 6px;' +
+                        'background:' + bg + ';color:#fff;border-radius:4px;padding:4px 6px;' +
                         'font-size:11px;line-height:1.2;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.15);' +
-                        'box-sizing:border-box;">' +
+                        'box-sizing:border-box;border-left:3px solid ' + routeColor + ';">' +
                         '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
-                        '<div style="opacity:0.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + subLabel + '</div>' +
+                        '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2Html + '</div>' +
                         '</div>';
                 }
             }
