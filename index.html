@@ -3662,6 +3662,14 @@
         var targetStartMs = dayMs + timeToMinutes(b.start) * 60000;
         var targetEndMs = dayMs + timeToMinutes(b.end) * 60000;
         var grace = Math.max(0, parseInt(route.graceMin, 10) || 0) * 60000;
+        // Route end boundary for the "vs Route end" hint shown when Late.
+        var routeEndMs = dayMs + timeToMinutes(route.endTime) * 60000;
+        function vsRouteEnd(ms) {
+            var diffMs = ms - routeEndMs;
+            if (diffMs < 0) return formatMinutesHM(Math.round(-diffMs / 60000)) + ' to Route end';
+            if (diffMs > 0) return formatMinutesHM(Math.round(diffMs / 60000)) + ' after Route end';
+            return 'at Route end';
+        }
         if (eventMs) {
             if (eventMs >= targetStartMs - grace && eventMs <= targetEndMs + grace) {
                 // Inside the tolerant window; show a subtle offset from nearest edge.
@@ -3675,18 +3683,21 @@
             }
             if (eventMs > targetEndMs) {
                 var lateMin = Math.round((eventMs - targetEndMs) / 60000);
-                return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>';
+                return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>' +
+                    ' <span style="color:#888;font-weight:400;font-size:11px;">(' + vsRouteEnd(eventMs) + ')</span>';
             }
             var earlyMin = Math.round((targetStartMs - eventMs) / 60000);
             return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(earlyMin) + '</span>';
         }
         if (windowEnded) {
-            return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>';
+            return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>' +
+                (nowMs ? ' <span style="color:#888;font-weight:400;font-size:11px;">(' + vsRouteEnd(nowMs) + ')</span>' : '');
         }
         if (nowMs && nowMs > targetEndMs + grace) {
             var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
             var verb = route.direction === 'outside' ? 'no departure yet' : 'no arrival yet';
-            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ')</span></span>';
+            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + '</span>' +
+                ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ', ' + vsRouteEnd(nowMs) + ')</span>';
         }
         return '<span style="color:#aaa">Pending</span>';
     }
