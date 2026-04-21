@@ -4158,11 +4158,13 @@
 
     // ========== COMPARE LAST 7 DAYS (ROLLING AVERAGE) ==========
     // Keyed by baseDateStr + '|' + routeUid + '|' + assignedId; value:
-    //   { samples: N, avgVariance: number|null, noShowCount: M, activeDays: D }
-    // samples      = days in the 7-day window that produced an event
-    // avgVariance  = mean of those days' variances (in minutes, signed)
-    // noShowCount  = days the route was active but no event was recorded
-    // activeDays   = total days the route was active (samples + noShowCount)
+    //   { samples: N, avgVariance: number|null, avgEventMinutes: number|null,
+    //     noShowCount: M, activeDays: D }
+    // samples         = days in the 7-day window that produced an event
+    // avgVariance     = mean of those days' variances (in minutes, signed)
+    // avgEventMinutes = mean event time-of-day (minutes from midnight)
+    // noShowCount     = days the route was active but no event was recorded
+    // activeDays      = total days the route was active (samples + noShowCount)
     // Once a base date is fully computed we set _compareComputedForDate[baseDateStr]
     // and subsequent toggle-on / renders short-circuit to applyCompareBadges with
     // no API calls. Cache persists for the session.
@@ -4170,25 +4172,79 @@
     var _compareComputedForDate = {};
     var _compareRunId = 0;
 
+    function formatHourMin(totalMin) {
+        if (totalMin == null || isNaN(totalMin)) return '';
+        var t = Math.round(totalMin);
+        var h = Math.floor(t / 60), m = ((t % 60) + 60) % 60;
+        var ampm = h >= 12 ? 'PM' : 'AM';
+        var h12 = h % 12 || 12;
+        return h12 + ':' + ('0' + m).slice(-2) + ' ' + ampm;
+    }
+
+    // Live side-badge: compares nowMs (or the row's actual eventMs) to the 7d-avg
+    // time of day. Uses the route's own graceMin as the green/red threshold so
+    // each route can tune its own "close enough" window.
+    function formatAvgLiveIndicator(avgEventMinutes, eventMs, dateStr, nowMs, route) {
+        if (avgEventMinutes == null) return '';
+        var grace = Math.max(0, parseInt(route && route.graceMin, 10) || 0);
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var avgMs = dayMs + avgEventMinutes * 60000;
+        if (eventMs) {
+            // Already arrived/departed/started — show diff vs avg, green if within grace.
+            var diffMin = Math.round((eventMs - avgMs) / 60000);
+            var good = Math.abs(diffMin) <= grace;
+            var color = good ? '#28a745' : '#dc3545';
+            var sign = diffMin > 0 ? '+' : (diffMin < 0 ? '-' : '');
+            return '<span style="color:' + color + ';font-size:11px;font-weight:600;margin-left:6px;">' +
+                sign + formatMinutesHM(Math.abs(diffMin)) + ' vs 7d avg</span>';
+        }
+        // No event yet — compare clock-time to the average.
+        //   avg still in the future → "Due in Xm" (green)
+        //   avg in the past        → "Over by Xm" (green within route's graceMin, else red)
+        var deltaMin = Math.round((avgMs - nowMs) / 60000);
+        if (deltaMin > 0) {
+            return '<span style="color:#28a745;font-size:11px;font-weight:600;margin-left:6px;">Due in ' +
+                formatMinutesHM(deltaMin) + ' (vs 7d avg)</span>';
+        }
+        var overMin = -deltaMin;
+        var good2 = overMin <= grace;
+        var color2 = good2 ? '#28a745' : '#dc3545';
+        return '<span style="color:' + color2 + ';font-size:11px;font-weight:600;margin-left:6px;">Overdue ' +
+            formatMinutesHM(overMin) + ' (vs 7d avg)</span>';
+    }
+
     function formatCompareCellHtml(entry, route) {
         if (!entry || !entry.activeDays) return '<span style="color:#aaa;font-size:11px;">7d avg: —</span>';
         var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
         if (entry.samples === 0) {
             return '<span style="color:#888;font-size:11px;">7d avg: No-show (' + entry.noShowCount + '/' + entry.activeDays + ')</span>';
         }
-        var v = entry.avgVariance;
+        var avgTime = entry.avgEventMinutes != null
+            ? ' <span style="color:#555;font-weight:600;">@' + formatHourMin(entry.avgEventMinutes) + '</span>'
+            : '';
         var noShowSuffix = entry.noShowCount > 0
             ? ' <span style="color:#888;font-weight:400;">+ ' + entry.noShowCount + ' no-show</span>'
             : '';
         var sampleNote = ' <span style="color:#888;font-weight:400;">(' + entry.samples + '/' + entry.activeDays + ' days)</span>';
-        if (Math.abs(v) <= grace) return '<span style="color:#28a745;font-size:11px;font-weight:600;">7d avg: On time</span>' + sampleNote + noShowSuffix;
-        if (v > 0) return '<span style="color:#dc3545;font-size:11px;font-weight:600;">7d avg: Late ' + formatMinutesHM(Math.round(v)) + '</span>' + sampleNote + noShowSuffix;
-        return '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d avg: Early ' + formatMinutesHM(Math.round(-v)) + '</span>' + sampleNote + noShowSuffix;
+        var v = entry.avgVariance;
+        var core;
+        if (v == null) {
+            // No target window set for this route — just show the time-of-day average.
+            core = '<span style="color:#555;font-size:11px;font-weight:600;">7d avg:</span>';
+        } else if (Math.abs(v) <= grace) {
+            core = '<span style="color:#28a745;font-size:11px;font-weight:600;">7d avg: On time</span>';
+        } else if (v > 0) {
+            core = '<span style="color:#dc3545;font-size:11px;font-weight:600;">7d avg: Late ' + formatMinutesHM(Math.round(v)) + '</span>';
+        } else {
+            core = '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d avg: Early ' + formatMinutesHM(Math.round(-v)) + '</span>';
+        }
+        return core + avgTime + sampleNote + noShowSuffix;
     }
 
     function applyCompareBadges(routes) {
         var compareOn = !!(document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked);
         var baseDateStr = document.getElementById('rpProgressDate').value || formatDate(new Date());
+        var nowMs = Date.now();
         var rows = document.querySelectorAll('#rpProgressContent tr[data-row-uid]');
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
@@ -4210,10 +4266,14 @@
             // Skip rows where the route never ran on any active day in the window
             // (entry missing OR activeDays === 0) so we don't show a blank placeholder.
             if (!entry || !entry.activeDays) continue;
+            var eventRaw = row.dataset.eventMs;
+            var rowEventMs = eventRaw ? parseInt(eventRaw, 10) : null;
+            if (!rowEventMs) rowEventMs = null;
             var line = document.createElement('div');
             line.className = 'rpCompareLine';
             line.style.setProperty('margin-top', '2px', 'important');
-            line.innerHTML = formatCompareCellHtml(entry, route);
+            line.innerHTML = formatCompareCellHtml(entry, route) +
+                formatAvgLiveIndicator(entry.avgEventMinutes, rowEventMs, baseDateStr, nowMs, route);
             vCell.appendChild(line);
         }
     }
@@ -4258,15 +4318,16 @@
             for (var ai = 0; ai < aIds.length; ai++) {
                 var aId = aIds[ai];
                 if (!lookup[aId]) continue;
-                var samples = 0, noShowCount = 0, activeDays = 0, sumVariance = 0;
+                var samples = 0, noShowCount = 0, activeDays = 0, sumVariance = 0, sumEventMinutes = 0;
 
                 for (var di = 0; di < daysInWindow.length; di++) {
                     var dStr = daysInWindow[di];
                     var dow = new Date(dStr + 'T12:00:00').getDay();
                     if (rDays.indexOf(dow) === -1) continue;
                     activeDays++;
-                    var wFromMs = new Date(dStr + 'T00:00:00').getTime() + startMin * 60000;
-                    var wToMs = new Date(dStr + 'T00:00:00').getTime() + endMin * 60000;
+                    var dayBaseMs = new Date(dStr + 'T00:00:00').getTime();
+                    var wFromMs = dayBaseMs + startMin * 60000;
+                    var wToMs = dayBaseMs + endMin * 60000;
 
                     var dayDevIds;
                     if (isDriverRoute) {
@@ -4291,15 +4352,18 @@
                     augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
                     var evMs = getRouteEventMs(presence, r.direction);
                     if (!evMs) { noShowCount++; continue; }
-                    var variance = computeTargetVarianceMin(evMs, r, dStr);
-                    if (variance === null) continue; // no target window set — skip rather than counting as sample
+                    // Always track the time-of-day average (minutes from midnight),
+                    // even if the route has no target window to compute variance against.
+                    sumEventMinutes += (evMs - dayBaseMs) / 60000;
                     samples++;
-                    sumVariance += variance;
+                    var variance = computeTargetVarianceMin(evMs, r, dStr);
+                    if (variance !== null) sumVariance += variance;
                 }
 
                 _compareCache[baseDateStr + '|' + r._uid + '|' + aId] = {
                     samples: samples,
-                    avgVariance: samples > 0 ? (sumVariance / samples) : null,
+                    avgVariance: (routeHasTarget(r) && samples > 0) ? (sumVariance / samples) : null,
+                    avgEventMinutes: samples > 0 ? (sumEventMinutes / samples) : null,
                     noShowCount: noShowCount,
                     activeDays: activeDays
                 };
