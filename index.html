@@ -811,6 +811,16 @@
                     });
                 }
             } catch (e) {}
+            // Show a loading state in the main content area while the initial
+            // reference data (zones/devices/drivers/routes) is being fetched.
+            injectSparklineStyles();
+            var _initContent = document.getElementById('rpProgressContent');
+            if (_initContent) {
+                _initContent.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
+                    '<div class="rpSpinner" style="margin:0 auto 12px;"></div>' +
+                    '<div style="font-size:13px;">Loading zones, devices, drivers, and routes…</div>' +
+                    '</div>';
+            }
             await loadZones();
             await loadDevices();
             await loadDrivers();
@@ -2137,6 +2147,8 @@
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
                 row.dataset.eventMs = eventMs || '';
+                row.dataset.lastLogMs = presence.lastLogMs || '';
+                row.dataset.lastSpeed = (typeof presence.lastSpeed === 'number') ? presence.lastSpeed : '';
             }
             liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
         }
@@ -2485,7 +2497,7 @@
                         var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '">' +
                                 '<td class="rptd"><span>' + escapeHtml(aName) + '</span> ' +
                                     '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
                                         'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
@@ -2709,6 +2721,15 @@
         var btn = document.getElementById('rpBtnGenReport');
         btn.textContent = 'Generating...';
         forceStyle(btn, { 'background': '#a0c4e8' });
+        // Show an in-table spinner so the user knows the report is generating.
+        injectSparklineStyles();
+        var _reportBody = document.getElementById('rpReportBody');
+        if (_reportBody) {
+            _reportBody.innerHTML = '<tr><td colspan="99" style="text-align:center;padding:40px;color:#888;">' +
+                '<div class="rpSpinner" style="margin:0 auto 12px;"></div>' +
+                '<div style="font-size:13px;">Generating report…</div>' +
+                '</td></tr>';
+        }
 
         try {
             await loadRoutes();
@@ -4286,12 +4307,25 @@
             var pastWindow = isToday ? (now >= dayBaseMs + endMin * 60000) : true;
             var varianceCell = row.querySelector('.rpVarianceCell');
             if (varianceCell) varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow);
+            // Engine cell ("No signal" after 15 min of stale GPS) is also time-relative —
+            // re-evaluate staleness on the tick even when Go Live is off. We use the
+            // cell's own cached speed + lastLogMs (written on the last full render).
+            var engineCell = row.querySelector('.rpEngineCell');
+            if (engineCell && row.dataset.lastLogMs) {
+                var _ll = parseInt(row.dataset.lastLogMs, 10);
+                var _sp = row.dataset.lastSpeed === '' ? null : parseFloat(row.dataset.lastSpeed);
+                engineCell.innerHTML = formatEngineCell(isNaN(_sp) ? null : _sp, _ll, now);
+            }
         }
+        // ETA bar's "X% elapsed" text is purely a function of wall-clock time vs the
+        // route window — tick it here so the bar keeps advancing without Live mode.
+        updateEtaBars(now);
         // Re-apply the "7d ago" sub-line if Compare mode is on, since we just
         // overwrote every variance cell's innerHTML above.
         if (document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked) {
             applyCompareBadges(savedRoutes);
         }
+        refreshLastUpdatedText();
     }
     setInterval(refreshRelativeTimesOnly, 30000);
 
@@ -4418,7 +4452,8 @@
         var s = document.createElement('style');
         s.textContent =
             '@keyframes rpSpin { to { transform: rotate(360deg); } }' +
-            '#rpSparklinePopup .rpSpinner{' +
+            '.rpSpinner{' +
+                'display:inline-block;box-sizing:border-box;' +
                 'width:32px;height:32px;border-radius:50%;' +
                 'border:3px solid #eef2f6;border-top-color:#0078d4;' +
                 'animation:rpSpin 0.85s linear infinite;' +
