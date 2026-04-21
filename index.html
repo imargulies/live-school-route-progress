@@ -166,7 +166,7 @@
             </label>
             <label id="rpChkCompareModeLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
                 <input type="checkbox" id="rpChkCompareMode">
-                <span class="rpLbl" title="Show last-week variance under vs Target for each row.">Compare 7d ago</span>
+                <span class="rpLbl" title="Show last-7-day average variance vs target under vs Target for each row.">Compare last 7d avg</span>
             </label>
             <label id="rpChkNotifyLbl" style="display:inline-flex; align-items:center; gap:6px; margin-left:8px; cursor:pointer; user-select:none;">
                 <input type="checkbox" id="rpChkNotify">
@@ -4156,30 +4156,40 @@
         }
     }
 
-    // ========== COMPARE 7-DAYS-AGO ==========
-    // Keyed by routeUid + '|' + assignedId; value: { variance: number|null, eventMs: ms|null }
+    // ========== COMPARE LAST 7 DAYS (ROLLING AVERAGE) ==========
+    // Keyed by baseDateStr + '|' + routeUid + '|' + assignedId; value:
+    //   { samples: N, avgVariance: number|null, noShowCount: M, activeDays: D }
+    // samples      = days in the 7-day window that produced an event
+    // avgVariance  = mean of those days' variances (in minutes, signed)
+    // noShowCount  = days the route was active but no event was recorded
+    // activeDays   = total days the route was active (samples + noShowCount)
+    // Once a base date is fully computed we set _compareComputedForDate[baseDateStr]
+    // and subsequent toggle-on / renders short-circuit to applyCompareBadges with
+    // no API calls. Cache persists for the session.
     var _compareCache = {};
+    var _compareComputedForDate = {};
     var _compareRunId = 0;
 
     function formatCompareCellHtml(entry, route) {
-        if (!entry) return '<span style="color:#aaa;font-size:11px;">7d: —</span>';
-        if (!entry.eventMs) return '<span style="color:#888;font-size:11px;">7d: No-show</span>';
+        if (!entry || !entry.activeDays) return '<span style="color:#aaa;font-size:11px;">7d avg: —</span>';
         var grace = Math.max(0, parseInt(route.graceMin, 10) || 0);
-        var v = entry.variance;
-        if (v === null) return '<span style="color:#888;font-size:11px;">7d: —</span>';
-        if (Math.abs(v) <= grace) return '<span style="color:#28a745;font-size:11px;font-weight:600;">7d: On time</span>';
-        if (v > 0) return '<span style="color:#dc3545;font-size:11px;font-weight:600;">7d: Late ' + formatMinutesHM(v) + '</span>';
-        return '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d: Early ' + formatMinutesHM(-v) + '</span>';
+        if (entry.samples === 0) {
+            return '<span style="color:#888;font-size:11px;">7d avg: No-show (' + entry.noShowCount + '/' + entry.activeDays + ')</span>';
+        }
+        var v = entry.avgVariance;
+        var noShowSuffix = entry.noShowCount > 0
+            ? ' <span style="color:#888;font-weight:400;">+ ' + entry.noShowCount + ' no-show</span>'
+            : '';
+        var sampleNote = ' <span style="color:#888;font-weight:400;">(' + entry.samples + '/' + entry.activeDays + ' days)</span>';
+        if (Math.abs(v) <= grace) return '<span style="color:#28a745;font-size:11px;font-weight:600;">7d avg: On time</span>' + sampleNote + noShowSuffix;
+        if (v > 0) return '<span style="color:#dc3545;font-size:11px;font-weight:600;">7d avg: Late ' + formatMinutesHM(Math.round(v)) + '</span>' + sampleNote + noShowSuffix;
+        return '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d avg: Early ' + formatMinutesHM(Math.round(-v)) + '</span>' + sampleNote + noShowSuffix;
     }
 
     function applyCompareBadges(routes) {
         var compareOn = !!(document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked);
-        var rows = document.querySelectorAll('#rpProgressContent tr[data-row-uid]');
-        // Compute the comparison day-of-week once; routes not active on that weekday
-        // get no compare line at all (instead of a "7d: —" placeholder).
         var baseDateStr = document.getElementById('rpProgressDate').value || formatDate(new Date());
-        var prev = new Date(baseDateStr + 'T12:00:00'); prev.setDate(prev.getDate() - 7);
-        var prevDow = prev.getDay();
+        var rows = document.querySelectorAll('#rpProgressContent tr[data-row-uid]');
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
             var vCell = row.querySelector('.rpVarianceCell');
@@ -4196,10 +4206,10 @@
             if (routes) { for (var k = 0; k < routes.length; k++) if (routes[k]._uid === routeUid) { route = routes[k]; break; } }
             if (!route) route = findRouteByUid(routeUid);
             if (!route) continue;
-            // Skip routes whose comparison day is not in their active weekdays.
-            var rDays = route.activeDays || [0,1,2,3,4,5];
-            if (rDays.indexOf(prevDow) === -1) continue;
-            var entry = _compareCache[routeUid + '|' + aId];
+            var entry = _compareCache[baseDateStr + '|' + routeUid + '|' + aId];
+            // Skip rows where the route never ran on any active day in the window
+            // (entry missing OR activeDays === 0) so we don't show a blank placeholder.
+            if (!entry || !entry.activeDays) continue;
             var line = document.createElement('div');
             line.className = 'rpCompareLine';
             line.style.setProperty('margin-top', '2px', 'important');
@@ -4211,63 +4221,92 @@
     async function computeCompareData(routes, baseDateStr) {
         var runId = ++_compareRunId;
         if (!routes || !routes.length) return;
+        // If we've already computed this base date in-session, reuse cached entries.
+        if (_compareComputedForDate[baseDateStr]) { applyCompareBadges(routes); return; }
         var base = new Date(baseDateStr + 'T00:00:00');
-        var prev = new Date(base); prev.setDate(prev.getDate() - 7);
-        var prevStr = formatDate(prev);
-        var dayStart = new Date(prevStr + 'T00:00:00');
-        var dayEnd = new Date(prevStr + 'T00:00:00'); dayEnd.setDate(dayEnd.getDate() + 1);
+        // Window: the 7 calendar days ending the day before `baseDateStr`.
+        var windowEnd = new Date(base);
+        var windowStart = new Date(base); windowStart.setDate(windowStart.getDate() - 7);
+        var fetchFromIso = windowStart.toISOString();
+        var fetchToIso = windowEnd.toISOString();
         var trips = [];
-        try { trips = await cachedGetTrips(dayStart.toISOString(), dayEnd.toISOString()); }
+        try { trips = await cachedGetTrips(fetchFromIso, fetchToIso); }
         catch (e) { return; }
         if (runId !== _compareRunId) return;
         var deviceIds = collectRouteDeviceIds(routes, trips);
         var logsByDevice = {};
-        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, dayStart.toISOString(), dayEnd.toISOString()); } catch (e) {}
+        try { logsByDevice = await cachedLogRecordsByDevice(deviceIds, fetchFromIso, fetchToIso); } catch (e) {}
         if (runId !== _compareRunId) return;
 
-        var prevDow = new Date(prevStr + 'T12:00:00').getDay();
+        // Build the list of day-strings in the window (oldest → newest).
+        var daysInWindow = [];
+        for (var d = 0; d < 7; d++) {
+            var dd = new Date(windowStart); dd.setDate(dd.getDate() + d);
+            daysInWindow.push(formatDate(dd));
+        }
+
         for (var ri = 0; ri < routes.length; ri++) {
             var r = routes[ri];
-            var rDays = r.activeDays || [0,1,2,3,4,5];
-            if (rDays.indexOf(prevDow) === -1) continue;
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
             var isDriverRoute = r.trackBy === 'driver';
             var aIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
             var lookup = isDriverRoute ? cachedDrivers : cachedDevices;
+            var rDays = r.activeDays || [0,1,2,3,4,5];
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
-            var wFromMs = new Date(prevStr + 'T00:00:00').getTime() + startMin * 60000;
-            var wToMs = new Date(prevStr + 'T00:00:00').getTime() + endMin * 60000;
+
             for (var ai = 0; ai < aIds.length; ai++) {
                 var aId = aIds[ai];
                 if (!lookup[aId]) continue;
-                var dayDevIds;
-                if (isDriverRoute) {
-                    var set = {};
-                    for (var ti = 0; ti < trips.length; ti++) {
-                        var tr = trips[ti];
-                        if (!tr.driver || tr.driver.id !== aId) continue;
-                        if (!tr.device || !tr.device.id) continue;
-                        var s = tr.stop ? new Date(tr.stop) : null;
-                        if (!s || formatDate(s) !== prevStr) continue;
-                        set[tr.device.id] = true;
+                var samples = 0, noShowCount = 0, activeDays = 0, sumVariance = 0;
+
+                for (var di = 0; di < daysInWindow.length; di++) {
+                    var dStr = daysInWindow[di];
+                    var dow = new Date(dStr + 'T12:00:00').getDay();
+                    if (rDays.indexOf(dow) === -1) continue;
+                    activeDays++;
+                    var wFromMs = new Date(dStr + 'T00:00:00').getTime() + startMin * 60000;
+                    var wToMs = new Date(dStr + 'T00:00:00').getTime() + endMin * 60000;
+
+                    var dayDevIds;
+                    if (isDriverRoute) {
+                        var set = {};
+                        for (var ti = 0; ti < trips.length; ti++) {
+                            var tr = trips[ti];
+                            if (!tr.driver || tr.driver.id !== aId) continue;
+                            if (!tr.device || !tr.device.id) continue;
+                            var s = tr.stop ? new Date(tr.stop) : null;
+                            if (!s || formatDate(s) !== dStr) continue;
+                            set[tr.device.id] = true;
+                        }
+                        dayDevIds = Object.keys(set);
+                    } else {
+                        dayDevIds = [aId];
                     }
-                    dayDevIds = Object.keys(set);
-                } else {
-                    dayDevIds = [aId];
+                    var effLogs = isDriverRoute
+                        ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, aId))
+                        : logsByDevice;
+                    var merged = mergeDeviceLogs(effLogs, dayDevIds);
+                    var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
+                    augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
+                    var evMs = getRouteEventMs(presence, r.direction);
+                    if (!evMs) { noShowCount++; continue; }
+                    var variance = computeTargetVarianceMin(evMs, r, dStr);
+                    if (variance === null) continue; // no target window set — skip rather than counting as sample
+                    samples++;
+                    sumVariance += variance;
                 }
-                var effLogs = isDriverRoute
-                    ? filterLogsByAttribution(logsByDevice, dayDevIds, buildDriverAttributionMap(trips, aId))
-                    : logsByDevice;
-                var merged = mergeDeviceLogs(effLogs, dayDevIds);
-                var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
-                augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
-                var evMs = getRouteEventMs(presence, r.direction);
-                var variance = computeTargetVarianceMin(evMs, r, prevStr);
-                _compareCache[r._uid + '|' + aId] = { eventMs: evMs, variance: variance };
+
+                _compareCache[baseDateStr + '|' + r._uid + '|' + aId] = {
+                    samples: samples,
+                    avgVariance: samples > 0 ? (sumVariance / samples) : null,
+                    noShowCount: noShowCount,
+                    activeDays: activeDays
+                };
             }
         }
         if (runId !== _compareRunId) return;
+        _compareComputedForDate[baseDateStr] = true;
         applyCompareBadges(routes);
     }
 
