@@ -2070,6 +2070,7 @@
                 var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                 augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
                 var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
@@ -2434,6 +2435,7 @@
                         var mergedLogs = mergeDeviceLogs(effectiveLogsByDevice, rowDeviceIds);
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                         augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                        adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
                         var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
@@ -3609,6 +3611,107 @@
         var s = {};
         for (var i = 0; i < (ids || []).length; i++) s[ids[i]] = true;
         return s;
+    }
+
+    // Find the closest route for the same driver/vehicle that sits right before
+    // (neighborType='prior') or right after ('next') the given route on the same
+    // calendar day, with a window gap <= 30 min. Used to re-attribute late
+    // arrivals that straddle two back-to-back routes.
+    function findContiguousRouteNeighbor(currentRoute, assignedId, neighborType, routesList, dateStr) {
+        if (!currentRoute || !assignedId || !routesList) return null;
+        var dayOfWeek = new Date(dateStr + 'T12:00:00').getDay();
+        var assignedField = currentRoute.trackBy === 'driver' ? 'driverIds' : 'vehicleIds';
+        var curStart = timeToMinutes(currentRoute.startTime);
+        var curEnd = timeToMinutes(currentRoute.endTime);
+        var best = null, bestGap = Infinity;
+        for (var i = 0; i < routesList.length; i++) {
+            var r = routesList[i];
+            if (!r || r._uid === currentRoute._uid) continue;
+            if (r.direction !== 'inside') continue;
+            if (r.trackBy !== currentRoute.trackBy) continue;
+            var ids = r[assignedField] || [];
+            if (ids.indexOf(assignedId) === -1) continue;
+            var days = r.activeDays || [0,1,2,3,4,5];
+            if (days.indexOf(dayOfWeek) === -1) continue;
+            var rStart = timeToMinutes(r.startTime);
+            var rEnd = timeToMinutes(r.endTime);
+            var gap;
+            if (neighborType === 'prior') {
+                if (rEnd > curStart) continue;
+                gap = curStart - rEnd;
+            } else {
+                if (rStart < curEnd) continue;
+                gap = rStart - curEnd;
+            }
+            if (gap < 0 || gap > 30) continue;
+            if (gap < bestGap) { best = r; bestGap = gap; }
+        }
+        return best;
+    }
+
+    // Re-attribute late arrivals between two adjacent routes for the same driver
+    // (driver-mode) or vehicle (vehicle-mode). Without this, a driver late out of
+    // Route A (7:30-8:30) arriving at 8:45 gets credited to Route B (8:30-9:30)
+    // because 8:45 falls inside B's window. Two adjustments:
+    //   (a) If a prior contiguous route owns the arrival — either it already has
+    //       an arrival with no departure (driver never left), or its own window
+    //       had no arrival but an arrival exists in the 30-min tail — clear this
+    //       route's arrivedAtMs so it doesn't claim a continuation.
+    //   (b) If this route has no arrival in its own window but a next contiguous
+    //       route exists, borrow back an arrival from the 30-min tail after this
+    //       route's end so vs-target reads "Late Xm" instead of "No-show".
+    // Only runs for direction==='inside'. Mutates `presence.arrivedAtMs`.
+    function adjustPresenceForAdjacentRoutes(presence, route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs) {
+        if (!zonePoints || !zonePoints.length || route.direction !== 'inside') return;
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var routeStartMs = dayMs + timeToMinutes(route.startTime) * 60000;
+        var routeEndMs = dayMs + timeToMinutes(route.endTime) * 60000;
+        var isDriverMode = route.trackBy === 'driver';
+        var devSet = deviceIdSetFromList(rowDeviceIds);
+        var driverFilter = isDriverMode ? aId : null;
+
+        // (a) Prior contiguous route may own this arrival.
+        var prior = findContiguousRouteNeighbor(route, aId, 'prior', savedRoutes, dateStr);
+        if (prior) {
+            var priorStartMs = dayMs + timeToMinutes(prior.startTime) * 60000;
+            var priorEndMs = dayMs + timeToMinutes(prior.endTime) * 60000;
+            var priorOwns = false;
+            var priorPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorStartMs, priorEndMs);
+            augmentPresenceWithTrips(priorPresence, trips, driverFilter, devSet, zonePoints, priorStartMs, priorEndMs);
+            if (priorPresence.arrivedAtMs && priorPresence.departedAtMs === null) {
+                // Driver arrived during prior window and never left within it — any
+                // "arrival" we see for this route is just continuation.
+                priorOwns = true;
+            } else if (!priorPresence.arrivedAtMs) {
+                // Prior window had no arrival — check the tail grace [priorEnd, min(priorEnd+30m, ourEnd)].
+                var tailTo = Math.min(priorEndMs + 30 * 60000, routeEndMs);
+                if (isToday && nowMs) tailTo = Math.min(tailTo, nowMs);
+                if (tailTo > priorEndMs) {
+                    var tailPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorEndMs, tailTo);
+                    augmentPresenceWithTrips(tailPresence, trips, driverFilter, devSet, zonePoints, priorEndMs, tailTo);
+                    if (tailPresence.arrivedAtMs) priorOwns = true;
+                }
+            }
+            if (priorOwns) presence.arrivedAtMs = null;
+        }
+
+        // (b) We have no own-window arrival; check if a late arrival slipped into the next route.
+        if (!presence.arrivedAtMs) {
+            var next = findContiguousRouteNeighbor(route, aId, 'next', savedRoutes, dateStr);
+            if (next) {
+                var nextEndMs = dayMs + timeToMinutes(next.endTime) * 60000;
+                var tailTo2 = Math.min(routeEndMs + 30 * 60000, nextEndMs);
+                if (isToday && nowMs) tailTo2 = Math.min(tailTo2, nowMs);
+                if (tailTo2 > routeEndMs) {
+                    var borrow = computePresenceFromLogs(mergedLogs, zonePoints, routeEndMs, tailTo2);
+                    augmentPresenceWithTrips(borrow, trips, driverFilter, devSet, zonePoints, routeEndMs, tailTo2);
+                    if (borrow.arrivedAtMs) {
+                        presence.arrivedAtMs = borrow.arrivedAtMs;
+                        presence.everInZone = true;
+                    }
+                }
+            }
+        }
     }
 
     // Build per-device attribution intervals for a driver. Each interval is the
