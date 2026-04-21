@@ -2908,8 +2908,13 @@
 
                         zoneMinutes = Math.round(zoneMinutes * 10) / 10;
                         var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
+                        // Outside routes only count as "passed through" if we have
+                        // real evidence of a departure — either a recorded in->out
+                        // transition or an in-zone observation during the window
+                        // followed by the bus being out now. Otherwise a vehicle
+                        // that was never at the zone would read as having departed.
                         var passedThrough = (r.direction === 'inside' && presenceR.everInZone) ||
-                                            (r.direction === 'outside' && !presenceR.isCurrentlyInZone && presenceR.hasData) ||
+                                            (r.direction === 'outside' && (!!presenceR.departedAtMs || (presenceR.everInZone && !presenceR.isCurrentlyInZone))) ||
                                             (r.direction === 'engineStart' && !!presenceR.engineStartedAtMs);
                         var status;
                         if (r.direction === 'engineStart') {
@@ -5377,8 +5382,12 @@
                     var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
                     augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
                     var evMs = getRouteEventMs(presence, r.direction);
+                    // Outside requires evidence of an actual departure (a recorded
+                    // in->out transition, or the bus was observed in-zone and is
+                    // now out) so a bus that was never at the zone isn't
+                    // silently counted as on-time.
                     var passed = (r.direction === 'inside' && (presence.everInZone || presence.isCurrentlyInZone)) ||
-                                 (r.direction === 'outside' && !presence.isCurrentlyInZone && presence.hasData) ||
+                                 (r.direction === 'outside' && (!!presence.departedAtMs || (presence.everInZone && !presence.isCurrentlyInZone))) ||
                                  (r.direction === 'engineStart' && !!presence.engineStartedAtMs);
                     var good;
                     if (routeHasTarget(r)) {
@@ -5498,11 +5507,14 @@
         }
         var everInZone = presence.everInZone;
         var isCurrentlyInZone = presence.isCurrentlyInZone;
-        // "Departed" means they've left the zone at some point during the window — either
-        // they're out now, or we recorded a departure transition. That way a vehicle that
-        // left before the target window still reads Departed even if it briefly re-enters.
+        // For "outside" routes, "Departed" requires evidence the vehicle was
+        // actually at the zone at some point — otherwise a bus that never
+        // visited the school but happens to be elsewhere in the world would
+        // read as Departed. We only declare a departure when we have a
+        // recorded in->out transition (departedAtMs) or we observed the bus
+        // in-zone earlier in the window and it's now out.
         var goodDir = (route.direction === 'inside' && (everInZone || isCurrentlyInZone || !!presence.arrivedAtMs)) ||
-                      (route.direction === 'outside' && (!isCurrentlyInZone || !!presence.departedAtMs)) ||
+                      (route.direction === 'outside' && (!!presence.departedAtMs || (everInZone && !isCurrentlyInZone))) ||
                       (route.direction === 'engineStart' && !!presence.engineStartedAtMs);
         var vStatus = routeStatusLabel(route.direction, goodDir);
         var statusTip;
