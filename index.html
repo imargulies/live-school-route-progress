@@ -2173,7 +2173,8 @@
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
                 }
                 if (varianceCell) {
-                    varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
+                    varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) +
+                        historyBtnHtml(r._uid, aId, isDriverRoute ? 'driver' : 'vehicle');
                 }
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
@@ -2532,16 +2533,14 @@
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
 
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
-                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
+                        var histBtn = historyBtnHtml(r._uid, aId, isDriverRoute ? 'driver' : 'vehicle');
+                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + histBtn + '</td>';
 
                         var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '">' +
-                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span> ' +
-                                    '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
-                                        'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
-                                        'data-entity-type="' + (isDriverRoute ? 'driver' : 'vehicle') + '">&#x1F4C8;</span>' +
+                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span>' +
                                     '<span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
                                 '</td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
@@ -3576,6 +3575,21 @@
             'style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;background:#fff;border:1px solid #d0d0d0;color:#0078d4;font-size:11px;line-height:1;cursor:pointer;text-decoration:none;vertical-align:middle;">\u{1F4CD} Map</a>';
     }
 
+    // Small "History" pill (clock-arrow icon + label) used in the vs Target cell.
+    // Uses .rpRowTlBtn so the existing click delegation opens the row timeline popup.
+    function historyBtnHtml(routeUid, assignedId, entityType) {
+        var svg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ' +
+            'style="vertical-align:-1px;margin-right:3px;">' +
+            '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>' +
+            '<polyline points="3 3 3 8 8 8"/>' +
+            '<polyline points="12 7 12 12 15 14"/>' +
+            '</svg>';
+        return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
+            'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
+            'data-entity-type="' + entityType + '">' + svg + 'History</span>';
+    }
+
     // ========== REVERSE GEOCODE CACHE ==========
     // Geotab's GetAddresses API resolves lat/lng -> formatted address. We cache
     // per rounded coord (4 dp ~= 11m) to avoid repeat fetches and kick off async
@@ -4105,6 +4119,12 @@
         var rightLabel = nowMs >= windowToMs
             ? 'Window ended'
             : (nowMs < windowFromMs ? 'Not started' : elapsedRounded + '% elapsed');
+        var targetLabelHtml = '<span></span>';
+        if (routeHasTarget(route) && targetStartPct !== null) {
+            var targetCenterPct = (targetStartPct + targetEndPct) / 2;
+            targetLabelHtml = '<span class="rpEtaBarTargetLabel" style="left:' + targetCenterPct + '%">' +
+                'Target ' + formatTargetRange(route) + '</span>';
+        }
         return '<div class="rpEtaBarWrap" data-route-uid="' + route._uid + '" ' +
                 'data-start-ms="' + windowFromMs + '" data-end-ms="' + windowToMs + '">' +
                 '<div class="rpEtaBarTrack">' +
@@ -4113,7 +4133,7 @@
                 '</div>' +
                 '<div class="rpEtaBarLabels">' +
                     '<span>' + formatTime12(route.startTime) + '</span>' +
-                    (routeHasTarget(route) ? '<span class="rpEtaBarTargetLabel">Target ' + formatTargetRange(route) + '</span>' : '<span></span>') +
+                    targetLabelHtml +
                     '<span>' + formatTime12(route.endTime) + '</span>' +
                 '</div>' +
                 '<div class="rpEtaBarStatus">' + rightLabel + '</div>' +
@@ -4176,12 +4196,16 @@
         for (var i = 0; i < lbls.length; i++) {
             forceStyle(lbls[i], {
                 'display': 'flex', 'justify-content': 'space-between', 'margin-top': '6px',
-                'font-size': '13px', 'color': '#333', 'font-weight': '600'
+                'font-size': '13px', 'color': '#333', 'font-weight': '600',
+                'position': 'relative'
             });
         }
         var tLbls = document.querySelectorAll('.rpEtaBarTargetLabel');
         for (var i = 0; i < tLbls.length; i++) {
-            forceStyle(tLbls[i], { 'color': '#d63031', 'font-weight': '700', 'font-size': '13px' });
+            forceStyle(tLbls[i], {
+                'color': '#d63031', 'font-weight': '700', 'font-size': '13px',
+                'position': 'absolute', 'transform': 'translateX(-50%)', 'white-space': 'nowrap', 'top': '0'
+            });
         }
         var sts = document.querySelectorAll('.rpEtaBarStatus');
         for (var i = 0; i < sts.length; i++) {
@@ -4598,7 +4622,12 @@
             var endMin = timeToMinutes(r.endTime);
             var pastWindow = isToday ? (now >= dayBaseMs + endMin * 60000) : true;
             var varianceCell = row.querySelector('.rpVarianceCell');
-            if (varianceCell) varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow);
+            if (varianceCell) {
+                var aId4 = uid.substring(dashIdx + 1);
+                var entType4 = r.trackBy === 'driver' ? 'driver' : 'vehicle';
+                varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow) +
+                    historyBtnHtml(routeUid, aId4, entType4);
+            }
             // Engine cell ("No signal" after 15 min of stale GPS) is also time-relative —
             // re-evaluate staleness on the tick even when Go Live is off. We use the
             // cell's own cached speed + lastLogMs (written on the last full render).
@@ -5220,10 +5249,11 @@
             var btns = document.querySelectorAll('.rpRowTlBtn');
             for (var i = 0; i < btns.length; i++) {
                 forceStyle(btns[i], {
-                    'display': 'inline-block', 'padding': '1px 6px', 'margin-left': '6px',
-                    'border-radius': '10px', 'background': '#fff', 'border': '1px solid #d0d0d0',
-                    'font-size': '11px', 'line-height': '1', 'cursor': 'pointer', 'user-select': 'none',
-                    'vertical-align': 'middle'
+                    'display': 'inline-flex', 'align-items': 'center', 'padding': '2px 8px',
+                    'margin': '4px 0 0', 'border-radius': '10px', 'background': '#fff',
+                    'border': '1px solid #d0d0d0', 'color': '#0078d4',
+                    'font-size': '11px', 'font-weight': '600', 'line-height': '1',
+                    'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle'
                 });
             }
         }
