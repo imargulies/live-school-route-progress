@@ -2433,8 +2433,8 @@
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
-                    '<th class="rpth rpthSm" title="Latest known GPS coordinates. Click to open in Google Maps.">Location</th>' +
-                    '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary, No signal = no recent log.">Engine</th>' +
+                    '<th class="rpth rpthSm" title="Latest known street address. Click to open in Google Maps.">Location</th>' +
+                    '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary. An age note appears when the log is older than 15 min.">Engine</th>' +
                     '</tr></thead><tbody>';
 
                 var rCompleted = 0, rTotal = 0, rLate = 0;
@@ -3621,38 +3621,44 @@
             var addr = _addressCache[key] || '';
             var targets = document.querySelectorAll('[data-addr-key="' + key + '"]');
             for (var i = 0; i < targets.length; i++) {
-                if (addr) { targets[i].textContent = addr; targets[i].style.color = '#555'; }
-                else { targets[i].textContent = ''; targets[i].style.display = 'none'; }
+                if (addr) { targets[i].textContent = addr; targets[i].style.color = '#0078d4'; }
+                else { targets[i].textContent = 'Unknown'; targets[i].style.color = '#bbb'; }
             }
         });
     }
 
-    // Cell HTML for Current Location (lat, lng) and Engine status (from latest log speed).
+    // Cell HTML for Current Location (street address) linked to Google Maps.
     function formatLocationCell(lat, lng) {
         if (typeof lat !== 'number' || typeof lng !== 'number') return '<span style="color:#bbb;">\u2014</span>';
-        var latS = lat.toFixed(5), lngS = lng.toFixed(5);
-        var maps = 'https://www.google.com/maps?q=' + latS + ',' + lngS;
+        var maps = 'https://www.google.com/maps?q=' + lat.toFixed(5) + ',' + lng.toFixed(5);
         var key = _addrKey(lat, lng);
-        var addrLine = '';
+        var label, color;
         if (_addressCache.hasOwnProperty(key)) {
             var cached = _addressCache[key];
-            if (cached) {
-                addrLine = '<div class="rpLocAddr" data-addr-key="' + key + '" style="font-size:11px;color:#555;line-height:1.3;margin-top:2px;">' + escapeHtml(cached) + '</div>';
-            }
+            if (cached) { label = escapeHtml(cached); color = '#0078d4'; }
+            else { label = 'Unknown'; color = '#bbb'; }
         } else {
-            addrLine = '<div class="rpLocAddr" data-addr-key="' + key + '" style="font-size:11px;color:#aaa;line-height:1.3;margin-top:2px;">\u2026</div>';
+            label = '\u2026';
+            color = '#aaa';
             kickOffAddressFill(lat, lng);
         }
-        return '<a href="' + maps + '" target="_blank" rel="noopener" style="color:#0078d4;text-decoration:none;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:11px;" title="Open in Google Maps">' +
-            latS + ', ' + lngS +
-            '</a>' + addrLine;
+        return '<a class="rpLocAddr" data-addr-key="' + key + '" href="' + maps + '" target="_blank" rel="noopener" ' +
+            'style="color:' + color + ';text-decoration:none;font-size:12px;line-height:1.3;" title="Open in Google Maps">' +
+            label + '</a>';
     }
     function formatEngineCell(speed, lastLogMs, nowMs) {
         if (typeof speed !== 'number' || !lastLogMs) return '<span style="color:#bbb;">\u2014</span>';
-        var stale = nowMs && (nowMs - lastLogMs) > 15 * 60000; // no log in 15 min
-        if (stale) return '<span style="background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="No GPS update in 15+ min">No signal</span>';
-        if (speed > 3) return '<span style="background:#d4edda;color:#155724;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Speed: ' + Math.round(speed) + ' km/h">On \u2022 ' + Math.round(speed) + ' km/h</span>';
-        return '<span style="background:#e9ecef;color:#555;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Stationary">Stopped</span>';
+        var ageMin = nowMs ? Math.floor((nowMs - lastLogMs) / 60000) : 0;
+        var ageNote = ageMin > 15
+            ? '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">as of ' + formatMinutesHM(ageMin) + ' ago</div>'
+            : '';
+        var badge;
+        if (speed > 3) {
+            badge = '<span style="background:#d4edda;color:#155724;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Speed: ' + Math.round(speed) + ' km/h">On \u2022 ' + Math.round(speed) + ' km/h</span>';
+        } else {
+            badge = '<span style="background:#e9ecef;color:#555;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Stationary">Stopped</span>';
+        }
+        return badge + ageNote;
     }
 
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
@@ -4279,22 +4285,22 @@
             var good = Math.abs(diffMin) <= grace;
             var color = good ? '#28a745' : '#dc3545';
             var sign = diffMin > 0 ? '+' : (diffMin < 0 ? '-' : '');
-            return '<span style="color:' + color + ';font-size:11px;font-weight:600;margin-left:6px;">' +
-                sign + formatMinutesHM(Math.abs(diffMin)) + ' vs 7d avg</span>';
+            return '<div style="color:' + color + ';font-size:11px;font-weight:600;margin-top:1px;">' +
+                sign + formatMinutesHM(Math.abs(diffMin)) + ' vs 7d avg</div>';
         }
         // No event yet — compare clock-time to the average.
         //   avg still in the future → "Due in Xm" (green)
         //   avg in the past        → "Over by Xm" (green within route's graceMin, else red)
         var deltaMin = Math.round((avgMs - nowMs) / 60000);
         if (deltaMin > 0) {
-            return '<span style="color:#28a745;font-size:11px;font-weight:600;margin-left:6px;">Due in ' +
-                formatMinutesHM(deltaMin) + ' (vs 7d avg)</span>';
+            return '<div style="color:#28a745;font-size:11px;font-weight:600;margin-top:1px;">Due in ' +
+                formatMinutesHM(deltaMin) + ' vs 7d avg</div>';
         }
         var overMin = -deltaMin;
         var good2 = overMin <= grace;
         var color2 = good2 ? '#28a745' : '#dc3545';
-        return '<span style="color:' + color2 + ';font-size:11px;font-weight:600;margin-left:6px;">Overdue ' +
-            formatMinutesHM(overMin) + ' (vs 7d avg)</span>';
+        return '<div style="color:' + color2 + ';font-size:11px;font-weight:600;margin-top:1px;">Overdue ' +
+            formatMinutesHM(overMin) + ' vs 7d avg</div>';
     }
 
     function formatCompareCellHtml(entry, route) {
@@ -4304,12 +4310,12 @@
             return '<span style="color:#888;font-size:11px;">7d avg: No-show (' + entry.noShowCount + '/' + entry.activeDays + ')</span>';
         }
         var avgTime = entry.avgEventMinutes != null
-            ? ' <span style="color:#555;font-weight:600;">@' + formatHourMin(entry.avgEventMinutes) + '</span>'
+            ? ' <span style="color:#555;font-weight:600;font-size:11px;">@' + formatHourMin(entry.avgEventMinutes) + '</span>'
             : '';
         var noShowSuffix = entry.noShowCount > 0
-            ? ' <span style="color:#888;font-weight:400;">+ ' + entry.noShowCount + ' no-show</span>'
+            ? ' · ' + entry.noShowCount + ' no-show'
             : '';
-        var sampleNote = ' <span style="color:#888;font-weight:400;">(' + entry.samples + '/' + entry.activeDays + ' days)</span>';
+        var sampleNote = '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + entry.samples + '/' + entry.activeDays + ' days' + noShowSuffix + '</div>';
         var v = entry.avgVariance;
         var core;
         if (v == null) {
@@ -4322,7 +4328,7 @@
         } else {
             core = '<span style="color:#e67e22;font-size:11px;font-weight:600;">7d avg: Early ' + formatMinutesHM(Math.round(-v)) + '</span>';
         }
-        return core + avgTime + sampleNote + noShowSuffix;
+        return core + avgTime + sampleNote;
     }
 
     function applyCompareBadges(routes) {
@@ -5529,20 +5535,20 @@
                 else if (eventMs > targetEndMs) offsetMin = Math.round((eventMs - targetEndMs) / 60000);
                 var suffix = offsetMin === 0
                     ? ''
-                    : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (offsetMin > 0 ? '+' : '') + offsetMin + 'm)</span>';
+                    : '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">(' + (offsetMin > 0 ? '+' : '') + offsetMin + 'm)</div>';
                 return '<span style="color:#28a745;font-weight:600;">On time</span>' + suffix;
             }
             if (eventMs > targetEndMs) {
                 var lateMin = Math.round((eventMs - targetEndMs) / 60000);
                 return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>' +
-                    ' <span style="color:#888;font-weight:400;font-size:11px;">(' + vsRouteEnd(eventMs) + ')</span>';
+                    '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + vsRouteEnd(eventMs) + '</div>';
             }
             var earlyMin = Math.round((targetStartMs - eventMs) / 60000);
             return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(earlyMin) + '</span>';
         }
         if (windowEnded) {
             return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>' +
-                (nowMs ? ' <span style="color:#888;font-weight:400;font-size:11px;">(' + vsRouteEnd(nowMs) + ')</span>' : '');
+                (nowMs ? '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + vsRouteEnd(nowMs) + '</div>' : '');
         }
         if (nowMs && nowMs > targetEndMs + grace) {
             var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
@@ -5550,7 +5556,7 @@
                 ? 'no departure yet'
                 : (route.direction === 'engineStart' ? 'no engine start yet' : 'no arrival yet');
             return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + '</span>' +
-                ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ', ' + vsRouteEnd(nowMs) + ')</span>';
+                '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + verb + ' · ' + vsRouteEnd(nowMs) + '</div>';
         }
         return '<span style="color:#aaa">Pending</span>';
     }
