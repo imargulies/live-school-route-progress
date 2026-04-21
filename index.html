@@ -3648,7 +3648,7 @@
         for (var i = 0; i < routesList.length; i++) {
             var r = routesList[i];
             if (!r || r._uid === currentRoute._uid) continue;
-            if (r.direction !== 'inside') continue;
+            if (r.direction !== currentRoute.direction) continue;
             if (r.trackBy !== currentRoute.trackBy) continue;
             var ids = r[assignedField] || [];
             if (ids.indexOf(assignedId) === -1) continue;
@@ -3670,28 +3670,36 @@
         return best;
     }
 
-    // Re-attribute late arrivals between two adjacent routes for the same driver
-    // (driver-mode) or vehicle (vehicle-mode). Without this, a driver late out of
-    // Route A (7:30-8:30) arriving at 8:45 gets credited to Route B (8:30-9:30)
-    // because 8:45 falls inside B's window. Two adjustments:
-    //   (a) If a prior contiguous route owns the arrival — either it already has
-    //       an arrival with no departure (driver never left), or its own window
-    //       had no arrival but an arrival exists in the 30-min tail — clear this
-    //       route's arrivedAtMs so it doesn't claim a continuation.
-    //   (b) If this route has no arrival in its own window but a next contiguous
-    //       route exists, borrow back an arrival from the 30-min tail after this
+    // Re-attribute late arrivals/departures between two adjacent routes for the
+    // same driver (driver-mode) or vehicle (vehicle-mode). Without this, a
+    // driver late out of Route A (7:30-8:30) arriving at 8:45 gets credited to
+    // Route B (8:30-9:30) because 8:45 falls inside B's window; the symmetric
+    // case applies to "outside" routes where a late departure bleeds into the
+    // next route's window. Two adjustments per direction:
+    //   (a) If a prior contiguous route owns this route's event (driver already
+    //       arrived/departed during prior and never reversed, or prior had no
+    //       event but one exists in the 30-min tail) — clear our event so we
+    //       don't claim a continuation from the prior route.
+    //   (b) If this route has no event in its own window but a next contiguous
+    //       route exists, borrow back an event from the 30-min tail after this
     //       route's end so vs-target reads "Late Xm" instead of "No-show".
-    // Only runs for direction==='inside'. Mutates `presence.arrivedAtMs`.
+    // Mutates presence.arrivedAtMs (inside) or presence.departedAtMs (outside).
     function adjustPresenceForAdjacentRoutes(presence, route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs) {
-        if (!zonePoints || !zonePoints.length || route.direction !== 'inside') return;
+        if (!zonePoints || !zonePoints.length) return;
         var dayMs = new Date(dateStr + 'T00:00:00').getTime();
-        var routeStartMs = dayMs + timeToMinutes(route.startTime) * 60000;
         var routeEndMs = dayMs + timeToMinutes(route.endTime) * 60000;
         var isDriverMode = route.trackBy === 'driver';
         var devSet = deviceIdSetFromList(rowDeviceIds);
         var driverFilter = isDriverMode ? aId : null;
+        var isOutside = route.direction === 'outside';
+        // The "event" is arrival for inside routes and departure for outside routes.
+        // Its counterpart is the reverse transition (a driver came back after
+        // leaving, or left again after arriving), which signals the event isn't
+        // just continuation from the prior route.
+        var eventField = isOutside ? 'departedAtMs' : 'arrivedAtMs';
+        var reverseField = isOutside ? 'arrivedAtMs' : 'departedAtMs';
 
-        // (a) Prior contiguous route may own this arrival.
+        // (a) Prior contiguous route may own this event.
         var prior = findContiguousRouteNeighbor(route, aId, 'prior', savedRoutes, dateStr);
         if (prior) {
             var priorStartMs = dayMs + timeToMinutes(prior.startTime) * 60000;
@@ -3699,25 +3707,25 @@
             var priorOwns = false;
             var priorPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorStartMs, priorEndMs);
             augmentPresenceWithTrips(priorPresence, trips, driverFilter, devSet, zonePoints, priorStartMs, priorEndMs);
-            if (priorPresence.arrivedAtMs && priorPresence.departedAtMs === null) {
-                // Driver arrived during prior window and never left within it — any
-                // "arrival" we see for this route is just continuation.
+            if (priorPresence[eventField] && priorPresence[reverseField] === null) {
+                // Driver produced the event during prior window and never reversed
+                // it — any event we see in our window is just continuation.
                 priorOwns = true;
-            } else if (!priorPresence.arrivedAtMs) {
-                // Prior window had no arrival — check the tail grace [priorEnd, min(priorEnd+30m, ourEnd)].
+            } else if (!priorPresence[eventField]) {
+                // Prior window had no event — check the tail grace [priorEnd, min(priorEnd+30m, ourEnd)].
                 var tailTo = Math.min(priorEndMs + 30 * 60000, routeEndMs);
                 if (isToday && nowMs) tailTo = Math.min(tailTo, nowMs);
                 if (tailTo > priorEndMs) {
                     var tailPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorEndMs, tailTo);
                     augmentPresenceWithTrips(tailPresence, trips, driverFilter, devSet, zonePoints, priorEndMs, tailTo);
-                    if (tailPresence.arrivedAtMs) priorOwns = true;
+                    if (tailPresence[eventField]) priorOwns = true;
                 }
             }
-            if (priorOwns) presence.arrivedAtMs = null;
+            if (priorOwns) presence[eventField] = null;
         }
 
-        // (b) We have no own-window arrival; check if a late arrival slipped into the next route.
-        if (!presence.arrivedAtMs) {
+        // (b) We have no own-window event; check if a late event slipped into the next route.
+        if (!presence[eventField]) {
             var next = findContiguousRouteNeighbor(route, aId, 'next', savedRoutes, dateStr);
             if (next) {
                 var nextEndMs = dayMs + timeToMinutes(next.endTime) * 60000;
@@ -3726,9 +3734,9 @@
                 if (tailTo2 > routeEndMs) {
                     var borrow = computePresenceFromLogs(mergedLogs, zonePoints, routeEndMs, tailTo2);
                     augmentPresenceWithTrips(borrow, trips, driverFilter, devSet, zonePoints, routeEndMs, tailTo2);
-                    if (borrow.arrivedAtMs) {
-                        presence.arrivedAtMs = borrow.arrivedAtMs;
-                        presence.everInZone = true;
+                    if (borrow[eventField]) {
+                        presence[eventField] = borrow[eventField];
+                        if (!isOutside) presence.everInZone = true;
                     }
                 }
             }
@@ -5798,10 +5806,11 @@
 
         function renderWeekGridFor(entry) {
             var rs = routesFor(entry);
-            // Min 160px per day column so card text ("Arrived 9:47 AM · 12min late")
-            // can fit on a single line. The entity body wraps with overflow-x:auto
-            // so the grid scrolls horizontally on narrow viewports.
-            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(160px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:1200px;">';
+            // Min 240px per day column so every card line ("Arrived 9:47 AM ·
+            // 12min late", "Target 9:30 AM – 9:45 AM", longer route names) fits
+            // without ellipsis truncation. The entity body wraps with
+            // overflow-x:auto so the grid scrolls horizontally on narrow viewports.
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(240px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:1744px;">';
             inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
             for (var di = 0; di < 7; di++) {
                 var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
