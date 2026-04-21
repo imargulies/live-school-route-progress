@@ -2417,23 +2417,23 @@
                     '<colgroup>' +
                         '<col class="rpColName" style="width:14%">' +
                         '<col class="rpColCurVeh" style="width:11%">' +
+                        '<col class="rpColLoc" style="width:12%">' +
                         '<col class="rpColStatus" style="width:10%">' +
                         '<col class="rpColEvent" style="width:13%">' +
                         '<col class="rpColVariance" style="width:13%">' +
                         '<col class="rpColTime" style="width:11%">' +
                         '<col class="rpColDist" style="width:8%">' +
-                        '<col class="rpColLoc" style="width:12%">' +
                         '<col class="rpColEngine" style="width:8%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
                     '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">' + (isDriverRoute ? 'Current Vehicle' : '') + '</th>' +
+                    '<th class="rpth rpthSm" title="Latest known street address. Click to open in Google Maps.">Current Location</th>' +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
-                    '<th class="rpth rpthSm" title="Latest known street address. Click to open in Google Maps.">Location</th>' +
                     '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary. An age note appears when the log is older than 15 min.">Engine</th>' +
                     '</tr></thead><tbody>';
 
@@ -2545,12 +2545,12 @@
                                     '<span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
                                 '</td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
+                                '<td class="rptd rpLocationCell">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</td>' +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
                                 varianceCell +
                                 '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
-                                '<td class="rptd rpLocationCell">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</td>' +
                                 '<td class="rptd rpEngineCell">' + formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime()) + '</td>' +
                                 '</tr>'
                         });
@@ -2661,11 +2661,15 @@
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
             for (var k = 0; k < cols.length; k++) forceStyle(cols[k], { 'width': colWidths[cls] });
         }
-        // Cells truncate cleanly instead of pushing column widths.
+        // Cells truncate cleanly instead of pushing column widths, are centered,
+        // and carry a thin vertical divider between columns.
         var ptds = document.querySelectorAll('#rpProgressContent .rpProgressTable .rptd, #rpProgressContent .rpProgressTable .rpth');
         for (var p = 0; p < ptds.length; p++) {
-            forceStyle(ptds[p], { 'overflow': 'hidden', 'text-overflow': 'ellipsis', 'word-break': 'break-word' });
+            forceStyle(ptds[p], { 'overflow': 'hidden', 'text-overflow': 'ellipsis', 'word-break': 'break-word',
+                'text-align': 'center', 'vertical-align': 'middle', 'border-right': '1px solid #e8e8e8' });
         }
+        var lastCells = document.querySelectorAll('#rpProgressContent .rpProgressTable tr > .rptd:last-child, #rpProgressContent .rpProgressTable tr > .rpth:last-child');
+        for (var lc = 0; lc < lastCells.length; lc++) forceStyle(lastCells[lc], { 'border-right': 'none' });
         var smTh = document.querySelectorAll('.rpthSm');
         for (var i = 0; i < smTh.length; i++) forceStyle(smTh[i], { 'font-size': '12px', 'padding': '8px 12px' });
         var tds = document.querySelectorAll('#rpProgressContent .rptd');
