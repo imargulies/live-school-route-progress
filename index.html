@@ -2125,6 +2125,24 @@
                 var varianceCell = row.querySelector('.rpVarianceCell');
                 var locationCell = row.querySelector('.rpLocationCell');
                 var engineCell = row.querySelector('.rpEngineCell');
+                var curVehCell = row.querySelector('.rpCurVehCell');
+                var mapLinkWrap = row.querySelector('.rpMapLinkWrap');
+
+                // Driver mode: the "Current Vehicle" + map link reflect the most
+                // recent trip's device, so a driver who switches buses after the
+                // route started gets picked up live without a full re-render.
+                if (isDriverRoute) {
+                    var latestMs = -Infinity, curId = '', curName = '';
+                    for (var _ti = 0; _ti < trips.length; _ti++) {
+                        var _tr = trips[_ti];
+                        if (!_tr.driver || _tr.driver.id !== aId) continue;
+                        if (!_tr.device || !_tr.device.id) continue;
+                        var _stopMs = _tr.stop ? new Date(_tr.stop).getTime() : 0;
+                        if (_stopMs > latestMs) { latestMs = _stopMs; curId = _tr.device.id; curName = cachedDevices[_tr.device.id] || _tr.device.id; }
+                    }
+                    if (curVehCell) curVehCell.innerHTML = curName || '<span style="color:#aaa">-</span>';
+                    if (mapLinkWrap && curId) mapLinkWrap.innerHTML = mapLinkButton(curId, 'Open ' + (cachedDevices[curId] || 'vehicle') + ' on live map');
+                }
 
                 // Compute new status via the shared helper, then update counts.
                 var _st = computeRowStatus(r, presence, isToday, currentMinutes, startMin, endMin);
@@ -2512,9 +2530,6 @@
                         }
 
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
-                        var curVehCol = isDriverRoute
-                            ? '<td class="rptd">' + (currentVehicleName || '<span style="color:#aaa">-</span>') + '</td>'
-                            : '<td class="rptd" style="color:#ccc;">—</td>';
 
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
                         var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
@@ -2527,9 +2542,9 @@
                                     '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
                                         'data-route-uid="' + r._uid + '" data-assigned-id="' + aId + '" ' +
                                         'data-entity-type="' + (isDriverRoute ? 'driver' : 'vehicle') + '">&#x1F4C8;</span>' +
-                                    mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') +
+                                    '<span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
                                 '</td>' +
-                                curVehCol +
+                                '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
                                 varianceCell +
@@ -3557,14 +3572,80 @@
             'style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;background:#fff;border:1px solid #d0d0d0;color:#0078d4;font-size:11px;line-height:1;cursor:pointer;text-decoration:none;vertical-align:middle;">\u{1F4CD} Map</a>';
     }
 
+    // ========== REVERSE GEOCODE CACHE ==========
+    // Geotab's GetAddresses API resolves lat/lng -> formatted address. We cache
+    // per rounded coord (4 dp ~= 11m) to avoid repeat fetches and kick off async
+    // backfill for any cell rendered before its address is known.
+    var _addressCache = {};
+    var _addressPending = {};
+    function _addrKey(lat, lng) {
+        return (Math.round(lat * 10000) / 10000).toFixed(4) + ',' +
+               (Math.round(lng * 10000) / 10000).toFixed(4);
+    }
+    function reverseGeocode(lat, lng) {
+        var key = _addrKey(lat, lng);
+        if (_addressCache.hasOwnProperty(key)) return Promise.resolve(_addressCache[key]);
+        if (_addressPending[key]) return _addressPending[key];
+        if (!api || typeof api.call !== 'function') {
+            _addressCache[key] = null;
+            return Promise.resolve(null);
+        }
+        var p = new Promise(function (resolve) {
+            try {
+                api.call('GetAddresses', { coordinates: [{ x: lng, y: lat }] }, function (result) {
+                    var addr = null;
+                    if (result && result.length && result[0]) addr = result[0].formattedAddress || null;
+                    _addressCache[key] = addr;
+                    delete _addressPending[key];
+                    resolve(addr);
+                }, function () {
+                    _addressCache[key] = null;
+                    delete _addressPending[key];
+                    resolve(null);
+                });
+            } catch (e) {
+                _addressCache[key] = null;
+                delete _addressPending[key];
+                resolve(null);
+            }
+        });
+        _addressPending[key] = p;
+        return p;
+    }
+    // Backfill any currently-rendered cells tagged with data-addr-key once the
+    // address resolves. Run at most once per unique coord.
+    function kickOffAddressFill(lat, lng) {
+        var key = _addrKey(lat, lng);
+        if (_addressCache.hasOwnProperty(key)) return;
+        reverseGeocode(lat, lng).then(function () {
+            var addr = _addressCache[key] || '';
+            var targets = document.querySelectorAll('[data-addr-key="' + key + '"]');
+            for (var i = 0; i < targets.length; i++) {
+                if (addr) { targets[i].textContent = addr; targets[i].style.color = '#555'; }
+                else { targets[i].textContent = ''; targets[i].style.display = 'none'; }
+            }
+        });
+    }
+
     // Cell HTML for Current Location (lat, lng) and Engine status (from latest log speed).
     function formatLocationCell(lat, lng) {
         if (typeof lat !== 'number' || typeof lng !== 'number') return '<span style="color:#bbb;">\u2014</span>';
         var latS = lat.toFixed(5), lngS = lng.toFixed(5);
         var maps = 'https://www.google.com/maps?q=' + latS + ',' + lngS;
+        var key = _addrKey(lat, lng);
+        var addrLine = '';
+        if (_addressCache.hasOwnProperty(key)) {
+            var cached = _addressCache[key];
+            if (cached) {
+                addrLine = '<div class="rpLocAddr" data-addr-key="' + key + '" style="font-size:11px;color:#555;line-height:1.3;margin-top:2px;">' + escapeHtml(cached) + '</div>';
+            }
+        } else {
+            addrLine = '<div class="rpLocAddr" data-addr-key="' + key + '" style="font-size:11px;color:#aaa;line-height:1.3;margin-top:2px;">\u2026</div>';
+            kickOffAddressFill(lat, lng);
+        }
         return '<a href="' + maps + '" target="_blank" rel="noopener" style="color:#0078d4;text-decoration:none;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:11px;" title="Open in Google Maps">' +
             latS + ', ' + lngS +
-            '</a>';
+            '</a>' + addrLine;
     }
     function formatEngineCell(speed, lastLogMs, nowMs) {
         if (typeof speed !== 'number' || !lastLogMs) return '<span style="color:#bbb;">\u2014</span>';
@@ -3670,9 +3751,12 @@
                         presence.everInZone = true;
                         if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
                         if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
-                        // Arrival: stop time (clamped into window)
+                        // Arrival: stop time (clamped into window). Skip the clamped
+                        // value if it's past windowToMs (can happen today when
+                        // windowToMs = now and windowFromMs is still in the future),
+                        // so we never show a phantom arrival before the route starts.
                         var arrCandidate = Math.max(stopMs, windowFromMs);
-                        if (presence.arrivedAtMs === null || arrCandidate < presence.arrivedAtMs) {
+                        if (arrCandidate <= windowToMs && (presence.arrivedAtMs === null || arrCandidate < presence.arrivedAtMs)) {
                             presence.arrivedAtMs = arrCandidate;
                         }
                         // Departure: next trip started (they drove off) during window — keep EARLIEST
