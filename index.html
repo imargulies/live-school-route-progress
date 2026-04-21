@@ -2209,16 +2209,24 @@
             svEls[3].textContent = notStartedCount;
         }
 
-        // Re-sort rows within each route table: red first, green, then no data
+        // Re-sort rows within each route table: red first, green, then no data.
+        // Only touch the DOM when the order would actually change, otherwise
+        // re-appending every row on each tick makes the page visibly jump.
         var routeTables = document.querySelectorAll('.rpProgressTable tbody');
         for (var rt = 0; rt < routeTables.length; rt++) {
             var rows = Array.prototype.slice.call(routeTables[rt].querySelectorAll('tr[data-row-uid]'));
-            rows.sort(function (a, b) {
+            var sorted = rows.slice().sort(function (a, b) {
                 var aStatus = a.querySelector('.rpStMissed') ? 0 : (a.querySelector('.rpStCompleted') ? 1 : 2);
                 var bStatus = b.querySelector('.rpStMissed') ? 0 : (b.querySelector('.rpStCompleted') ? 1 : 2);
                 return aStatus - bStatus;
             });
-            for (var rr = 0; rr < rows.length; rr++) routeTables[rt].appendChild(rows[rr]);
+            var orderChanged = false;
+            for (var ci = 0; ci < sorted.length; ci++) {
+                if (sorted[ci] !== rows[ci]) { orderChanged = true; break; }
+            }
+            if (orderChanged) {
+                for (var rr = 0; rr < sorted.length; rr++) routeTables[rt].appendChild(sorted[rr]);
+            }
         }
 
         // Re-style badges
@@ -2416,12 +2424,12 @@
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
                     '<colgroup>' +
-                        '<col class="rpColName" style="width:14%">' +
-                        '<col class="rpColCurVeh" style="width:11%">' +
-                        '<col class="rpColLoc" style="width:12%">' +
+                        '<col class="rpColName" style="width:13%">' +
+                        '<col class="rpColCurVeh" style="width:10%">' +
+                        '<col class="rpColLoc" style="width:11%">' +
                         '<col class="rpColStatus" style="width:10%">' +
-                        '<col class="rpColEvent" style="width:13%">' +
-                        '<col class="rpColVariance" style="width:13%">' +
+                        '<col class="rpColEvent" style="width:12%">' +
+                        '<col class="rpColVariance" style="width:17%">' +
                         '<col class="rpColTime" style="width:11%">' +
                         '<col class="rpColDist" style="width:8%">' +
                         '<col class="rpColEngine" style="width:8%">' +
@@ -2652,9 +2660,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '14%', 'rpColCurVeh': '11%', 'rpColStatus': '10%',
-            'rpColEvent': '13%', 'rpColVariance': '13%', 'rpColTime': '11%', 'rpColDist': '8%',
-            'rpColLoc': '12%', 'rpColEngine': '8%' };
+        var colWidths = { 'rpColName': '13%', 'rpColCurVeh': '10%', 'rpColStatus': '10%',
+            'rpColEvent': '12%', 'rpColVariance': '17%', 'rpColTime': '11%', 'rpColDist': '8%',
+            'rpColLoc': '11%', 'rpColEngine': '8%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -3575,19 +3583,18 @@
             'style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;background:#fff;border:1px solid #d0d0d0;color:#0078d4;font-size:11px;line-height:1;cursor:pointer;text-decoration:none;vertical-align:middle;">\u{1F4CD} Map</a>';
     }
 
-    // Small "History" pill (clock-arrow icon + label) used in the vs Target cell.
+    // Small "History" pill (line-graph icon + label) used in the vs Target cell.
     // Uses .rpRowTlBtn so the existing click delegation opens the row timeline popup.
     function historyBtnHtml(routeUid, assignedId, entityType) {
         var svg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
             'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ' +
-            'style="vertical-align:-1px;margin-right:3px;">' +
-            '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>' +
-            '<polyline points="3 3 3 8 8 8"/>' +
-            '<polyline points="12 7 12 12 15 14"/>' +
+            'style="vertical-align:-1px;margin-right:4px;">' +
+            '<polyline points="3 3 3 21 21 21"/>' +
+            '<polyline points="7 14 11 10 15 13 20 6"/>' +
             '</svg>';
         return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
             'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
-            'data-entity-type="' + entityType + '">' + svg + 'History</span>';
+            'data-entity-type="' + entityType + '">' + svg + ' History</span>';
     }
 
     // ========== REVERSE GEOCODE CACHE ==========
@@ -3636,13 +3643,22 @@
         var key = _addrKey(lat, lng);
         if (_addressCache.hasOwnProperty(key)) return;
         reverseGeocode(lat, lng).then(function () {
-            var addr = _addressCache[key] || '';
+            var addr = shortenAddress(_addressCache[key] || '');
             var targets = document.querySelectorAll('[data-addr-key="' + key + '"]');
             for (var i = 0; i < targets.length; i++) {
                 if (addr) { targets[i].textContent = addr; targets[i].style.color = '#0078d4'; }
                 else { targets[i].textContent = 'Unknown'; targets[i].style.color = '#bbb'; }
             }
         });
+    }
+
+    // Trim the formatted address down to just the street portion by dropping
+    // trailing city/state/zip/country segments. Geotab returns comma-separated
+    // parts like "123 Main St, Springfield, IL 62701, USA".
+    function shortenAddress(addr) {
+        if (!addr) return addr;
+        var first = String(addr).split(',')[0];
+        return first ? first.trim() : addr;
     }
 
     // Cell HTML for Current Location (street address) linked to Google Maps.
@@ -3652,7 +3668,7 @@
         var key = _addrKey(lat, lng);
         var label, color;
         if (_addressCache.hasOwnProperty(key)) {
-            var cached = _addressCache[key];
+            var cached = shortenAddress(_addressCache[key]);
             if (cached) { label = escapeHtml(cached); color = '#0078d4'; }
             else { label = 'Unknown'; color = '#bbb'; }
         } else {
@@ -3661,7 +3677,7 @@
             kickOffAddressFill(lat, lng);
         }
         return '<a class="rpLocAddr" data-addr-key="' + key + '" href="' + maps + '" target="_blank" rel="noopener" ' +
-            'style="color:' + color + ';text-decoration:none;font-size:12px;line-height:1.3;" title="Open in Google Maps">' +
+            'style="color:' + color + ';text-decoration:underline;font-size:12px;line-height:1.3;cursor:pointer;" title="Open in Google Maps">' +
             label + '</a>';
     }
     function formatEngineCell(speed, lastLogMs, nowMs) {
