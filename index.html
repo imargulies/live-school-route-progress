@@ -1115,6 +1115,9 @@
                 ? { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' }
                 : { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
         }
+        // The explanatory note only applies to the engine-start option.
+        var noteRow = document.getElementById('rpDirEngineNoteRow');
+        if (noteRow) forceStyle(noteRow, { 'display': selectedDirection === 'engineStart' ? '' : 'none' });
     }
     document.getElementById('rpDirInside').addEventListener('click', function () {
         selectedDirection = 'inside';
