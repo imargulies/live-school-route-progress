@@ -51,6 +51,11 @@
                     <span class="rpLbl">Tracking:</span>
                     <span id="rpDirInside" class="rpToggle rpToggleActive" title="Vehicles/drivers should be inside the zone (e.g. parked at school)">Arrived at Location</span>
                     <span id="rpDirOutside" class="rpToggle" title="Vehicles/drivers should have left the zone (e.g. out driving their route)">Departed from Location</span>
+                    <span id="rpDirEngine" class="rpToggle" title="Detect when the engine is first started while the vehicle is inside the zone (marks the start of a route)">Engine Started in Zone</span>
+                </div>
+                <div class="rpFormRow" id="rpDirEngineNoteRow">
+                    <span class="rpLbl">&nbsp;</span>
+                    <span id="rpDirEngineNote" style="font-size:11px;color:#666;font-style:italic;">Engine-start routes mark the start of a route. They may overlap other routes and are treated independently.</span>
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Start Time:</span>
@@ -1099,15 +1104,29 @@
     document.getElementById('rpEndTime').addEventListener('change', syncTargetTimeBounds);
 
     // ========== DIRECTION TOGGLE ==========
+    function applyDirectionToggleStyles() {
+        var map = { 'inside': 'rpDirInside', 'outside': 'rpDirOutside', 'engineStart': 'rpDirEngine' };
+        for (var k in map) {
+            if (!map.hasOwnProperty(k)) continue;
+            var el = document.getElementById(map[k]);
+            if (!el) continue;
+            var active = selectedDirection === k;
+            forceStyle(el, active
+                ? { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' }
+                : { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        }
+    }
     document.getElementById('rpDirInside').addEventListener('click', function () {
         selectedDirection = 'inside';
-        forceStyle(this, { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-        forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        applyDirectionToggleStyles();
     });
     document.getElementById('rpDirOutside').addEventListener('click', function () {
         selectedDirection = 'outside';
-        forceStyle(this, { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-        forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        applyDirectionToggleStyles();
+    });
+    document.getElementById('rpDirEngine').addEventListener('click', function () {
+        selectedDirection = 'engineStart';
+        applyDirectionToggleStyles();
     });
 
     // ========== TRACK BY TOGGLE ==========
@@ -1304,12 +1323,14 @@
             var daysArr = r.activeDays || [0,1,2,3,4,5]; // default Sun-Fri
             var daysText = daysArr.map(function(d) { return DAY_NAMES[d]; }).join(', ');
 
+            var _dirTip = r.direction === 'outside'
+                ? 'Should have left the zone'
+                : (r.direction === 'engineStart' ? 'Engine should start while inside the zone' : 'Should be at the zone');
             html += '<tr>' +
                 '<td class="rptd">' + escapeHtml(r.name) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
-                '<td class="rptd"><span class="rpDirBadge rpDir' + (r.direction === 'inside' ? 'In' : 'Out') + '" title="' +
-                    (r.direction === 'inside' ? 'Should be at the zone' : 'Should have left the zone') + '">' +
-                    (r.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location') + '</span></td>' +
+                '<td class="rptd"><span class="rpDirBadge ' + dirBadgeClass(r.direction) + '" title="' + _dirTip + '">' +
+                    directionFriendlyLabel(r.direction) + '</span></td>' +
                 '<td class="rptd">' + formatWindow(r.startTime, r.endTime) +
                     (routeHasTarget(r) ? ' <span class="rpTargetInline" title="Target window">· target ' + formatTargetRange(r) + '</span>' : '') +
                     '</td>' +
@@ -1371,6 +1392,13 @@
             forceStyle(dirOut[i], {
                 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px',
                 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460'
+            });
+        }
+        var dirEng = document.querySelectorAll('.rpDirEng');
+        for (var i = 0; i < dirEng.length; i++) {
+            forceStyle(dirEng[i], {
+                'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px',
+                'font-weight': '600', 'background': '#fff3cd', 'color': '#856404'
             });
         }
     }
@@ -1523,13 +1551,7 @@
         for (var k = 0; k < dayChecks.length; k++) {
             dayChecks[k].checked = editDays.indexOf(parseInt(dayChecks[k].value, 10)) !== -1;
         }
-        if (selectedDirection === 'inside') {
-            forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
-        } else {
-            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-            forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
-        }
+        applyDirectionToggleStyles();
         document.getElementById('rpFormTitle').textContent = 'Duplicate Route from: ' + r.name;
         document.getElementById('rpBtnSaveRoute').innerHTML = '&#x2714; Save as New';
         forceStyle(document.getElementById('rpFormWrap'), { 'display': 'block' });
@@ -1578,13 +1600,7 @@
         }
 
         // Update direction toggle visuals
-        if (selectedDirection === 'inside') {
-            forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
-        } else {
-            forceStyle(document.getElementById('rpDirOutside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-            forceStyle(document.getElementById('rpDirInside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
-        }
+        applyDirectionToggleStyles();
 
         document.getElementById('rpFormTitle').textContent = 'Edit Route: ' + r.name;
         document.getElementById('rpBtnSaveRoute').innerHTML = '&#x2714; Update';
@@ -1628,8 +1644,7 @@
         }
         document.getElementById('rpFormTitle').textContent = 'Create New Route';
         document.getElementById('rpBtnSaveRoute').textContent = 'Save Route';
-        forceStyle(document.getElementById('rpDirInside'), { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' });
-        forceStyle(document.getElementById('rpDirOutside'), { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
+        applyDirectionToggleStyles();
         document.getElementById('rpVehicleSearch').value = '';
     }
 
@@ -2081,7 +2096,7 @@
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                 augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                 adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
-                var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                var eventMs = getRouteEventMs(presence, r.direction);
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
                     var elapsedInWindow = Math.max(0, (windowToMs - windowFromMs) / 60000);
@@ -2333,7 +2348,8 @@
                     var lenSuffix = targetLen > 0
                         ? ' <span class="rpTargetBadgeLen">(' + formatMinutesHM(targetLen) + ')</span>'
                         : '';
-                    targetBadge = '<span class="rpTargetBadge" title="Target ' + (r.direction === 'outside' ? 'departure' : 'arrival') + ' window">Target: ' + formatTargetRange(r) + lenSuffix + '</span>';
+                    var _targetWord = r.direction === 'outside' ? 'departure' : (r.direction === 'engineStart' ? 'engine-start' : 'arrival');
+                    targetBadge = '<span class="rpTargetBadge" title="Target ' + _targetWord + ' window">Target: ' + formatTargetRange(r) + lenSuffix + '</span>';
                 }
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">&#x1F4C8; Trend</span>';
@@ -2341,7 +2357,7 @@
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder +
-                        '<span class="rpRouteCardInfo">Tracking ' + (r.direction === 'inside' ? 'Arrived at Location:' : 'Departed from Location:') +
+                        '<span class="rpRouteCardInfo">Tracking ' + directionFriendlyLabel(r.direction) + ':' +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
                     '</div>' +
@@ -2356,15 +2372,21 @@
                     elapsedMin = endMin - startMin;
                 }
 
-                var timeColLabel = (r.direction === 'outside' ? 'Time Away' : 'Time at Zone') + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
+                // Engine-start routes are a point-in-time event; "Time at Zone" isn't
+                // meaningful so we reuse the "Time at Zone" semantics for both inside
+                // and engineStart and only flip to "Time Away" for outside.
+                var _timeCol = r.direction === 'outside' ? 'Time Away' : 'Time at Zone';
+                var timeColLabel = _timeCol + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
                 var isDriverRoute = r.trackBy === 'driver';
                 var assignedIds = isDriverRoute ? (r.driverIds || []) : (r.vehicleIds || []);
                 var idLookup = isDriverRoute ? cachedDrivers : cachedDevices;
 
-                var eventColLabel = r.direction === 'outside' ? 'Departed At' : 'Arrived At';
+                var eventColLabel = eventColHeaderForDirection(r.direction);
                 var eventColTip = r.direction === 'outside'
                     ? 'When the vehicle left the zone (relative to now)'
-                    : 'When the vehicle first entered the zone (relative to now)';
+                    : (r.direction === 'engineStart'
+                        ? 'When the engine first started while inside the zone (relative to now)'
+                        : 'When the vehicle first entered the zone (relative to now)');
                 var targetColTip = routeHasTarget(r)
                     ? 'Minutes early or late vs target window ' + formatTargetRange(r)
                     : 'No target window set for this route';
@@ -2448,7 +2470,7 @@
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                         augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
-                        var eventMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                        var eventMs = getRouteEventMs(presence, r.direction);
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
                         var lastStopLng = presence.lastLng;
@@ -2858,13 +2880,18 @@
                         zoneMinutes = Math.round(zoneMinutes * 10) / 10;
                         var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
                         var passedThrough = (r.direction === 'inside' && presenceR.everInZone) ||
-                                            (r.direction === 'outside' && !presenceR.isCurrentlyInZone && presenceR.hasData);
+                                            (r.direction === 'outside' && !presenceR.isCurrentlyInZone && presenceR.hasData) ||
+                                            (r.direction === 'engineStart' && !!presenceR.engineStartedAtMs);
                         var status;
-                        if (pct >= 80) status = 'Completed';
+                        if (r.direction === 'engineStart') {
+                            // Engine-start routes are a point-in-time event — completed if
+                            // the engine did start in the zone within the window.
+                            status = presenceR.engineStartedAtMs ? 'Completed' : 'Missed';
+                        } else if (pct >= 80) status = 'Completed';
                         else if (zoneMinutes > 0 || passedThrough) status = 'Incomplete';
                         else status = 'Missed';
 
-                        var eventMsR = r.direction === 'outside' ? presenceR.departedAtMs : presenceR.arrivedAtMs;
+                        var eventMsR = getRouteEventMs(presenceR, r.direction);
                         var varianceMin = computeTargetVarianceMin(eventMsR, r, dayStr);
                         var tb = routeTargetBounds(r);
                         reportData.push({
@@ -2872,7 +2899,7 @@
                             vehicleId: vehicleId, vehicleName: vehicleName,
                             driverId: driverId, driverName: driverName,
                             date: dayStr, zoneName: r.zoneName || '',
-                            direction: r.direction === 'inside' ? 'Arrived' : 'Departed',
+                            direction: eventVerbForDirection(r.direction),
                             window: formatWindow(r.startTime, r.endTime),
                             targetTimeStart: tb.start || '',
                             targetTimeEnd: tb.end || '',
@@ -3343,6 +3370,54 @@
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
     }
 
+    // Direction → presence field name. 'engineStart' stores the first trip.start
+    // timestamp whose startPoint fell inside the zone during the window.
+    function eventFieldForDirection(direction) {
+        if (direction === 'outside') return 'departedAtMs';
+        if (direction === 'engineStart') return 'engineStartedAtMs';
+        return 'arrivedAtMs';
+    }
+    function getRouteEventMs(presence, direction) {
+        if (!presence) return null;
+        return presence[eventFieldForDirection(direction)] || null;
+    }
+    // Past-tense verb shown on cards, status labels, and the timeline.
+    function eventVerbForDirection(direction) {
+        if (direction === 'outside') return 'Departed';
+        if (direction === 'engineStart') return 'Started';
+        return 'Arrived';
+    }
+    // Status labels for a route row given whether it's achieved its goal.
+    function routeStatusLabel(direction, goodDir) {
+        if (direction === 'outside') return goodDir ? 'Departed' : 'Not Departed';
+        if (direction === 'engineStart') return goodDir ? 'Started' : 'Not Started';
+        return goodDir ? 'Arrived' : 'Not Arrived';
+    }
+    // Long-form label for route cards / routes table.
+    function directionFriendlyLabel(direction) {
+        if (direction === 'outside') return 'Departed from Location';
+        if (direction === 'engineStart') return 'Engine Started in Zone';
+        return 'Arrived at Location';
+    }
+    // Column header for the event-time column in the Progress table.
+    function eventColHeaderForDirection(direction) {
+        if (direction === 'outside') return 'Departed At';
+        if (direction === 'engineStart') return 'Started At';
+        return 'Arrived At';
+    }
+    // Badge CSS class for the routes table.
+    function dirBadgeClass(direction) {
+        if (direction === 'outside') return 'rpDirOut';
+        if (direction === 'engineStart') return 'rpDirEng';
+        return 'rpDirIn';
+    }
+    // Verb used on the summary "2/3 arrived, 1 late" badge.
+    function progressBadgeVerb(direction) {
+        if (direction === 'outside') return 'departed';
+        if (direction === 'engineStart') return 'started';
+        return 'arrived';
+    }
+
     function syncTargetTimeBounds() {
         var s = document.getElementById('rpStartTime');
         var e = document.getElementById('rpEndTime');
@@ -3497,7 +3572,7 @@
     }
 
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
-        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null };
+        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null, engineStartedAtMs: null };
         if (!logs || !logs.length || !zonePoints || !zonePoints.length) return out;
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
@@ -3621,6 +3696,12 @@
                         if (presence.departedAtMs === null || startMs2 < presence.departedAtMs) {
                             presence.departedAtMs = startMs2;
                         }
+                        // Engine started in zone: first trip.start inside the zone within
+                        // the window. Distinct from arrival (when they entered) and
+                        // departure (when they drove off) — this is the ignition moment.
+                        if (presence.engineStartedAtMs === null || startMs2 < presence.engineStartedAtMs) {
+                            presence.engineStartedAtMs = startMs2;
+                        }
                     }
                 }
             }
@@ -3686,6 +3767,9 @@
     // Mutates presence.arrivedAtMs (inside) or presence.departedAtMs (outside).
     function adjustPresenceForAdjacentRoutes(presence, route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs) {
         if (!zonePoints || !zonePoints.length) return;
+        // Engine-start routes mark the beginning of a route and may overlap other
+        // routes — they're treated independently and never re-attribute events.
+        if (route.direction === 'engineStart') return;
         var dayMs = new Date(dateStr + 'T00:00:00').getTime();
         var routeEndMs = dayMs + timeToMinutes(route.endTime) * 60000;
         var isDriverMode = route.trackBy === 'driver';
@@ -4045,7 +4129,7 @@
             var uid = rows[i].dataset.routeUid;
             var c = counts[uid];
             if (!c) { rows[i].innerHTML = ''; continue; }
-            var verb = c.direction === 'outside' ? 'Departed' : 'Arrived';
+            var verb = eventVerbForDirection(c.direction);
             var names = c.arrivedNames || [];
             var body = names.length
                 ? '<span class="rpArrivedNames">' + escapeHtml(names.join(', ')) + '</span>'
@@ -4175,7 +4259,7 @@
                 var merged = mergeDeviceLogs(effLogs, dayDevIds);
                 var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
                 augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
-                var evMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                var evMs = getRouteEventMs(presence, r.direction);
                 var variance = computeTargetVarianceMin(evMs, r, prevStr);
                 _compareCache[r._uid + '|' + aId] = { eventMs: evMs, variance: variance };
             }
@@ -4752,7 +4836,7 @@
             var merged = mergeDeviceLogs(effLogs, dayDevIds);
             var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
             augmentPresenceWithTrips(presence, trips, isDriver ? assignedId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
-            var evMs = route.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+            var evMs = getRouteEventMs(presence, route.direction);
             out.push({ dateStr: dStr, eventMs: evMs });
         }
         return out;
@@ -4891,7 +4975,7 @@
             '<span style="display:inline-flex;align-items:center;gap:6px;">' +
                 '<span style="display:inline-block;width:14px;height:2px;background:#0078d4;"></span>' +
                 '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0078d4;border:1.5px solid #fff;margin-left:-4px;box-shadow:0 0 0 1px #0078d4;"></span>' +
-                ' Actual ' + (route.direction === 'outside' ? 'departure' : 'arrival') +
+                ' Actual ' + (route.direction === 'outside' ? 'departure' : (route.direction === 'engineStart' ? 'engine start' : 'arrival')) +
             '</span>' +
             '<span style="display:inline-flex;align-items:center;gap:6px;">' +
                 '<span style="color:#dc3545;font-weight:700;">\u2715</span>No event' +
@@ -5046,9 +5130,10 @@
                     var merged = mergeDeviceLogs(effLogs, dayDevIds);
                     var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
                     augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
-                    var evMs = r.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                    var evMs = getRouteEventMs(presence, r.direction);
                     var passed = (r.direction === 'inside' && (presence.everInZone || presence.isCurrentlyInZone)) ||
-                                 (r.direction === 'outside' && !presence.isCurrentlyInZone && presence.hasData);
+                                 (r.direction === 'outside' && !presence.isCurrentlyInZone && presence.hasData) ||
+                                 (r.direction === 'engineStart' && !!presence.engineStartedAtMs);
                     var good;
                     if (routeHasTarget(r)) {
                         if (!evMs) { good = false; }
@@ -5098,7 +5183,7 @@
     // Badge HTML for per-route completion like "3/5 arrived".
     // total excludes removed/unknown members. direction: 'inside' | 'outside'.
     function formatRouteProgressBadge(completed, total, direction, late) {
-        var verb = direction === 'outside' ? 'departed' : 'arrived';
+        var verb = progressBadgeVerb(direction);
         if (!total) {
             return '<span class="rpRouteProgressCount rpRouteProgressEmpty">0/0 ' + verb + '</span>';
         }
@@ -5171,16 +5256,20 @@
         // they're out now, or we recorded a departure transition. That way a vehicle that
         // left before the target window still reads Departed even if it briefly re-enters.
         var goodDir = (route.direction === 'inside' && (everInZone || isCurrentlyInZone || !!presence.arrivedAtMs)) ||
-                      (route.direction === 'outside' && (!isCurrentlyInZone || !!presence.departedAtMs));
-        var vStatus, statusTip;
+                      (route.direction === 'outside' && (!isCurrentlyInZone || !!presence.departedAtMs)) ||
+                      (route.direction === 'engineStart' && !!presence.engineStartedAtMs);
+        var vStatus = routeStatusLabel(route.direction, goodDir);
+        var statusTip;
         if (route.direction === 'inside') {
-            vStatus = goodDir ? 'Arrived' : 'Not Arrived';
             statusTip = goodDir
                 ? (isCurrentlyInZone ? 'Currently at the zone' : 'Passed through / visited the zone')
                 : 'Has not arrived at the zone yet';
-        } else {
-            vStatus = goodDir ? 'Departed' : 'Not Departed';
+        } else if (route.direction === 'outside') {
             statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
+        } else {
+            statusTip = goodDir
+                ? 'Engine started inside the zone during this window'
+                : 'Engine has not started inside the zone yet';
         }
         return {
             vStatus: vStatus,
@@ -5267,7 +5356,9 @@
         }
         if (nowMs && nowMs > targetEndMs + grace) {
             var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
-            var verb = route.direction === 'outside' ? 'no departure yet' : 'no arrival yet';
+            var verb = route.direction === 'outside'
+                ? 'no departure yet'
+                : (route.direction === 'engineStart' ? 'no engine start yet' : 'no arrival yet');
             return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + '</span>' +
                 ' <span style="color:#888;font-weight:400;font-size:11px;">(' + verb + ', ' + vsRouteEnd(nowMs) + ')</span>';
         }
@@ -5305,7 +5396,8 @@
         if (_notifiedKeys[key]) return;
         _notifiedKeys[key] = true;
         var title = kind === 'noshow' ? 'No-show: ' + entityName : 'Late: ' + entityName;
-        var body = route.name + ' \u2014 ' + (route.direction === 'outside' ? 'departure' : 'arrival') + ' from ' + (route.zoneName || 'zone');
+        var _bodyKind = route.direction === 'outside' ? 'departure' : (route.direction === 'engineStart' ? 'engine start' : 'arrival');
+        var body = route.name + ' \u2014 ' + _bodyKind + ' at ' + (route.zoneName || 'zone');
         try {
             var n = new Notification(title, { body: body, tag: key, icon: undefined });
             setTimeout(function () { try { n.close(); } catch (e) {} }, 10000);
@@ -5542,7 +5634,7 @@
             var h12 = d.getHours() % 12 || 12;
             var mm = ('0' + d.getMinutes()).slice(-2);
             var ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-            var verb = route.direction === 'outside' ? 'Departed' : 'Arrived';
+            var verb = eventVerbForDirection(route.direction);
             var varianceBadge = '';
             if (routeHasTarget(route)) {
                 var b = routeTargetBounds(route);
@@ -5574,7 +5666,7 @@
         var zoneName = route.zoneName || '\u2014';
         var entityName = entry.type === 'driver' ? (cachedDrivers[entry.id] || entry.id) : (cachedDevices[entry.id] || entry.id);
         var typeLabel = entry.type === 'driver' ? 'Driver' : 'Vehicle';
-        var tracking = route.direction === 'inside' ? 'Arrived at Location' : 'Departed from Location';
+        var tracking = directionFriendlyLabel(route.direction);
         function row(k, v) {
             return '<tr><td style="padding:3px 14px 3px 0;color:#888;vertical-align:top;white-space:nowrap;">' + k + '</td>' +
                 '<td style="padding:3px 0;vertical-align:top;">' + v + '</td></tr>';
@@ -5784,7 +5876,7 @@
                     var merged = mergeDeviceLogs(effLogs, dayDevIds);
                     var presence = computePresenceFromLogs(merged, zone && zone.points, wFromMs, wToMs);
                     augmentPresenceWithTrips(presence, trips, isDriverRoute ? entry.id : null, deviceIdSetFromList(dayDevIds), zone && zone.points, wFromMs, wToMs);
-                    var evMs = rr4.direction === 'outside' ? presence.departedAtMs : presence.arrivedAtMs;
+                    var evMs = getRouteEventMs(presence, rr4.direction);
                     var windowEndedNow = nowMs > (new Date(dStr + 'T00:00:00').getTime() + endMinR * 60000);
                     var missed = !evMs && windowEndedNow;
                     var pending = !evMs && !windowEndedNow;
@@ -5853,7 +5945,7 @@
                     var ev = eventIndex[entry.type + '|' + entry.id + '|' + rr2._uid + '|' + colDateStr];
                     var bg = routeColor;
                     var line2Html = '';
-                    var eventVerb = rr2.direction === 'outside' ? 'Departed' : 'Arrived';
+                    var eventVerb = eventVerbForDirection(rr2.direction);
                     // Precompute target bounds + variance label if a target window is set.
                     var targetLine = '';
                     if (routeHasTarget(rr2)) {
