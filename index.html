@@ -917,14 +917,34 @@
     // ========== INIT ==========
     async function initAddin() {
         try {
-            // Capture the Geotab database name so we can build deep links to the live map.
+            // Capture the Geotab database name so we can build deep links to
+            // the live map. Await the callback (with a 2s timeout) so the
+            // first render has a non-empty geotabDb, otherwise the Map column
+            // silently drops the button. Fall back to parsing it out of the
+            // parent page's URL via document.referrer when the API path fails
+            // (e.g. local testing).
             try {
                 if (api && typeof api.getSession === 'function') {
-                    api.getSession(function (credentials /*, server */) {
-                        if (credentials && credentials.database) geotabDb = String(credentials.database);
-                    });
+                    await Promise.race([
+                        new Promise(function (resolve) {
+                            try {
+                                api.getSession(function (credentials /*, server */) {
+                                    if (credentials && credentials.database) geotabDb = String(credentials.database);
+                                    resolve();
+                                });
+                            } catch (e) { resolve(); }
+                        }),
+                        new Promise(function (resolve) { setTimeout(resolve, 2000); })
+                    ]);
                 }
             } catch (e) {}
+            if (!geotabDb) {
+                try {
+                    var ref = document.referrer || '';
+                    var m = ref.match(/https?:\/\/my\.geotab\.com\/([^/]+)\//i);
+                    if (m && m[1]) geotabDb = decodeURIComponent(m[1]);
+                } catch (e) {}
+            }
             // Show a loading state in the main content area while the initial
             // reference data (zones/devices/drivers/routes) is being fetched.
             injectSparklineStyles();
@@ -4690,11 +4710,19 @@
                 'position': 'absolute', 'transform': 'translateX(-50%)', 'white-space': 'nowrap', 'top': '0'
             });
         }
+        // Status text position depends on the current state: 'Window ended'
+        // drops to the labels row (right of end time) so it never overlaps
+        // the bar. Everything else sits in its usual spot at the top-right.
         var sts = document.querySelectorAll('.rpEtaBarStatus');
         for (var i = 0; i < sts.length; i++) {
+            var ended = (sts[i].textContent || '').trim() === 'Window ended';
             forceStyle(sts[i], {
-                'position': 'absolute', 'top': '10px', 'right': '16px',
-                'font-size': '11px', 'color': '#555', 'font-weight': '600'
+                'position': 'absolute',
+                'top': ended ? '26px' : '10px',
+                'right': ended ? '70px' : '16px',
+                'font-size': ended ? '12px' : '11px',
+                'color': ended ? '#d63031' : '#555',
+                'font-weight': ended ? '800' : '600'
             });
         }
     }
