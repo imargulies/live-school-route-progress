@@ -4214,7 +4214,7 @@
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
         var zoneSec = 0;
-        var prevMs = null, prevIn = false, haveSeenIn = false, haveSeenOut = false;
+        var prevMs = null, prevIn = false, haveSeenIn = false;
         // Dwell thresholds: bus must linger ~30s to count as truly arrived
         // (otherwise a drive-through registers) or truly departed (otherwise
         // a one-ping GPS wobble at the zone edge locks in a bogus time).
@@ -4223,14 +4223,29 @@
         var STOP_SPEED_KPH = 3; // same threshold used by the Engine "Stopped" badge
         var pendingDepartMs = null;   // first out-log after being in-zone; commit once it persists 30s
         var stopStartMs = null;       // first in-zone log where the bus was stopped; commit arrival once it persists 30s
+        // Captures the zone state AT route start (windowFromMs). We use the
+        // last log BEFORE the window as the best proxy; if none exist we
+        // fall back to the first log inside the window. Per user rule:
+        //   Arrival  requires firstInZ === false (bus was OUTSIDE at start).
+        //   Departure requires firstInZ === true  (bus was INSIDE  at start).
+        var firstInZ = null;
+        var preWindowInZ = null;
         for (var i = 0; i < sorted.length; i++) {
             var lg = sorted[i];
             if (typeof lg.latitude !== 'number' || typeof lg.longitude !== 'number') continue;
             var t = new Date(lg.dateTime).getTime();
-            if (t < windowFromMs || t > windowToMs) continue;
+            if (t < windowFromMs) {
+                // Track last pre-window state so we know where the bus was
+                // AT route start (closer to windowFromMs than the first
+                // in-window log would be).
+                preWindowInZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
+                continue;
+            }
+            if (t > windowToMs) continue;
             out.hasData = true;
             var inZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
             var spd = (typeof lg.speed === 'number') ? lg.speed : null;
+            if (firstInZ === null) firstInZ = (preWindowInZ !== null) ? preWindowInZ : inZ;
             if (inZ) {
                 out.everInZone = true;
                 haveSeenIn = true;
@@ -4238,22 +4253,21 @@
                 var stopped = (spd === null) || spd <= STOP_SPEED_KPH;
                 if (stopped) {
                     if (stopStartMs === null) stopStartMs = t;
-                    // Only commit an arrival if we have seen this vehicle
-                    // OUTSIDE the zone first — otherwise the bus was parked at
-                    // the zone from before the window and never actually
-                    // arrived during it (e.g. left overnight at school).
-                    if (haveSeenOut && out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
+                    // Arrival: bus must have been OUTSIDE at route start AND
+                    // stayed stopped in the zone for >= 30s to count.
+                    if (firstInZ === false && out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
                         out.arrivedAtMs = stopStartMs;
                     }
                 } else {
                     stopStartMs = null; // still moving — not parked yet
                 }
             } else {
-                haveSeenOut = true;
-                if (haveSeenIn) {
+                if (haveSeenIn || firstInZ === true) {
                     stopStartMs = null;
                     if (pendingDepartMs === null) pendingDepartMs = t;
-                    if (out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
+                    // Departure: bus must have been INSIDE at route start AND
+                    // stayed out of the zone for >= 30s to count.
+                    if (firstInZ === true && out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
                         out.departedAtMs = pendingDepartMs;
                     }
                 }
