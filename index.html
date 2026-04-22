@@ -2407,8 +2407,13 @@
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">&#x1F4C8; Route Trend</span>';
                 var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
+                var toggleHolder = '<span class="rpRouteCardToggle" role="button" tabindex="0" aria-label="Collapse or expand route" title="Collapse/expand">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                        '<polyline points="6 9 12 15 18 9"/>' +
+                    '</svg></span>';
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
+                        toggleHolder +
                         '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder +
                         '<span class="rpRouteCardInfo">Tracking ' + directionFriendlyLabel(r.direction) + ':' +
                         ' ' + escapeHtml(r.zoneName || '') +
@@ -2682,6 +2687,20 @@
         }
         var titles = document.querySelectorAll('.rpRouteCardTitle');
         for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '18px', 'color': '#333' });
+        var toggles = document.querySelectorAll('.rpRouteCardToggle');
+        for (var i = 0; i < toggles.length; i++) {
+            forceStyle(toggles[i], {
+                'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
+                'width': '28px', 'height': '28px',
+                'border-radius': '6px', 'background': 'rgba(0,0,0,0.04)',
+                'color': '#333', 'cursor': 'pointer', 'user-select': 'none'
+            });
+            var svg = toggles[i].querySelector('svg');
+            if (svg) {
+                var isCollapsed = toggles[i].closest('.rpRouteCard') && toggles[i].closest('.rpRouteCard').dataset.collapsed === '1';
+                forceStyle(svg, { 'transition': 'transform 0.15s ease', 'transform': isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' });
+            }
+        }
         var infos = document.querySelectorAll('.rpRouteCardInfo');
         for (var i = 0; i < infos.length; i++) forceStyle(infos[i], {
             'font-size': '16px', 'font-weight': '600', 'color': '#1a1a1a',
@@ -4743,8 +4762,11 @@
         for (var i = 0; i < cards.length; i++) {
             var card = cards[i];
             var uid = card.dataset.routeUid;
-            // User can click a collapsed summary line to force-expand.
+            // Manual toggle wins over auto-collapse: forceExpanded keeps the
+            // card open, forceCollapsed keeps it closed, until the user toggles
+            // again or the page is reloaded.
             if (card.dataset.forceExpanded === '1') { expandCard(card); continue; }
+            if (card.dataset.forceCollapsed === '1') { collapseCard(card, findRouteByUid(uid)); continue; }
             if (mode === 'never' || !isToday) { expandCard(card); continue; }
             var r = findRouteByUid(uid);
             if (!r) { expandCard(card); continue; }
@@ -4775,6 +4797,8 @@
             head.title = 'Click to expand';
             head.style.setProperty('cursor', 'pointer', 'important');
         }
+        var toggleSvg = card.querySelector('.rpRouteCardToggle svg');
+        if (toggleSvg) toggleSvg.style.setProperty('transform', 'rotate(-90deg)', 'important');
     }
 
     function expandCard(card) {
@@ -4789,15 +4813,37 @@
             head.style.removeProperty('cursor');
             delete head.dataset.a11yHint;
         }
+        var toggleSvg = card.querySelector('.rpRouteCardToggle svg');
+        if (toggleSvg) toggleSvg.style.setProperty('transform', 'rotate(0deg)', 'important');
     }
 
-    // Click anywhere on the header of a collapsed card to force-expand it.
+    // Manual toggle chevron before the route name: expands or collapses the
+    // card on demand and pins the state so applyAutoCollapse() respects it.
     document.addEventListener('click', function (e) {
+        var toggle = e.target.closest && e.target.closest('#rpProgressContent .rpRouteCardToggle');
+        if (toggle) {
+            e.stopPropagation();
+            var tCard = toggle.closest('.rpRouteCard');
+            if (!tCard) return;
+            if (tCard.dataset.collapsed === '1') {
+                tCard.dataset.forceExpanded = '1';
+                delete tCard.dataset.forceCollapsed;
+                expandCard(tCard);
+            } else {
+                tCard.dataset.forceCollapsed = '1';
+                delete tCard.dataset.forceExpanded;
+                var r = findRouteByUid(tCard.dataset.routeUid);
+                collapseCard(tCard, r);
+            }
+            return;
+        }
+        // Click anywhere else on the header of a collapsed card to expand it.
         var head = e.target.closest && e.target.closest('#rpProgressContent .rpRouteCardHead');
         if (!head) return;
         var card = head.parentElement;
         if (!card || card.dataset.collapsed !== '1') return;
         card.dataset.forceExpanded = '1';
+        delete card.dataset.forceCollapsed;
         expandCard(card);
     });
 
