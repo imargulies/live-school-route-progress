@@ -2466,7 +2466,7 @@
                         '<col class="rpColEngine" style="width:11%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
-                    '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
+                    '<th class="rpth rpthSm rpNameCell">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
                     '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">' + (isDriverRoute ? 'Current Vehicle' : '') + '</th>' +
                     '<th class="rpth rpthSm" title="Latest known street address. Click to open in Google Maps.">Current Location</th>' +
                     '<th class="rpth rpthSm" title="Open the vehicle on Geotab live map">Map</th>' +
@@ -2583,7 +2583,7 @@
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
-                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span></td>' +
+                                '<td class="rptd rpNameCell"><span>' + escapeHtml(aName) + '</span></td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpLocationCell">' +
                                     '<span class="rpLocAddrSlot">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</span>' +
@@ -2741,6 +2741,12 @@
                 'word-break': 'keep-all',
                 'text-overflow': 'clip'
             });
+        }
+        // Driver / Vehicle name column: left-align both header and data cells
+        // so names read as a list rather than centered blocks.
+        var nameCells = document.querySelectorAll('#rpProgressContent .rpProgressTable .rpNameCell');
+        for (var nc = 0; nc < nameCells.length; nc++) {
+            forceStyle(nameCells[nc], { 'text-align': 'left' });
         }
         var lastCells = document.querySelectorAll('#rpProgressContent .rpProgressTable tr > .rptd:last-child, #rpProgressContent .rpProgressTable tr > .rpth:last-child');
         for (var lc = 0; lc < lastCells.length; lc++) forceStyle(lastCells[lc], { 'border-right': 'none' });
