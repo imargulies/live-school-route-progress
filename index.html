@@ -6959,17 +6959,27 @@
 
         function renderWeekGridFor(entry) {
             var rs = routesFor(entry);
-            // Min 240px per day column so every card line ("Arrived 9:47 AM ·
-            // 12min late", "Target 9:30 AM – 9:45 AM", longer route names) fits
-            // without ellipsis truncation. The entity body wraps with
-            // overflow-x:auto so the grid scrolls horizontally on narrow viewports.
-            // Weekly grid fits a full week across a normal 1280px+ viewport:
-            // 48px time column + 7 fluid day columns (min ~140px) so the whole
-            // week reads without horizontal scroll. Cards inside each day use
-            // narrower text and a single-line layout.
-            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:48px repeat(7, minmax(0, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;width:100%;">';
+            // Only render day columns where at least one route actually runs
+            // that day-of-week. Hiding the empty days lets the remaining ones
+            // stretch wider, so the content is easier to read.
+            var activeDays = [];
+            for (var adi = 0; adi < 7; adi++) {
+                var dowA = (new Date(weekStart).getDay() + adi) % 7;
+                var hit = false;
+                for (var ari = 0; ari < rs.length; ari++) {
+                    var rd = rs[ari].activeDays || [0,1,2,3,4,5];
+                    if (rd.indexOf(dowA) !== -1) { hit = true; break; }
+                }
+                if (hit) activeDays.push(adi);
+            }
+            if (!activeDays.length) activeDays = [0,1,2,3,4,5,6]; // defensive: no routes at all → keep the empty week
+            // Weekly grid: 48px time column + N fluid day columns (N depends
+            // on how many days of the week actually carry a route). Cards
+            // inside each day stay on a single ellipsed line.
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:48px repeat(' + activeDays.length + ', minmax(0, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;width:100%;">';
             inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
-            for (var di = 0; di < 7; di++) {
+            for (var dii = 0; dii < activeDays.length; dii++) {
+                var di = activeDays[dii];
                 var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
                 inner += '<div style="background:#fff;padding:8px 4px;text-align:center;">' +
                     '<div style="font-weight:700;font-size:12px;color:#333;">' + DAY_HDR[di] + '</div>' +
@@ -6987,7 +6997,8 @@
             inner += timeAxis;
 
             var routeColor = tlColorFor(entry.type, entry.id);
-            for (var dcol = 0; dcol < 7; dcol++) {
+            for (var dci = 0; dci < activeDays.length; dci++) {
+                var dcol = activeDays[dci];
                 var colDate = new Date(weekStart); colDate.setDate(colDate.getDate() + dcol);
                 var dow = colDate.getDay();
                 var colDateStr = formatDate(colDate);
