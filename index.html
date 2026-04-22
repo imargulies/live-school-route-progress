@@ -2078,6 +2078,7 @@
             var endMin = timeToMinutes(r.endTime);
             var rCompleted = 0, rTotal = 0, rLate = 0;
             var rArrivedNames = [];
+            var rNotArrivedNames = [];
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -2158,7 +2159,7 @@
                 var _st = computeRowStatus(r, presence, isToday, currentMinutes, startMin, endMin);
                 var vStatus = _st.vStatus, vStatusClass = _st.vStatusClass, statusTip = _st.statusTip, goodDir = _st.goodDir;
                 if (_st.kind === 'good') { completedCount++; rCompleted++; rArrivedNames.push(aLookup[aId] || aId); }
-                else if (_st.kind === 'bad') missedCount++;
+                else if (_st.kind === 'bad') { missedCount++; rNotArrivedNames.push(aLookup[aId] || aId); }
                 else notStartedCount++;
                 // A row counts as a "problem" for the filter when it's late vs target,
                 // overdue, no-show, or not arrived / not departed after the window ended.
@@ -2206,7 +2207,7 @@
                 row.dataset.lastSpeed = (typeof presence.lastSpeed === 'number') ? presence.lastSpeed : '';
                 row.dataset.isProblem = _problem ? '1' : '0';
             }
-            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
+            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames };
         }
 
         applyRouteProgressBadges(liveRouteCounts);
@@ -2481,6 +2482,7 @@
 
                 var rCompleted = 0, rTotal = 0, rLate = 0;
                 var rArrivedNames = [];
+                var rNotArrivedNames = [];
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="11" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -2554,7 +2556,7 @@
                         var vStatus = _st.vStatus, vStatusClass = _st.vStatusClass, statusTip = _st.statusTip, goodDir = _st.goodDir;
                         var sortOrder;
                         if (_st.kind === 'good') { completedCount++; rCompleted++; sortOrder = 1; rArrivedNames.push(aName); }
-                        else if (_st.kind === 'bad') { missedCount++; sortOrder = 0; }
+                        else if (_st.kind === 'bad') { missedCount++; sortOrder = 0; rNotArrivedNames.push(aName); }
                         else { notStartedCount++; sortOrder = 2; }
                         // A row counts as a "problem" for the filter when it's late vs target,
                         // overdue, no-show, or not arrived / not departed after the window ended.
@@ -2605,7 +2607,7 @@
                     vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
                     for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
-                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
+                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames };
                 html += '</tbody></table></div>';
             }
 
@@ -3833,11 +3835,11 @@
         var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
                 '<polyline points="9 6 15 12 9 18"/>' +
             '</svg>';
-        return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show 14-day arrival/departure history for this row" ' +
+        return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show 14-day arrival/departure trend for this row" ' +
             'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
             'data-entity-type="' + entityType + '">' +
                 '<span class="rpRowTlBtnIcon">' + iconSvg + '</span>' +
-                '<span class="rpRowTlBtnText">14 Day history</span>' +
+                '<span class="rpRowTlBtnText">14 Day Trend</span>' +
                 '<span class="rpRowTlBtnChevron">' + chevronSvg + '</span>' +
             '</span>';
     }
@@ -4531,7 +4533,10 @@
         applyProblemsOnlyFilter();
     }
 
-    // Populate each route card's "Arrived: Bus 21, Bus 22" line.
+    // Populate each route card's summary rows: a green "Departed / Arrived:
+    // A, B, C" line and, when applicable, a red "Not departed / Not arrived:
+    // X, Y, Z" line directly below. Both refresh every live tick off the
+    // `counts` map built by the render/refresh loops.
     function applyArrivedLists(counts) {
         if (!counts) return;
         var rows = document.querySelectorAll('#rpProgressContent .rpRouteArrivedRow');
@@ -4541,17 +4546,27 @@
             if (!c) { rows[i].innerHTML = ''; continue; }
             var verb = eventVerbForDirection(c.direction);
             var names = c.arrivedNames || [];
-            var body = names.length
+            var notNames = c.notArrivedNames || [];
+            var arrivedBody = names.length
                 ? '<span class="rpArrivedNames">' + escapeHtml(names.join(', ')) + '</span>'
                 : '<span style="color:#999;">none yet</span>';
-            rows[i].innerHTML = '<span class="rpArrivedLabel">' + verb + ':</span> ' + body;
+            var html = '<div class="rpArrivedLine"><span class="rpArrivedLabel">' + verb + ':</span> ' + arrivedBody + '</div>';
+            if (notNames.length) {
+                html += '<div class="rpNotArrivedLine"><span class="rpNotArrivedLabel">Not ' + verb + ':</span> ' +
+                    '<span class="rpNotArrivedNames">' + escapeHtml(notNames.join(', ')) + '</span></div>';
+            }
+            rows[i].innerHTML = html;
         }
         var allRows = document.querySelectorAll('.rpRouteArrivedRow');
         for (var j = 0; j < allRows.length; j++) {
             forceStyle(allRows[j], {
                 'padding': '8px 16px', 'background': '#f8fafc', 'border-bottom': '1px solid #eee',
-                'font-size': '13px', 'color': '#333', 'line-height': '1.4'
+                'font-size': '13px', 'color': '#333', 'line-height': '1.5'
             });
+        }
+        var lines = document.querySelectorAll('.rpArrivedLine, .rpNotArrivedLine');
+        for (var ln = 0; ln < lines.length; ln++) {
+            forceStyle(lines[ln], { 'margin': '2px 0' });
         }
         var labels = document.querySelectorAll('.rpArrivedLabel');
         for (var k = 0; k < labels.length; k++) {
@@ -4560,6 +4575,14 @@
         var namesEls = document.querySelectorAll('.rpArrivedNames');
         for (var m = 0; m < namesEls.length; m++) {
             forceStyle(namesEls[m], { 'font-weight': '600', 'color': '#155724' });
+        }
+        var notLabels = document.querySelectorAll('.rpNotArrivedLabel');
+        for (var nl = 0; nl < notLabels.length; nl++) {
+            forceStyle(notLabels[nl], { 'font-weight': '700', 'color': '#dc3545', 'margin-right': '6px' });
+        }
+        var notNamesEls = document.querySelectorAll('.rpNotArrivedNames');
+        for (var nm = 0; nm < notNamesEls.length; nm++) {
+            forceStyle(notNamesEls[nm], { 'font-weight': '600', 'color': '#8b1e2a' });
         }
     }
 
