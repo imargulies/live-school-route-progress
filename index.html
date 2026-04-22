@@ -601,6 +601,18 @@
                 'height': 'auto', 'box-sizing': 'border-box'
             });
         }
+        // Search inputs get a taller, rounder shape with a subtle inner
+        // shadow so they read as a prominent filter control.
+        var searches = document.querySelectorAll('#rp-root input[type="search"]');
+        for (var s = 0; s < searches.length; s++) {
+            forceStyle(searches[s], {
+                'padding': '12px 16px', 'border': '1px solid #d0d7de', 'border-radius': '10px',
+                'font-size': '14px', 'background': '#fff', 'color': '#111827',
+                'height': 'auto', 'box-sizing': 'border-box',
+                'box-shadow': 'inset 0 1px 2px rgba(15,23,42,0.05)',
+                'min-height': '44px'
+            });
+        }
     }
 
     function styleForm() {
@@ -5431,30 +5443,55 @@
 
     function sparklineSvg(values, width, height) {
         width = width || 280; height = height || 60;
-        var pad = 8;
-        var innerW = width - pad * 2, innerH = height - pad * 2;
+        // Pad extra room at the bottom for x-axis date labels and on the
+        // left for y-axis percentage ticks.
+        var padL = 30, padR = 10, padT = 12, padB = 22;
+        var innerW = width - padL - padR, innerH = height - padT - padB;
         var n = values.length;
         var dx = n > 1 ? innerW / (n - 1) : 0;
-        var path = '', dots = '', noDataDots = '';
+        var path = '', areaPath = '', dots = '', noDataDots = '', xLabels = '';
         var hasAny = false;
-        // First pass: draw the connecting line through days with data.
+        var firstX = null, lastX = null;
+        // First pass: walk days that have data to build the connecting line
+        // and the area under it.
         for (var i = 0; i < n; i++) {
             var rate = values[i].rate;
             if (rate === null || rate === undefined) continue;
             hasAny = true;
-            var x = pad + i * dx;
-            var y = pad + (1 - rate) * innerH;
+            var x = padL + i * dx;
+            var y = padT + (1 - rate) * innerH;
             path += (path === '' ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+            if (firstX === null) firstX = x;
+            lastX = x;
         }
-        // Second pass: draw each day's dot on top of the line with a rich
-        // hover tooltip. Days with no data get a hollow grey dot on the
-        // zero-line so the chart always has one point per day (easier to
-        // correlate with the x-axis dates and to hover for details).
+        if (hasAny) {
+            var baseY = padT + innerH;
+            areaPath = 'M' + firstX.toFixed(1) + ',' + baseY.toFixed(1) + ' ' +
+                path.substring(1) + // drop leading M so coordinates chain
+                ' L' + lastX.toFixed(1) + ',' + baseY.toFixed(1) + ' Z';
+            // Rebuild path with explicit M so the line still renders cleanly.
+            var pathWithM = '';
+            var firstDrawn = false;
+            for (var ii = 0; ii < n; ii++) {
+                var rI = values[ii].rate;
+                if (rI === null || rI === undefined) continue;
+                var xI = padL + ii * dx;
+                var yI = padT + (1 - rI) * innerH;
+                pathWithM += (firstDrawn ? 'L' : 'M') + xI.toFixed(1) + ',' + yI.toFixed(1);
+                firstDrawn = true;
+            }
+            path = pathWithM;
+        }
+        // Second pass: dots + x-axis day-of-month labels under each point.
         for (var i2 = 0; i2 < n; i2++) {
             var vday = values[i2];
-            var x2 = pad + i2 * dx;
+            var x2 = padL + i2 * dx;
+            // Short X-axis label: day number only (e.g., "05") to stay compact.
+            var dObj = new Date(vday.dateStr + 'T12:00:00');
+            var dayLbl = ('0' + dObj.getDate()).slice(-2);
+            xLabels += '<text x="' + x2.toFixed(1) + '" y="' + (padT + innerH + 14) + '" font-size="9.5" fill="#6b7280" text-anchor="middle" pointer-events="none">' + dayLbl + '</text>';
             if (vday.rate === null || vday.rate === undefined) {
-                var y2 = pad + innerH; // sit on the 0% baseline
+                var y2 = padT + innerH;
                 var tipNoHtml =
                     '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
                         escapeHtml(formatDateFriendly(vday.dateStr)) +
@@ -5464,7 +5501,7 @@
                 noDataDots += '<circle class="rpHoverTip" tabindex="0" cx="' + x2.toFixed(1) + '" cy="' + y2.toFixed(1) + '" r="4" fill="#fff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="2,2" data-tip-html="' + tipNoAttr + '" style="cursor:pointer;"/>';
                 continue;
             }
-            var y3 = pad + (1 - vday.rate) * innerH;
+            var y3 = padT + (1 - vday.rate) * innerH;
             var color = vday.rate >= 0.9 ? '#28a745' : (vday.rate >= 0.6 ? '#e67e22' : '#dc3545');
             var pctLabel = Math.round(vday.rate * 100) + '%';
             var onT = (typeof vday.onTime === 'number') ? vday.onTime : null;
@@ -5483,15 +5520,33 @@
                 (ratio ? '<div style="font-size:12px;color:#374151;">' + escapeHtml(ratio) + '</div>' : '') +
                 (tot !== null ? '<div style="font-size:12px;color:#6b7280;">' + (tot - (onT || 0)) + ' off target</div>' : '');
             var tipAttr = tipHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            dots += '<circle class="rpHoverTip" tabindex="0" cx="' + x2.toFixed(1) + '" cy="' + y3.toFixed(1) + '" r="6" fill="' + color + '" stroke="#fff" stroke-width="2" data-tip-html="' + tipAttr + '" style="cursor:pointer;"/>';
+            // Outer ring softens the dot and gives it a "glow" over the area fill.
+            dots += '<circle cx="' + x2.toFixed(1) + '" cy="' + y3.toFixed(1) + '" r="9" fill="' + color + '" fill-opacity="0.18" pointer-events="none"/>';
+            dots += '<circle class="rpHoverTip" tabindex="0" cx="' + x2.toFixed(1) + '" cy="' + y3.toFixed(1) + '" r="6" fill="' + color + '" stroke="#fff" stroke-width="2" data-tip-html="' + tipAttr + '" style="cursor:pointer;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.2));"/>';
         }
         if (!hasAny && !noDataDots) return '<div style="color:#aaa;padding:8px;">No history yet.</div>';
-        // Gridlines at 50% and 100%
-        var g50 = pad + 0.5 * innerH, g100 = pad;
+        // Gridlines at 0, 50, 100% + y-axis labels on the left.
+        var g0 = padT + innerH, g50 = padT + 0.5 * innerH, g100 = padT;
+        var uid = 'spark_' + Math.random().toString(36).slice(2, 8);
         return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">' +
-            '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eee"/>' +
-            '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eee" stroke-dasharray="2,2"/>' +
-            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2" fill="none" pointer-events="none"/>' : '') +
+            '<defs>' +
+                '<linearGradient id="' + uid + '" x1="0" x2="0" y1="0" y2="1">' +
+                    '<stop offset="0" stop-color="#0078d4" stop-opacity="0.28"/>' +
+                    '<stop offset="1" stop-color="#0078d4" stop-opacity="0"/>' +
+                '</linearGradient>' +
+            '</defs>' +
+            // Horizontal gridlines
+            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eef2f7"/>' +
+            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eef2f7" stroke-dasharray="2,3"/>' +
+            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g0 + '" y2="' + g0 + '" stroke="#eef2f7"/>' +
+            // Y-axis percentage labels
+            '<text x="' + (padL - 6) + '" y="' + (g100 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">100%</text>' +
+            '<text x="' + (padL - 6) + '" y="' + (g50 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">50%</text>' +
+            '<text x="' + (padL - 6) + '" y="' + (g0 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">0%</text>' +
+            // Area fill under the line + the line itself
+            (areaPath ? '<path d="' + areaPath + '" fill="url(#' + uid + ')" pointer-events="none"/>' : '') +
+            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>' : '') +
+            xLabels +
             noDataDots +
             dots +
             '</svg>';
