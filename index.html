@@ -2918,7 +2918,22 @@
                 'overflow': 'visible',
                 'white-space': 'nowrap',
                 'word-break': 'keep-all',
-                'text-overflow': 'clip'
+                'text-overflow': 'clip',
+                'text-align': 'center'
+            });
+        }
+        // Map link wrapper centers the button both horizontally and vertically
+        // in the cell. vertical-align:middle on both the td and this wrapper
+        // anchors the button's baseline to the middle of the row regardless
+        // of how tall other cells (address + map + history pill) grow.
+        var mapWraps = document.querySelectorAll('#rpProgressContent .rpProgressTable .rpMapLinkWrap');
+        for (var mw = 0; mw < mapWraps.length; mw++) {
+            forceStyle(mapWraps[mw], {
+                'display': 'inline-flex',
+                'align-items': 'center',
+                'justify-content': 'center',
+                'vertical-align': 'middle',
+                'line-height': '1'
             });
         }
         // Driver / Vehicle name column: left-align both header and data cells
