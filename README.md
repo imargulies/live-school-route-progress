@@ -54,10 +54,14 @@ When all three hold, **Arrived At** is set to the moment the bus first became st
 
 ## 4. How "Departed" is decided
 
-Mirror of Arrived.
+For a row to flip to **Departed**, all three rules must hold:
 
-### Rule 1 — Bus was INSIDE the zone when the route started
-A bus that was already out driving around at route start is not "departing" — it already left, or was never there in the first place. Same last-pre-window-log check as above, just inverted.
+### Rule 1 — Bus was at school "legitimately"
+At least one of the following is true:
+- **Inside the zone at route start** — e.g., parked at school since earlier in the day or overnight. Same last-pre-window-log check Arrivals use, inverted.
+- **Truly arrived during the window** — the bus came in from outside and parked (stopped ≤ 3 km/h in the zone for 30+ seconds). This covers afternoon dismissal buses that pull in just before departure.
+
+A drive-through (brief in-zone ping with no stop) is rejected by this rule.
 
 ### Rule 2 — Bus drove out of the zone during the window
 There must be at least one in-zone and one out-of-zone log in sequence.
