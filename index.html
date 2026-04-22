@@ -2204,6 +2204,7 @@
                 row.dataset.eventMs = eventMs || '';
                 row.dataset.lastLogMs = presence.lastLogMs || '';
                 row.dataset.lastSpeed = (typeof presence.lastSpeed === 'number') ? presence.lastSpeed : '';
+                row.dataset.isProblem = _problem ? '1' : '0';
             }
             liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames };
         }
@@ -2454,13 +2455,13 @@
                     '<colgroup>' +
                         '<col class="rpColName" style="width:9%">' +
                         '<col class="rpColCurVeh" style="width:6%">' +
-                        '<col class="rpColLoc" style="width:9%">' +
-                        '<col class="rpColMap" style="width:7%">' +
+                        '<col class="rpColLoc" style="width:10%">' +
+                        '<col class="rpColMap" style="width:5%">' +
                         '<col class="rpColStatus" style="width:8%">' +
                         '<col class="rpColEvent" style="width:10%">' +
-                        '<col class="rpColVariance" style="width:14%">' +
-                        '<col class="rpColHistory" style="width:9%">' +
-                        '<col class="rpColTime" style="width:10%">' +
+                        '<col class="rpColVariance" style="width:13%">' +
+                        '<col class="rpColHistory" style="width:12%">' +
+                        '<col class="rpColTime" style="width:9%">' +
                         '<col class="rpColDist" style="width:7%">' +
                         '<col class="rpColEngine" style="width:11%">' +
                     '</colgroup>' +
@@ -2557,7 +2558,8 @@
                         else { notStartedCount++; sortOrder = 2; }
                         // A row counts as a "problem" for the filter when it's late vs target,
                         // overdue, no-show, or not arrived / not departed after the window ended.
-                        if (isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir)) rLate++;
+                        var _isProblem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
+                        if (_isProblem) rLate++;
 
                         var distCol;
                         if (r.direction === 'outside') {
@@ -2580,7 +2582,7 @@
                         var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
                                 '<td class="rptd"><span>' + escapeHtml(aName) + '</span></td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpLocationCell">' +
@@ -2712,8 +2714,8 @@
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
         var colWidths = { 'rpColName': '9%', 'rpColCurVeh': '6%', 'rpColStatus': '8%',
-            'rpColEvent': '10%', 'rpColVariance': '14%', 'rpColHistory': '9%', 'rpColTime': '10%',
-            'rpColDist': '7%', 'rpColLoc': '9%', 'rpColMap': '7%', 'rpColEngine': '11%' };
+            'rpColEvent': '10%', 'rpColVariance': '13%', 'rpColHistory': '12%', 'rpColTime': '9%',
+            'rpColDist': '7%', 'rpColLoc': '10%', 'rpColMap': '5%', 'rpColEngine': '11%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -3794,7 +3796,6 @@
         return '<a class="rpMapLink" href="' + href + '" target="_blank" rel="noopener" title="' + (title || 'Open live map') + '" ' +
             'style="display:inline-flex;align-items:center;gap:8px;padding:2px 8px 2px 2px;border-radius:12px;background:transparent;color:#0f172a;font-size:13px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;white-space:nowrap;">' +
                 '<span class="rpMapIconTile" style="display:inline-flex;align-items:center;justify-content:center;border-radius:10px;box-shadow:0 2px 6px rgba(15,23,42,0.10);overflow:hidden;flex-shrink:0;">' + mapIconSvg + '</span>' +
-                '<span class="rpMapLinkLabel">Map</span>' +
                 '<span class="rpMapLinkExt" style="display:inline-flex;align-items:center;flex-shrink:0;">' + extSvg + '</span>' +
             '</a>';
     }
@@ -4961,12 +4962,24 @@
         var cards = document.querySelectorAll('#rpProgressContent .rpRouteCard');
         var hidden = 0, visible = 0;
         for (var i = 0; i < cards.length; i++) {
-            if (on && cards[i].dataset.allGood === '1') {
-                cards[i].style.setProperty('display', 'none', 'important');
+            var card = cards[i];
+            // Card-level: hide the whole card if every row is on track.
+            if (on && card.dataset.allGood === '1') {
+                card.style.setProperty('display', 'none', 'important');
                 hidden++;
             } else {
-                cards[i].style.removeProperty('display');
+                card.style.removeProperty('display');
                 visible++;
+            }
+            // Row-level: within a visible card, hide on-track rows when the
+            // filter is on so only the late/overdue/no-show rows remain.
+            var rows = card.querySelectorAll('tr[data-row-uid]');
+            for (var rj = 0; rj < rows.length; rj++) {
+                if (on && rows[rj].dataset.isProblem !== '1') {
+                    rows[rj].style.setProperty('display', 'none', 'important');
+                } else {
+                    rows[rj].style.removeProperty('display');
+                }
             }
         }
         var container = document.getElementById('rpProgressContent');
@@ -5556,26 +5569,28 @@
             for (var i = 0; i < btns.length; i++) {
                 forceStyle(btns[i], {
                     'display': 'inline-flex', 'align-items': 'center', 'gap': '8px',
-                    // Transparent 2px border filled by a green->red gradient via
-                    // background-clip:border-box. The inner white sits on padding-box.
-                    'background': 'linear-gradient(#fff,#fff) padding-box,linear-gradient(90deg,#1e7e34 0%,#dc3545 100%) border-box',
-                    'border': '2px solid transparent',
-                    'border-radius': '14px',
-                    'padding': '4px 8px 4px 4px', 'margin': '0',
+                    'background': 'transparent',
+                    'border': 'none',
+                    'border-radius': '0',
+                    'padding': '0', 'margin': '0',
                     'color': '#1e7e34',
                     'font-size': '13px', 'font-weight': '700', 'line-height': '1',
                     'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle',
                     'text-decoration': 'none',
-                    'box-shadow': '0 1px 3px rgba(0,0,0,0.08)'
+                    'box-shadow': 'none'
                 });
             }
             var iconTiles = document.querySelectorAll('.rpRowTlBtnIcon');
             for (var it = 0; it < iconTiles.length; it++) {
                 forceStyle(iconTiles[it], {
                     'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
-                    'width': '26px', 'height': '26px',
-                    'background': '#e8f5ed', 'border-radius': '7px',
-                    'flex-shrink': '0'
+                    'width': '30px', 'height': '30px',
+                    // Gradient border (green -> red) around the graph tile itself.
+                    'background': 'linear-gradient(#e8f5ed,#e8f5ed) padding-box,linear-gradient(135deg,#1e7e34 0%,#dc3545 100%) border-box',
+                    'border': '2px solid transparent',
+                    'border-radius': '8px',
+                    'flex-shrink': '0',
+                    'box-shadow': '0 1px 3px rgba(0,0,0,0.08)'
                 });
             }
             var chevronSpans = document.querySelectorAll('.rpRowTlBtnChevron');
