@@ -1875,6 +1875,10 @@
         applyButtonA11y();
         var wrap = document.getElementById('rpRouteChipsWrap');
         forceStyle(wrap, { 'padding': '8px 0', 'display': 'flex', 'align-items': 'center', 'gap': '10px', 'flex-wrap': 'wrap' });
+        // Chips container: lay chips out as a flex row with a comfortable gap
+        // so the route cards don't run into each other on wide viewports.
+        var chipsBox = document.getElementById('rpRouteChips');
+        if (chipsBox) forceStyle(chipsBox, { 'display': 'flex', 'flex-wrap': 'wrap', 'gap': '12px', 'align-items': 'center' });
         var allBtn = document.getElementById('rpChipSelectAll');
         var noneBtn = document.getElementById('rpChipDeselectAll');
         var btnStyleBase = { 'padding': '6px 14px', 'border-radius': '8px', 'font-size': '13px', 'font-weight': '600', 'cursor': 'pointer', 'user-select': 'none', 'border': '1px solid #e5e7eb' };
