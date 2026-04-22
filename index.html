@@ -3762,15 +3762,41 @@
     function mapLinkButton(vehicleId, title) {
         var href = geotabMapLink(vehicleId);
         if (!href) return '';
-        // Pin drawn as a crisp SVG instead of the \u{1F4CD} emoji so it renders
-        // identically across platforms and doesn't get squashed when the cell
-        // clips overflow.
-        var pinSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-                '<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/>' +
-                '<circle cx="12" cy="9" r="2.5" fill="#dc3545" stroke="none"/>' +
+        // Styled map tile: light background with grey cross-streets, a blue
+        // river, a green park patch, and a red teardrop pin with a small halo
+        // and a white center circle. Drawn in a 48x48 viewBox, rendered at
+        // 28x28 so details stay crisp but the tile matches the History icon's
+        // footprint.
+        var mapIconSvg = '<svg width="28" height="28" viewBox="0 0 48 48" fill="none" aria-hidden="true">' +
+                // Base "ground" tile
+                '<rect x="0" y="0" width="48" height="48" rx="10" fill="#e7ecf2"/>' +
+                // Green park in the bottom-left corner
+                '<path d="M0 30 L12 28 L18 36 L12 48 L0 48 Z" fill="#9cd6a4"/>' +
+                // White street grid
+                '<path d="M-2 20 Q14 15 24 20 T50 20" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>' +
+                '<path d="M-2 34 Q14 32 24 36 T50 34" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+                '<path d="M34 -2 L30 50" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>' +
+                // Blue river / waterway curving across the bottom
+                '<path d="M-2 40 Q10 36 20 41 T36 43 T50 40" stroke="#5aa7f5" stroke-width="2.8" fill="none" stroke-linecap="round"/>' +
+                // Blue halo at the base of the pin
+                '<ellipse cx="24" cy="32" rx="5" ry="1.5" fill="none" stroke="#3b82f6" stroke-width="1.4"/>' +
+                // Red teardrop pin
+                '<path d="M24 7 C17 7 12.5 12.4 12.5 19 C12.5 26 24 33 24 33 C24 33 35.5 26 35.5 19 C35.5 12.4 31 7 24 7 Z" fill="#ff3b3b"/>' +
+                // White center circle on the pin
+                '<circle cx="24" cy="18" r="4.5" fill="#fff"/>' +
+            '</svg>';
+        // External-link arrow (opens Geotab map in a new tab).
+        var extSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<path d="M15 3h6v6"/>' +
+                '<path d="M10 14 L21 3"/>' +
+                '<path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>' +
             '</svg>';
         return '<a class="rpMapLink" href="' + href + '" target="_blank" rel="noopener" title="' + (title || 'Open live map') + '" ' +
-            'style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:12px;background:#fff;border:1px solid #b8daff;color:#0078d4;font-size:12px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;white-space:nowrap;box-shadow:0 1px 2px rgba(0,120,212,0.15);">' + pinSvg + '<span>Map</span></a>';
+            'style="display:inline-flex;align-items:center;gap:8px;padding:2px 8px 2px 2px;border-radius:12px;background:transparent;color:#0f172a;font-size:13px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;white-space:nowrap;">' +
+                '<span class="rpMapIconTile" style="display:inline-flex;align-items:center;justify-content:center;border-radius:10px;box-shadow:0 2px 6px rgba(15,23,42,0.10);overflow:hidden;flex-shrink:0;">' + mapIconSvg + '</span>' +
+                '<span class="rpMapLinkLabel">Map</span>' +
+                '<span class="rpMapLinkExt" style="display:inline-flex;align-items:center;flex-shrink:0;">' + extSvg + '</span>' +
+            '</a>';
     }
 
     // "14 Day history" button used in the History column. Uses .rpRowTlBtn so
