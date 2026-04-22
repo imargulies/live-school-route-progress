@@ -2189,7 +2189,13 @@
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
-                if (locationCell) locationCell.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
+                if (locationCell) {
+                    // Update only the address slot so the adjacent map-link wrap
+                    // (same cell) survives the tick.
+                    var locSlot = locationCell.querySelector('.rpLocAddrSlot');
+                    if (locSlot) locSlot.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
+                    else locationCell.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
+                }
                 if (engineCell) engineCell.innerHTML = formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime());
                 var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                 flashRowOnChange(row, newSig);
@@ -2439,15 +2445,15 @@
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
                     '<colgroup>' +
-                        '<col class="rpColName" style="width:13%">' +
-                        '<col class="rpColCurVeh" style="width:10%">' +
-                        '<col class="rpColLoc" style="width:11%">' +
-                        '<col class="rpColStatus" style="width:10%">' +
+                        '<col class="rpColName" style="width:12%">' +
+                        '<col class="rpColCurVeh" style="width:9%">' +
+                        '<col class="rpColLoc" style="width:13%">' +
+                        '<col class="rpColStatus" style="width:9%">' +
                         '<col class="rpColEvent" style="width:12%">' +
-                        '<col class="rpColVariance" style="width:17%">' +
-                        '<col class="rpColTime" style="width:11%">' +
+                        '<col class="rpColVariance" style="width:20%">' +
+                        '<col class="rpColTime" style="width:10%">' +
                         '<col class="rpColDist" style="width:8%">' +
-                        '<col class="rpColEngine" style="width:8%">' +
+                        '<col class="rpColEngine" style="width:7%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
@@ -2563,11 +2569,12 @@
                         vehRows.push({
                             sortOrder: sortOrder,
                             html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '">' +
-                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span>' +
-                                    '<span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
-                                '</td>' +
+                                '<td class="rptd"><span>' + escapeHtml(aName) + '</span></td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
-                                '<td class="rptd rpLocationCell">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</td>' +
+                                '<td class="rptd rpLocationCell">' +
+                                    '<span class="rpLocAddrSlot">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</span>' +
+                                    ' <span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
+                                '</td>' +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
                                 varianceCell +
@@ -2675,9 +2682,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '13%', 'rpColCurVeh': '10%', 'rpColStatus': '10%',
-            'rpColEvent': '12%', 'rpColVariance': '17%', 'rpColTime': '11%', 'rpColDist': '8%',
-            'rpColLoc': '11%', 'rpColEngine': '8%' };
+        var colWidths = { 'rpColName': '12%', 'rpColCurVeh': '9%', 'rpColStatus': '9%',
+            'rpColEvent': '12%', 'rpColVariance': '20%', 'rpColTime': '10%', 'rpColDist': '8%',
+            'rpColLoc': '13%', 'rpColEngine': '7%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -4323,11 +4330,13 @@
             var st = w.querySelector('.rpEtaBarStatus');
             if (st) {
                 st.textContent = status;
-                // "Window ended" reads as the most important state — brighten it.
+                // "Window ended" reads as the most important state — brighten it
+                // and move it just below the bar so it doesn't overlap the track.
                 var ended = status === 'Window ended';
                 st.style.setProperty('color', ended ? '#d63031' : '#555', 'important');
                 st.style.setProperty('font-weight', ended ? '800' : '600', 'important');
                 st.style.setProperty('font-size', ended ? '12px' : '11px', 'important');
+                st.style.setProperty('top', ended ? '26px' : '10px', 'important');
             }
         }
     }
@@ -4516,7 +4525,7 @@
         var noShowSuffix = entry.noShowCount > 0
             ? ' · ' + entry.noShowCount + ' no-show'
             : '';
-        var sampleNote = '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + entry.samples + '/' + entry.activeDays + ' days' + noShowSuffix + '</div>';
+        var sampleNote = ' <span style="color:#888;font-weight:400;font-size:11px;">' + entry.samples + '/' + entry.activeDays + ' days' + noShowSuffix + '</span>';
         var v = entry.avgVariance;
         var core;
         if (v == null) {
@@ -5423,7 +5432,7 @@
             for (var i = 0; i < btns.length; i++) {
                 forceStyle(btns[i], {
                     'display': 'inline-flex', 'align-items': 'center', 'padding': '2px 8px',
-                    'margin': '4px 0 0', 'border-radius': '10px', 'background': '#fff',
+                    'margin': '0 0 0 8px', 'border-radius': '10px', 'background': '#fff',
                     'border': '1px solid #d0d0d0', 'color': '#0078d4',
                     'font-size': '11px', 'font-weight': '600', 'line-height': '1',
                     'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle'
@@ -5748,20 +5757,20 @@
                 else if (eventMs > targetEndMs) offsetMin = Math.round((eventMs - targetEndMs) / 60000);
                 var suffix = offsetMin === 0
                     ? ''
-                    : '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">(' + (offsetMin > 0 ? '+' : '') + offsetMin + 'm)</div>';
+                    : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (offsetMin > 0 ? '+' : '') + offsetMin + 'm)</span>';
                 return '<span style="color:#28a745;font-weight:600;">On time</span>' + suffix;
             }
             if (eventMs > targetEndMs) {
                 var lateMin = Math.round((eventMs - targetEndMs) / 60000);
                 return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>' +
-                    '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + vsRouteEnd(eventMs) + '</div>';
+                    ' <span style="color:#888;font-weight:400;font-size:11px;">' + vsRouteEnd(eventMs) + '</span>';
             }
             var earlyMin = Math.round((targetStartMs - eventMs) / 60000);
             return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(earlyMin) + '</span>';
         }
         if (windowEnded) {
             return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>' +
-                (nowMs ? '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + vsRouteEnd(nowMs) + '</div>' : '');
+                (nowMs ? ' <span style="color:#888;font-weight:400;font-size:11px;">' + vsRouteEnd(nowMs) + '</span>' : '');
         }
         if (nowMs && nowMs > targetEndMs + grace) {
             var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
@@ -5769,7 +5778,7 @@
                 ? 'no departure yet'
                 : (route.direction === 'engineStart' ? 'no engine start yet' : 'no arrival yet');
             return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + '</span>' +
-                '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">' + verb + ' · ' + vsRouteEnd(nowMs) + '</div>';
+                ' <span style="color:#888;font-weight:400;font-size:11px;">' + verb + ' · ' + vsRouteEnd(nowMs) + '</span>';
         }
         return '<span style="color:#aaa">Pending</span>';
     }
