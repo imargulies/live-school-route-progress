@@ -2165,15 +2165,25 @@
         }, 5000);
     }
 
+    // Toggle the inline 'Loading' spinner in every route card's header so the
+    // user can see each card is being refreshed during a live-tick fetch.
+    function setRouteCardsLoading(on) {
+        var spans = document.querySelectorAll('.rpRouteLoading');
+        for (var i = 0; i < spans.length; i++) {
+            spans[i].style.setProperty('display', on ? 'inline-flex' : 'none', 'important');
+        }
+    }
+
     // Generation guard: a slow fetch from a previous tick must not be allowed
     // to overwrite DOM state produced by a newer tick. Each call bumps the id;
     // at every await resumption we check we're still the current run.
     var _refreshInlineRunId = 0;
     async function refreshProgressInline() {
         var runId = ++_refreshInlineRunId;
+        setRouteCardsLoading(true);
         // Fetch fresh trip data without rebuilding the whole table
         var dateStr = document.getElementById('rpProgressDate').value;
-        if (!dateStr) return;
+        if (!dateStr) { setRouteCardsLoading(false); return; }
         var dayStart = new Date(dateStr + 'T00:00:00');
         var dayEnd = new Date(dateStr + 'T23:59:59');
         var trips = await apiCall('Get', {
@@ -2403,6 +2413,7 @@
 
         // Update route chips (live status may change)
         renderRouteChips();
+        setRouteCardsLoading(false);
     }
 
     function getProgressHash() {
@@ -2564,6 +2575,12 @@
                 }
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
                 var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">&#x1F4C8; Route Trend</span>';
+                // Inline loading indicator per card — hidden by default; shown
+                // during every live-tick fetch via setRouteCardsLoading().
+                var loadingHolder = '<span class="rpRouteLoading" data-route-uid="' + r._uid + '" aria-live="polite">' +
+                    '<span class="rpSpinner" style="width:12px;height:12px;border-width:2px;vertical-align:-2px;margin-right:4px;"></span>' +
+                    '<span style="font-size:11px;color:#6b7280;font-weight:600;">Loading</span>' +
+                '</span>';
                 var etaBarHtml = isToday ? renderEtaBarHtml(r, dateStr, now.getTime()) : '';
                 var toggleHolder = '<span class="rpRouteCardToggle" role="button" tabindex="0" aria-label="Collapse or expand route" title="Collapse/expand">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -2572,7 +2589,7 @@
                 html += '<div class="rpRouteCard' + (isActiveRoute ? ' rpRouteActive' : '') + '" data-route-uid="' + r._uid + '">' +
                     '<div class="rpRouteCardHead">' +
                         toggleHolder +
-                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder +
+                        '<span class="rpRouteCardTitle">' + escapeHtml(r.name) + '</span> ' + timeLabel + ' ' + targetBadge + ' ' + progressBadgeHolder + ' ' + sparklineHolder + ' ' + loadingHolder +
                         '<span class="rpRouteCardInfo">Tracking ' + directionFriendlyLabel(r.direction) + ':' +
                         ' ' + escapeHtml(r.zoneName || '') +
                         ' : ' + formatWindow(r.startTime, r.endTime) + '</span>' +
@@ -2895,6 +2912,16 @@
         }
         var titles = document.querySelectorAll('.rpRouteCardTitle');
         for (var i = 0; i < titles.length; i++) forceStyle(titles[i], { 'font-weight': '700', 'font-size': '18px', 'color': '#333' });
+        // Per-card loading indicator — hidden by default; flipped visible for
+        // the duration of each live-tick fetch by setRouteCardsLoading().
+        var loadingSpans = document.querySelectorAll('.rpRouteLoading');
+        for (var ls = 0; ls < loadingSpans.length; ls++) {
+            forceStyle(loadingSpans[ls], {
+                'display': 'none', 'align-items': 'center', 'margin-left': '8px',
+                'padding': '4px 10px', 'border-radius': '999px',
+                'background': '#eef2f6', 'color': '#374151'
+            });
+        }
         var toggles = document.querySelectorAll('.rpRouteCardToggle');
         for (var i = 0; i < toggles.length; i++) {
             forceStyle(toggles[i], {
