@@ -2913,6 +2913,11 @@
                         var mergedLogsR = mergeDeviceLogs(effectiveLogsByDeviceR, dayDeviceIds);
                         var presenceR = computePresenceFromLogs(mergedLogsR, zone && zone.points, windowFromMs, windowToMs);
                         augmentPresenceWithTrips(presenceR, trips, isDriverRoute ? aId : null, deviceIdSetFromList(dayDeviceIds), zone && zone.points, windowFromMs, windowToMs);
+                        // Match live-progress: re-attribute events between back-to-back
+                        // routes so a late arrival/departure that spills into (or out of)
+                        // the neighbouring route's window is counted on the right row.
+                        var dayIsToday = dayStr === formatDate(new Date());
+                        adjustPresenceForAdjacentRoutes(presenceR, r, aId, mergedLogsR, trips, dayDeviceIds, zone && zone.points, dayStr, dayIsToday, Date.now());
                         var zoneMinutes = presenceR.zoneMinutes;
                         if (r.direction === 'outside') {
                             zoneMinutes = Math.max(0, windowLen - presenceR.zoneMinutes);
@@ -6334,7 +6339,7 @@
             // 12min late", "Target 9:30 AM – 9:45 AM", longer route names) fits
             // without ellipsis truncation. The entity body wraps with
             // overflow-x:auto so the grid scrolls horizontally on narrow viewports.
-            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(240px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:1744px;">';
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(360px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:2590px;">';
             inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
             for (var di = 0; di < 7; di++) {
                 var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
