@@ -4214,7 +4214,7 @@
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
         var zoneSec = 0;
-        var prevMs = null, prevIn = false, haveSeenIn = false;
+        var prevMs = null, prevIn = false, haveSeenIn = false, haveSeenOut = false;
         // Dwell thresholds: bus must linger ~30s to count as truly arrived
         // (otherwise a drive-through registers) or truly departed (otherwise
         // a one-ping GPS wobble at the zone edge locks in a bogus time).
@@ -4238,17 +4238,24 @@
                 var stopped = (spd === null) || spd <= STOP_SPEED_KPH;
                 if (stopped) {
                     if (stopStartMs === null) stopStartMs = t;
-                    if (out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
+                    // Only commit an arrival if we have seen this vehicle
+                    // OUTSIDE the zone first — otherwise the bus was parked at
+                    // the zone from before the window and never actually
+                    // arrived during it (e.g. left overnight at school).
+                    if (haveSeenOut && out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
                         out.arrivedAtMs = stopStartMs;
                     }
                 } else {
                     stopStartMs = null; // still moving — not parked yet
                 }
-            } else if (haveSeenIn) {
-                stopStartMs = null;
-                if (pendingDepartMs === null) pendingDepartMs = t;
-                if (out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
-                    out.departedAtMs = pendingDepartMs;
+            } else {
+                haveSeenOut = true;
+                if (haveSeenIn) {
+                    stopStartMs = null;
+                    if (pendingDepartMs === null) pendingDepartMs = t;
+                    if (out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
+                        out.departedAtMs = pendingDepartMs;
+                    }
                 }
             }
             if (prevMs !== null && prevIn && inZ) {
@@ -4325,13 +4332,17 @@
                         presence.everInZone = true;
                         if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
                         if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
-                        // Arrival: stop time (clamped into window). Skip the clamped
-                        // value if it's past windowToMs (can happen today when
-                        // windowToMs = now and windowFromMs is still in the future),
-                        // so we never show a phantom arrival before the route starts.
-                        var arrCandidate = Math.max(stopMs, windowFromMs);
-                        if (arrCandidate <= windowToMs && (presence.arrivedAtMs === null || arrCandidate < presence.arrivedAtMs)) {
-                            presence.arrivedAtMs = arrCandidate;
+                        // Arrival: only record if the stop itself landed INSIDE
+                        // the window — meaning the vehicle actively drove in and
+                        // parked during the window. If stopMs is before
+                        // windowFromMs, the bus was already parked there from
+                        // earlier and never 'arrived' during this window, so we
+                        // skip setting arrivedAtMs (matches the haveSeenOut
+                        // gate on the log-based path).
+                        if (stopMs >= windowFromMs && stopMs <= windowToMs) {
+                            if (presence.arrivedAtMs === null || stopMs < presence.arrivedAtMs) {
+                                presence.arrivedAtMs = stopMs;
+                            }
                         }
                         // Departure: next trip started (they drove off) during window — keep EARLIEST
                         if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
