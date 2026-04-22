@@ -2232,6 +2232,11 @@
         if (runId !== _refreshInlineRunId) return;
 
         // Update each vehicle row inline
+        // Unique vehicle/driver tracking across all routes so the Total
+        // Vehicles card isn't inflated when the same entity is assigned to
+        // multiple routes. Prefixing with v:/d: keeps vehicle IDs and driver
+        // IDs from colliding in the set.
+        var uniqueEntities = {};
         var totalAssign = 0, completedCount = 0, missedCount = 0, notStartedCount = 0, lateCount = 0;
         var liveRouteCounts = {};
 
@@ -2256,6 +2261,7 @@
             for (var vi = 0; vi < aIds.length; vi++) {
                 var aId = aIds[vi];
                 if (!aLookup[aId]) continue;
+                uniqueEntities[(isDriverRoute ? 'd:' : 'v:') + aId] = true;
                 totalAssign++;
                 rTotal++;
 
@@ -2393,7 +2399,7 @@
         // Update summary cards inline. Order: Total, On Track, Late, Off Track, Waiting.
         var svEls = document.querySelectorAll('#rpProgSummary .rpSV');
         if (svEls.length >= 5) {
-            svEls[0].textContent = totalAssign;
+            svEls[0].textContent = Object.keys(uniqueEntities).length;
             svEls[1].textContent = completedCount;
             svEls[2].textContent = lateCount;
             svEls[3].textContent = missedCount;
@@ -2554,6 +2560,7 @@
             routesWithScore.sort(function (a, b) { return a.score - b.score; });
 
             // Build progress for each route
+            var uniqueEntities = {}; // unique "v:<id>" / "d:<id>" across routes
             var totalAssign = 0, completedCount = 0, inProgressCount = 0, notStartedCount = 0, missedCount = 0, lateCount = 0;
             var routeProgressCounts = {}; // uid -> { completed, total, direction }
             var html = '';
@@ -2681,6 +2688,7 @@
                             continue;
                         }
 
+                        uniqueEntities[(isDriverRoute ? 'd:' : 'v:') + aId] = true;
                         totalAssign++;
                         rTotal++;
                         var currentVehicleName = '';
@@ -2824,9 +2832,9 @@
             var clockSvg = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 15"/></svg>';
             var hourglassSvg = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3c0 4 5 6 5 9s-5 5-5 9"/><path d="M17 3c0 4-5 6-5 9s5 5 5 9"/></svg>';
             var cardsHtml = '<div id="rpProgSummary">' +
-                '<div class="rpSC rpSCBlue" title="Total number of vehicle-route assignments for this day">' +
+                '<div class="rpSC rpSCBlue" title="Distinct vehicles and drivers assigned today (an entity on multiple routes counts once)">' +
                     '<div class="rpSCIcon" style="color:#0078d4;background:#e8f0fe;">' + busSvg + '</div>' +
-                    '<div class="rpSCText"><div class="rpSV" style="color:#0078d4;">' + totalAssign + '</div><div class="rpSL">Total Vehicles</div></div>' +
+                    '<div class="rpSCText"><div class="rpSV" style="color:#0078d4;">' + Object.keys(uniqueEntities).length + '</div><div class="rpSL">Total Vehicles</div></div>' +
                 '</div>' +
                 '<div class="rpSC rpSCGreen" title="Vehicles currently where they should be (in or out of zone as required)">' +
                     '<div class="rpSCIcon" style="color:#28a745;background:#e6f4ea;">' + checkSvg + '</div>' +
