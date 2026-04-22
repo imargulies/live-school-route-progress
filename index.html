@@ -5443,9 +5443,11 @@
 
     function sparklineSvg(values, width, height) {
         width = width || 280; height = height || 60;
-        // Pad extra room at the bottom for x-axis date labels and on the
-        // left for y-axis percentage ticks.
-        var padL = 30, padR = 10, padT = 12, padB = 22;
+        // Plot area spans the full SVG width so the line / area fill align
+        // with the route-window bar above the chart. Y-axis percentage labels
+        // sit inside the plot on a white pill so they don't eat a padding
+        // strip on the left.
+        var padL = 8, padR = 8, padT = 12, padB = 22;
         var innerW = width - padL - padR, innerH = height - padT - padB;
         var n = values.length;
         var dx = n > 1 ? innerW / (n - 1) : 0;
@@ -5535,14 +5537,17 @@
                     '<stop offset="1" stop-color="#0078d4" stop-opacity="0"/>' +
                 '</linearGradient>' +
             '</defs>' +
-            // Horizontal gridlines
-            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eef2f7"/>' +
-            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eef2f7" stroke-dasharray="2,3"/>' +
-            '<line x1="' + padL + '" x2="' + (width - padR) + '" y1="' + g0 + '" y2="' + g0 + '" stroke="#eef2f7"/>' +
-            // Y-axis percentage labels
-            '<text x="' + (padL - 6) + '" y="' + (g100 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">100%</text>' +
-            '<text x="' + (padL - 6) + '" y="' + (g50 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">50%</text>' +
-            '<text x="' + (padL - 6) + '" y="' + (g0 + 4) + '" font-size="10" fill="#9ca3af" text-anchor="end">0%</text>' +
+            // Horizontal gridlines, spanning the full SVG width so the chart
+            // visually lines up with the route-window bar above it.
+            '<line x1="0" x2="' + width + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eef2f7"/>' +
+            '<line x1="0" x2="' + width + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eef2f7" stroke-dasharray="2,3"/>' +
+            '<line x1="0" x2="' + width + '" y1="' + g0 + '" y2="' + g0 + '" stroke="#eef2f7"/>' +
+            // Y-axis percentage labels float inside the plot area on a white
+            // rounded pill so the line/area can extend behind them.
+            '<rect x="4" y="' + (g100 - 8) + '" width="28" height="14" fill="rgba(255,255,255,0.85)" rx="3"/>' +
+            '<text x="18" y="' + (g100 + 3) + '" font-size="10" fill="#6b7280" text-anchor="middle" pointer-events="none">100%</text>' +
+            '<rect x="4" y="' + (g50 - 8) + '" width="24" height="14" fill="rgba(255,255,255,0.85)" rx="3"/>' +
+            '<text x="16" y="' + (g50 + 3) + '" font-size="10" fill="#6b7280" text-anchor="middle" pointer-events="none">50%</text>' +
             // Area fill under the line + the line itself
             (areaPath ? '<path d="' + areaPath + '" fill="url(#' + uid + ')" pointer-events="none"/>' : '') +
             (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>' : '') +
