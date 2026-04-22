@@ -1925,19 +1925,19 @@
             container.innerHTML = '<span style="color:#888;font-size:13px;">No routes created</span>';
             return;
         }
-        // Restore from prefs on first render if available; else select all.
-        var anySelected = false;
-        for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k)) { anySelected = true; break; } }
-        if (!anySelected && !_chipsRestored) {
+        // First render: restore from prefs; if no saved pref exists, start
+        // with every route selected. After the first render we respect
+        // whatever the user has — including the explicit empty state you
+        // get from clicking "None" — so we don't silently undo their choice.
+        if (!_chipsRestored) {
             _chipsRestored = true;
             var saved = getPref('selectedChips', null);
             if (saved && saved.length) {
                 for (var si = 0; si < saved.length; si++) selectedRouteChips[saved[si]] = true;
-            } else {
+            } else if (saved === null) {
                 for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
             }
-        } else if (!anySelected) {
-            for (var i2 = 0; i2 < savedRoutes.length; i2++) selectedRouteChips[savedRoutes[i2]._uid] = true;
+            // saved === [] (user had explicitly deselected all, persisted) → stay empty.
         }
         var now = new Date();
         var currentMin = now.getHours() * 60 + now.getMinutes();
@@ -2480,7 +2480,10 @@
             var filterFrom = timeToMinutes(document.getElementById('rpProgressTimeFrom').value || '00:00');
             var filterTo = timeToMinutes(document.getElementById('rpProgressTimeTo').value || '23:59');
 
-            // Route chip filter
+            // Route chip filter. Once chips have been initialized (_chipsRestored)
+            // we always require a match — so clicking "None" really shows
+            // nothing, not everything. Before initialization (very first
+            // paint) we fall through to show all.
             var anyChipSelected = false;
             for (var k in selectedRouteChips) { if (selectedRouteChips.hasOwnProperty(k)) { anyChipSelected = true; break; } }
 
@@ -2492,7 +2495,11 @@
                 var rEnd = timeToMinutes(r.endTime);
                 if (rEnd < filterFrom || rStart > filterTo) return false;
                 // Route chip filter
-                if (anyChipSelected && !selectedRouteChips[r._uid]) return false;
+                if (_chipsRestored) {
+                    if (!selectedRouteChips[r._uid]) return false;
+                } else if (anyChipSelected && !selectedRouteChips[r._uid]) {
+                    return false;
+                }
                 return true;
             });
 
