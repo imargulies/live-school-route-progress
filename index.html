@@ -4085,7 +4085,7 @@
             var addr = shortenAddress(_addressCache[key] || '');
             var targets = document.querySelectorAll('[data-addr-key="' + key + '"]');
             for (var i = 0; i < targets.length; i++) {
-                if (addr) { targets[i].textContent = addr; targets[i].style.color = '#0078d4'; }
+                if (addr) { targets[i].textContent = addr; targets[i].style.color = '#111827'; }
                 else { targets[i].textContent = 'Unknown'; targets[i].style.color = '#bbb'; }
             }
         });
@@ -4103,21 +4103,21 @@
     // Cell HTML for Current Location (street address) linked to Google Maps.
     function formatLocationCell(lat, lng) {
         if (typeof lat !== 'number' || typeof lng !== 'number') return '<span style="color:#bbb;">\u2014</span>';
-        var maps = 'https://www.google.com/maps?q=' + lat.toFixed(5) + ',' + lng.toFixed(5);
         var key = _addrKey(lat, lng);
         var label, color;
         if (_addressCache.hasOwnProperty(key)) {
             var cached = shortenAddress(_addressCache[key]);
-            if (cached) { label = escapeHtml(cached); color = '#0078d4'; }
+            if (cached) { label = escapeHtml(cached); color = '#111827'; }
             else { label = 'Unknown'; color = '#bbb'; }
         } else {
             label = '\u2026';
             color = '#aaa';
             kickOffAddressFill(lat, lng);
         }
-        return '<a class="rpLocAddr" data-addr-key="' + key + '" href="' + maps + '" target="_blank" rel="noopener" ' +
-            'style="color:' + color + ';text-decoration:underline;font-size:12px;line-height:1.3;cursor:pointer;" title="Open in Google Maps">' +
-            label + '</a>';
+        // Plain span, not a link — the Map column's button owns the map link.
+        return '<span class="rpLocAddr" data-addr-key="' + key + '" ' +
+            'style="color:' + color + ';font-size:12px;line-height:1.3;">' +
+            label + '</span>';
     }
     function formatEngineCell(speed, lastLogMs, nowMs) {
         if (typeof speed !== 'number' || !lastLogMs) return '<span style="color:#bbb;">\u2014</span>';
