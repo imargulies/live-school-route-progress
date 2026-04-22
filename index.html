@@ -2449,15 +2449,15 @@
                     '<colgroup>' +
                         '<col class="rpColName" style="width:9%">' +
                         '<col class="rpColCurVeh" style="width:6%">' +
-                        '<col class="rpColLoc" style="width:10%">' +
-                        '<col class="rpColMap" style="width:4%">' +
+                        '<col class="rpColLoc" style="width:9%">' +
+                        '<col class="rpColMap" style="width:7%">' +
                         '<col class="rpColStatus" style="width:8%">' +
-                        '<col class="rpColEvent" style="width:11%">' +
+                        '<col class="rpColEvent" style="width:10%">' +
                         '<col class="rpColVariance" style="width:14%">' +
                         '<col class="rpColHistory" style="width:9%">' +
                         '<col class="rpColTime" style="width:10%">' +
                         '<col class="rpColDist" style="width:7%">' +
-                        '<col class="rpColEngine" style="width:12%">' +
+                        '<col class="rpColEngine" style="width:11%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
@@ -2693,8 +2693,8 @@
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
         var colWidths = { 'rpColName': '9%', 'rpColCurVeh': '6%', 'rpColStatus': '8%',
-            'rpColEvent': '11%', 'rpColVariance': '14%', 'rpColHistory': '9%', 'rpColTime': '10%',
-            'rpColDist': '7%', 'rpColLoc': '10%', 'rpColMap': '4%', 'rpColEngine': '12%' };
+            'rpColEvent': '10%', 'rpColVariance': '14%', 'rpColHistory': '9%', 'rpColTime': '10%',
+            'rpColDist': '7%', 'rpColLoc': '9%', 'rpColMap': '7%', 'rpColEngine': '11%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -2708,10 +2708,18 @@
                 'text-align': 'center', 'vertical-align': 'middle', 'border-right': '1px solid #e8e8e8' });
         }
         // Map cell: map link anchors to the top of the cell so it reads as a
-        // standalone button above the row's vertical center.
+        // standalone button above the row's vertical center. Override the
+        // generic "rptd" clip so the button stays on one line and renders at
+        // its natural width instead of being squeezed by the column.
         var mapTds = document.querySelectorAll('#rpProgressContent .rpProgressTable .rpMapCell');
         for (var mt = 0; mt < mapTds.length; mt++) {
-            forceStyle(mapTds[mt], { 'vertical-align': 'top' });
+            forceStyle(mapTds[mt], {
+                'vertical-align': 'top',
+                'overflow': 'visible',
+                'white-space': 'nowrap',
+                'word-break': 'keep-all',
+                'text-overflow': 'clip'
+            });
         }
         var lastCells = document.querySelectorAll('#rpProgressContent .rpProgressTable tr > .rptd:last-child, #rpProgressContent .rpProgressTable tr > .rpth:last-child');
         for (var lc = 0; lc < lastCells.length; lc++) forceStyle(lastCells[lc], { 'border-right': 'none' });
@@ -3735,8 +3743,15 @@
     function mapLinkButton(vehicleId, title) {
         var href = geotabMapLink(vehicleId);
         if (!href) return '';
+        // Pin drawn as a crisp SVG instead of the \u{1F4CD} emoji so it renders
+        // identically across platforms and doesn't get squashed when the cell
+        // clips overflow.
+        var pinSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/>' +
+                '<circle cx="12" cy="9" r="2.5" fill="#dc3545" stroke="none"/>' +
+            '</svg>';
         return '<a class="rpMapLink" href="' + href + '" target="_blank" rel="noopener" title="' + (title || 'Open live map') + '" ' +
-            'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:12px;background:#fff;border:1px solid #b8daff;color:#0078d4;font-size:12px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;box-shadow:0 1px 2px rgba(0,120,212,0.15);">\u{1F4CD} Map</a>';
+            'style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:12px;background:#fff;border:1px solid #b8daff;color:#0078d4;font-size:12px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;white-space:nowrap;box-shadow:0 1px 2px rgba(0,120,212,0.15);">' + pinSvg + '<span>Map</span></a>';
     }
 
     // "14 Day history" button used in the History column. Uses .rpRowTlBtn so
