@@ -2023,7 +2023,12 @@
         }, 5000);
     }
 
+    // Generation guard: a slow fetch from a previous tick must not be allowed
+    // to overwrite DOM state produced by a newer tick. Each call bumps the id;
+    // at every await resumption we check we're still the current run.
+    var _refreshInlineRunId = 0;
     async function refreshProgressInline() {
+        var runId = ++_refreshInlineRunId;
         // Fetch fresh trip data without rebuilding the whole table
         var dateStr = document.getElementById('rpProgressDate').value;
         if (!dateStr) return;
@@ -2033,6 +2038,7 @@
             typeName: 'Trip',
             search: { fromDate: dayStart.toISOString(), toDate: dayEnd.toISOString() }
         });
+        if (runId !== _refreshInlineRunId) return;
 
         var now = new Date();
         var currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -2041,21 +2047,25 @@
         // Check if routes changed (add/edit/delete)
         await loadZones();
         await loadRoutes();
+        if (runId !== _refreshInlineRunId) return;
         var newHash = getProgressHash();
         if (newHash !== lastProgressHash) {
-            // Routes changed — full re-render needed
+            // Routes changed — full re-render needed. Drop the live log cache
+            // so the rebuilt view starts from a clean slate.
+            _liveLogCache = {};
             renderProgress();
             return;
         }
 
-        // Fetch GPS logs for all devices referenced by current routes
-        var logFromIso = dayStart.toISOString();
-        var logToIso = (isToday ? now : dayEnd).toISOString();
+        // Fetch GPS logs for all devices referenced by current routes.
+        // Live-tick path uses the delta cache so we only pull new logs since
+        // our last fetch (minus a 60s safety buffer for any back-dated record).
         var allDeviceIds = collectRouteDeviceIds(savedRoutes, trips);
         var logsByDevice = {};
         try {
-            logsByDevice = await fetchLogRecordsByDevice(allDeviceIds, logFromIso, logToIso);
+            logsByDevice = await fetchLiveLogRecordsByDevice(allDeviceIds, dateStr, now.getTime());
         } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
+        if (runId !== _refreshInlineRunId) return;
 
         // Update each vehicle row inline
         var totalAssign = 0, completedCount = 0, missedCount = 0, notStartedCount = 0;
@@ -2255,6 +2265,11 @@
     async function renderProgress() {
         var dateStr = document.getElementById('rpProgressDate').value;
         if (!dateStr) { showStatus('progressStatus', 'Please select a date.', 'error'); return; }
+
+        // Full render resets the live-log delta cache so the first live tick
+        // afterwards re-seeds cleanly (date may have changed, routes may have
+        // been edited, or the user may have clicked Refresh to force fresh data).
+        _liveLogCache = {};
 
         var container = document.getElementById('rpProgressContent');
         container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
@@ -3536,7 +3551,117 @@
         p.catch(function () { delete _apiLogCache[key]; });
         return p;
     }
-    function invalidateApiCaches() { _apiTripCache = {}; _apiLogCache = {}; }
+    function invalidateApiCaches() { _apiTripCache = {}; _apiLogCache = {}; _liveLogCache = {}; }
+
+    // ========== LIVE LOG DELTA CACHE ==========
+    // The live auto-refresh tick used to re-download the full day's LogRecords
+    // for every device every 5 seconds. By 3 PM that's ~9 hours of already-seen
+    // data. This cache keeps a per-device rolling log list and only fetches the
+    // delta (lastFetchToMs - 60s buffer, now). Geotab guarantees log records
+    // are never back-dated by more than 30s; 60s is 2x for safety.
+    //
+    // Only used by refreshProgressInline. Historical paths keep using
+    // cachedLogRecordsByDevice / fetchLogRecordsByDevice which are already
+    // TTL-cached for fixed ranges.
+    var _liveLogCache = {}; // key "deviceId|dateStr" -> { logs: [], lastFetchToMs: Number }
+    var LIVE_LOG_BACKDATE_BUFFER_MS = 60 * 1000;
+    var LIVE_LOG_STALE_RESET_MS = 10 * 60 * 1000; // a device silent this long → treat next tick as reconnect (full refetch)
+
+    async function fetchLiveLogRecordsByDevice(deviceIds, dateStr, nowMs) {
+        var byDevice = {};
+        if (!deviceIds || !deviceIds.length) return byDevice;
+        var dayStartMs = new Date(dateStr + 'T00:00:00').getTime();
+        var dayEndMs = new Date(dateStr + 'T23:59:59').getTime();
+        var toMs = Math.min(nowMs, dayEndMs);
+        var toIso = new Date(toMs).toISOString();
+        var dayFromIso = new Date(dayStartMs).toISOString();
+
+        var fullIds = [];          // need a full-day refetch
+        var deltaIds = [];         // can fetch just the delta
+        var deltaFromIsos = {};    // deviceId -> fromIso for the delta request
+        for (var i = 0; i < deviceIds.length; i++) {
+            var devId = deviceIds[i];
+            var key = devId + '|' + dateStr;
+            var entry = _liveLogCache[key];
+            if (!entry || (toMs - entry.lastFetchToMs) > LIVE_LOG_STALE_RESET_MS) {
+                fullIds.push(devId);
+            } else {
+                var fromMs = Math.max(dayStartMs, entry.lastFetchToMs - LIVE_LOG_BACKDATE_BUFFER_MS);
+                deltaIds.push(devId);
+                deltaFromIsos[devId] = new Date(fromMs).toISOString();
+            }
+        }
+
+        var calls = [];
+        for (var i = 0; i < fullIds.length; i++) {
+            calls.push(['Get', {
+                typeName: 'LogRecord',
+                search: { deviceSearch: { id: fullIds[i] }, fromDate: dayFromIso, toDate: toIso },
+                resultsLimit: 50000
+            }]);
+        }
+        for (var i = 0; i < deltaIds.length; i++) {
+            calls.push(['Get', {
+                typeName: 'LogRecord',
+                search: { deviceSearch: { id: deltaIds[i] }, fromDate: deltaFromIsos[deltaIds[i]], toDate: toIso },
+                resultsLimit: 50000
+            }]);
+        }
+
+        var results;
+        try {
+            results = await apiMultiCall(calls);
+        } catch (err) {
+            if (window.console) console.warn('[RouteProgress] Live log fetch failed:', err && err.message ? err.message : err);
+            // On failure, return whatever's in the cache so the UI doesn't go blank.
+            for (var i = 0; i < deviceIds.length; i++) {
+                var k = deviceIds[i] + '|' + dateStr;
+                byDevice[deviceIds[i]] = (_liveLogCache[k] && _liveLogCache[k].logs) || [];
+            }
+            return byDevice;
+        }
+
+        var idx = 0;
+        // Full fetches: cache entirely replaces whatever was there.
+        for (var i = 0; i < fullIds.length; i++) {
+            var devId = fullIds[i];
+            var logs = (results && results[idx]) || [];
+            idx++;
+            _liveLogCache[devId + '|' + dateStr] = { logs: logs, lastFetchToMs: toMs };
+            byDevice[devId] = logs;
+        }
+        // Delta fetches: trim the overlap from cache, then append, then re-sort
+        // and de-dupe by dateTime+latitude+longitude. The delta window is
+        // authoritative (Geotab may have back-dated up to 30s within it).
+        for (var i = 0; i < deltaIds.length; i++) {
+            var devId2 = deltaIds[i];
+            var newLogs = (results && results[idx]) || [];
+            idx++;
+            var k2 = devId2 + '|' + dateStr;
+            var existing = (_liveLogCache[k2] && _liveLogCache[k2].logs) || [];
+            var fromMs2 = new Date(deltaFromIsos[devId2]).getTime();
+            var kept = [];
+            for (var j = 0; j < existing.length; j++) {
+                var t = new Date(existing[j].dateTime).getTime();
+                if (t < fromMs2) kept.push(existing[j]);
+            }
+            var merged = kept.concat(newLogs);
+            merged.sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
+            // De-dupe: keep first occurrence of each (dateTime, lat, lng) triple.
+            var seen = {};
+            var deduped = [];
+            for (var m = 0; m < merged.length; m++) {
+                var lg = merged[m];
+                var dkey = lg.dateTime + '|' + lg.latitude + '|' + lg.longitude;
+                if (seen[dkey]) continue;
+                seen[dkey] = true;
+                deduped.push(lg);
+            }
+            _liveLogCache[k2] = { logs: deduped, lastFetchToMs: toMs };
+            byDevice[devId2] = deduped;
+        }
+        return byDevice;
+    }
 
     async function fetchLogRecordsByDevice(deviceIds, fromIso, toIso) {
         var byDevice = {};
@@ -5662,7 +5787,34 @@
     // ========== BROWSER NOTIFICATIONS ==========
     // Fires one notification per (route, assignedId, day, kind) when a row crosses into
     // Late or No-show. User opts in via the "Notify on problems" checkbox.
-    var _notifiedKeys = {};
+    // Persist fired-notification keys to localStorage so a page reload (or a
+    // full re-render) doesn't re-fire every outstanding Late/No-show alert.
+    // Keys include the dateStr; we prune entries for dates older than
+    // yesterday on load to keep storage bounded.
+    var _NOTIF_STORAGE_KEY = 'rpNotifiedKeys';
+    function _loadNotifiedKeys() {
+        try {
+            var raw = localStorage.getItem(_NOTIF_STORAGE_KEY);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return {};
+            var today = formatDate(new Date());
+            var yest = new Date(); yest.setDate(yest.getDate() - 1);
+            var yestStr = formatDate(yest);
+            var pruned = {};
+            for (var k in parsed) {
+                if (!parsed.hasOwnProperty(k)) continue;
+                var parts = k.split('|'); // uid|name|dateStr|kind
+                var d = parts[2];
+                if (d === today || d === yestStr) pruned[k] = true;
+            }
+            return pruned;
+        } catch (e) { return {}; }
+    }
+    function _saveNotifiedKeys() {
+        try { localStorage.setItem(_NOTIF_STORAGE_KEY, JSON.stringify(_notifiedKeys)); } catch (e) {}
+    }
+    var _notifiedKeys = _loadNotifiedKeys();
     function notificationsEnabled() {
         var el = document.getElementById('rpChkNotify');
         if (!el || !el.checked) return false;
@@ -5674,6 +5826,7 @@
         var key = route._uid + '|' + entityName + '|' + dateStr + '|' + kind;
         if (_notifiedKeys[key]) return;
         _notifiedKeys[key] = true;
+        _saveNotifiedKeys();
         var title = kind === 'noshow' ? 'No-show: ' + entityName : 'Late: ' + entityName;
         var _bodyKind = route.direction === 'outside' ? 'departure' : (route.direction === 'engineStart' ? 'engine start' : 'arrival');
         var body = route.name + ' \u2014 ' + _bodyKind + ' at ' + (route.zoneName || 'zone');
@@ -5682,7 +5835,7 @@
             setTimeout(function () { try { n.close(); } catch (e) {} }, 10000);
         } catch (e) {}
     }
-    function resetNotificationsForDay() { _notifiedKeys = {}; }
+    function resetNotificationsForDay() { _notifiedKeys = {}; _saveNotifiedKeys(); }
     // When user toggles on the checkbox, request permission.
     document.getElementById('rpChkNotify').addEventListener('change', function () {
         if (!this.checked) return;
