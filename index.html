@@ -4337,12 +4337,14 @@
             if (st) {
                 st.textContent = status;
                 // "Window ended" reads as the most important state — brighten it
-                // and move it just below the bar so it doesn't overlap the track.
+                // and drop it to the labels row, nudged left of the end-time
+                // label so the two don't overlap.
                 var ended = status === 'Window ended';
                 st.style.setProperty('color', ended ? '#d63031' : '#555', 'important');
                 st.style.setProperty('font-weight', ended ? '800' : '600', 'important');
                 st.style.setProperty('font-size', ended ? '12px' : '11px', 'important');
                 st.style.setProperty('top', ended ? '26px' : '10px', 'important');
+                st.style.setProperty('right', ended ? '70px' : '16px', 'important');
             }
         }
     }
