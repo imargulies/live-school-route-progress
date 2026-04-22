@@ -5435,8 +5435,9 @@
         var innerW = width - pad * 2, innerH = height - pad * 2;
         var n = values.length;
         var dx = n > 1 ? innerW / (n - 1) : 0;
-        var path = '', dots = '';
+        var path = '', dots = '', noDataDots = '';
         var hasAny = false;
+        // First pass: draw the connecting line through days with data.
         for (var i = 0; i < n; i++) {
             var rate = values[i].rate;
             if (rate === null || rate === undefined) continue;
@@ -5444,16 +5445,32 @@
             var x = pad + i * dx;
             var y = pad + (1 - rate) * innerH;
             path += (path === '' ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
-            var color = rate >= 0.9 ? '#28a745' : (rate >= 0.6 ? '#e67e22' : '#dc3545');
-            // Build a rich hover-tooltip describing this day's on-time rate
-            // and the breakdown. The generic .rpHoverTip handler (wireTlHover)
-            // shows it as a floating card on mouseover.
-            var vday = values[i];
-            var pctLabel = Math.round(rate * 100) + '%';
+        }
+        // Second pass: draw each day's dot on top of the line with a rich
+        // hover tooltip. Days with no data get a hollow grey dot on the
+        // zero-line so the chart always has one point per day (easier to
+        // correlate with the x-axis dates and to hover for details).
+        for (var i2 = 0; i2 < n; i2++) {
+            var vday = values[i2];
+            var x2 = pad + i2 * dx;
+            if (vday.rate === null || vday.rate === undefined) {
+                var y2 = pad + innerH; // sit on the 0% baseline
+                var tipNoHtml =
+                    '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
+                        escapeHtml(formatDateFriendly(vday.dateStr)) +
+                    '</div>' +
+                    '<div style="font-size:12px;color:#6b7280;">No data for this active day.</div>';
+                var tipNoAttr = tipNoHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                noDataDots += '<circle class="rpHoverTip" tabindex="0" cx="' + x2.toFixed(1) + '" cy="' + y2.toFixed(1) + '" r="4" fill="#fff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="2,2" data-tip-html="' + tipNoAttr + '" style="cursor:pointer;"/>';
+                continue;
+            }
+            var y3 = pad + (1 - vday.rate) * innerH;
+            var color = vday.rate >= 0.9 ? '#28a745' : (vday.rate >= 0.6 ? '#e67e22' : '#dc3545');
+            var pctLabel = Math.round(vday.rate * 100) + '%';
             var onT = (typeof vday.onTime === 'number') ? vday.onTime : null;
             var tot = (typeof vday.total === 'number') ? vday.total : null;
             var ratio = (onT !== null && tot !== null) ? (onT + ' / ' + tot + ' on target time') : '';
-            var verdict = rate >= 0.9 ? 'Hit target' : (rate >= 0.6 ? 'Partial' : 'Struggled');
+            var verdict = vday.rate >= 0.9 ? 'Hit target' : (vday.rate >= 0.6 ? 'Partial' : 'Struggled');
             var tipHtml =
                 '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
                     escapeHtml(formatDateFriendly(vday.dateStr)) +
@@ -5466,15 +5483,16 @@
                 (ratio ? '<div style="font-size:12px;color:#374151;">' + escapeHtml(ratio) + '</div>' : '') +
                 (tot !== null ? '<div style="font-size:12px;color:#6b7280;">' + (tot - (onT || 0)) + ' off target</div>' : '');
             var tipAttr = tipHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            dots += '<circle class="rpHoverTip" tabindex="0" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="5" fill="' + color + '" stroke="#fff" stroke-width="1.5" data-tip-html="' + tipAttr + '" style="cursor:pointer;"/>';
+            dots += '<circle class="rpHoverTip" tabindex="0" cx="' + x2.toFixed(1) + '" cy="' + y3.toFixed(1) + '" r="6" fill="' + color + '" stroke="#fff" stroke-width="2" data-tip-html="' + tipAttr + '" style="cursor:pointer;"/>';
         }
-        if (!hasAny) return '<div style="color:#aaa;padding:8px;">No history yet.</div>';
+        if (!hasAny && !noDataDots) return '<div style="color:#aaa;padding:8px;">No history yet.</div>';
         // Gridlines at 50% and 100%
         var g50 = pad + 0.5 * innerH, g100 = pad;
         return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">' +
             '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g100 + '" y2="' + g100 + '" stroke="#eee"/>' +
             '<line x1="' + pad + '" x2="' + (width - pad) + '" y1="' + g50 + '" y2="' + g50 + '" stroke="#eee" stroke-dasharray="2,2"/>' +
-            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2" fill="none"/>' : '') +
+            (path ? '<path d="' + path + '" stroke="#0078d4" stroke-width="2" fill="none" pointer-events="none"/>' : '') +
+            noDataDots +
             dots +
             '</svg>';
     }
@@ -5871,6 +5889,30 @@
             if (data[mi].eventMs) continue;
             var mx = xFor(mi);
             var my = padT + innerH - 6;
+            // Invisible hit-box over each missed/inactive marker so the
+            // rpHoverTip handler can surface a rich tooltip.
+            var mDate = new Date(data[mi].dateStr + 'T12:00:00');
+            var mDay = DAY_FULL[mDate.getDay()];
+            var mTipHtml;
+            if (data[mi].inactive) {
+                mTipHtml =
+                    '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
+                        escapeHtml(mDay + ', ' + formatDateFriendly(data[mi].dateStr)) +
+                    '</div>' +
+                    '<div style="font-size:12px;color:#6b7280;">Route does not run this weekday.</div>';
+            } else {
+                mTipHtml =
+                    '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
+                        escapeHtml(mDay + ', ' + formatDateFriendly(data[mi].dateStr)) +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                        '<span style="width:10px;height:10px;border-radius:50%;background:#dc3545;display:inline-block;"></span>' +
+                        '<span style="font-weight:700;font-size:14px;color:#dc3545;">No event recorded</span>' +
+                    '</div>' +
+                    '<div style="font-size:12px;color:#6b7280;">Route ran that day but no ' + eventVerbForDirection(route.direction).toLowerCase() + ' was captured.</div>';
+            }
+            var mTipAttr = mTipHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            svg += '<rect class="rpHoverTip" tabindex="0" x="' + (mx - 12) + '" y="' + (my - 14) + '" width="24" height="20" fill="transparent" data-tip-html="' + mTipAttr + '" style="cursor:pointer;"/>';
             if (data[mi].inactive) {
                 svg += '<text x="' + mx + '" y="' + my + '" font-size="12" fill="#bbb" text-anchor="middle">\u2013</text>';
             } else {
@@ -6723,9 +6765,22 @@
             '</table>';
     }
 
+    // Inject a small keyframe animation the fancy tooltip uses for its
+    // fade-and-lift-in effect. Idempotent.
+    var _rpTipStylesInjected = false;
+    function injectTipStyles() {
+        if (_rpTipStylesInjected) return;
+        _rpTipStylesInjected = true;
+        var s = document.createElement('style');
+        s.textContent =
+            '@keyframes rpTipIn { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }' +
+            '#rpTlTooltip { animation: rpTipIn 0.12s ease-out; }';
+        document.head.appendChild(s);
+    }
     function ensureTlTooltip() {
         var el = document.getElementById('rpTlTooltip');
         if (el) return el;
+        injectTipStyles();
         el = document.createElement('div');
         el.id = 'rpTlTooltip';
         document.body.appendChild(el);
@@ -6733,11 +6788,16 @@
             // Above the sparkline popup (z-index: 9999) so hover tooltips
             // surface over the route trend dialog when hovering its chart.
             'position': 'absolute', 'z-index': '10050', 'display': 'none',
-            'background': '#fff', 'border': '1px solid #d0d7de', 'border-radius': '8px',
-            'box-shadow': '0 10px 30px rgba(0,0,0,0.18)', 'padding': '12px 14px',
+            'background': 'linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%)',
+            'border': '1px solid rgba(15,23,42,0.08)', 'border-radius': '12px',
+            'box-shadow': '0 16px 48px rgba(15,23,42,0.22), 0 4px 12px rgba(15,23,42,0.08)',
+            'padding': '14px 16px',
             'min-width': '240px', 'max-width': '360px',
             'font-family': '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
-            'pointer-events': 'none'
+            'color': '#111827',
+            'pointer-events': 'none',
+            'backdrop-filter': 'blur(6px)',
+            '-webkit-backdrop-filter': 'blur(6px)'
         });
         wireTlHover(); // lazily wire when the tooltip is first requested
         return el;
