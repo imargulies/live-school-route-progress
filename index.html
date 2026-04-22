@@ -2183,8 +2183,10 @@
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
                 }
                 if (varianceCell) {
-                    varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) +
-                        historyBtnHtml(r._uid, aId, isDriverRoute ? 'driver' : 'vehicle');
+                    // History pill lives in its own column now, so the variance cell
+                    // only needs the target-variance text. The history cell is
+                    // rendered once and never changes content.
+                    varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
                 }
                 if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
@@ -2445,14 +2447,15 @@
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
                     '<colgroup>' +
-                        '<col class="rpColName" style="width:10%">' +
-                        '<col class="rpColCurVeh" style="width:7%">' +
+                        '<col class="rpColName" style="width:9%">' +
+                        '<col class="rpColCurVeh" style="width:6%">' +
                         '<col class="rpColLoc" style="width:13%">' +
                         '<col class="rpColStatus" style="width:9%">' +
-                        '<col class="rpColEvent" style="width:12%">' +
-                        '<col class="rpColVariance" style="width:20%">' +
+                        '<col class="rpColEvent" style="width:11%">' +
+                        '<col class="rpColVariance" style="width:14%">' +
+                        '<col class="rpColHistory" style="width:10%">' +
                         '<col class="rpColTime" style="width:10%">' +
-                        '<col class="rpColDist" style="width:8%">' +
+                        '<col class="rpColDist" style="width:7%">' +
                         '<col class="rpColEngine" style="width:11%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
@@ -2462,6 +2465,7 @@
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
+                    '<th class="rpth rpthSm" title="Historical arrival/departure trend for this driver or vehicle">History</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
                     '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary. An age note appears when the log is older than 15 min.">Engine</th>' +
@@ -2470,7 +2474,7 @@
                 var rCompleted = 0, rTotal = 0, rLate = 0;
                 var rArrivedNames = [];
                 if (!assignedIds.length) {
-                    html += '<tr><td colspan="9" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
+                    html += '<tr><td colspan="10" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
                     var vehRows = [];
                     for (var vi = 0; vi < assignedIds.length; vi++) {
@@ -2478,7 +2482,7 @@
                         var aName = idLookup[aId];
 
                         if (!aName) {
-                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="9"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
+                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="10"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
                         }
 
@@ -2563,7 +2567,8 @@
 
                         var eventCell = '<td class="rptd rpEventCell">' + formatTimeWithAgo(eventMs, now.getTime()) + '</td>';
                         var histBtn = historyBtnHtml(r._uid, aId, isDriverRoute ? 'driver' : 'vehicle');
-                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + histBtn + '</td>';
+                        var varianceCell = '<td class="rptd rpVarianceCell">' + formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow) + '</td>';
+                        var historyCell = '<td class="rptd rpHistoryCell">' + histBtn + '</td>';
 
                         var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
@@ -2578,6 +2583,7 @@
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
                                 varianceCell +
+                                historyCell +
                                 '<td class="rptd rpTimeCell">' + timeDisplay + '</td>' +
                                 distCol +
                                 '<td class="rptd rpEngineCell">' + formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime()) + '</td>' +
@@ -2682,9 +2688,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '10%', 'rpColCurVeh': '7%', 'rpColStatus': '9%',
-            'rpColEvent': '12%', 'rpColVariance': '20%', 'rpColTime': '10%', 'rpColDist': '8%',
-            'rpColLoc': '13%', 'rpColEngine': '11%' };
+        var colWidths = { 'rpColName': '9%', 'rpColCurVeh': '6%', 'rpColStatus': '9%',
+            'rpColEvent': '11%', 'rpColVariance': '14%', 'rpColHistory': '10%', 'rpColTime': '10%',
+            'rpColDist': '7%', 'rpColLoc': '13%', 'rpColEngine': '11%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -3726,15 +3732,15 @@
     // Small "History" pill (line-graph icon + label) used in the vs Target cell.
     // Uses .rpRowTlBtn so the existing click delegation opens the row timeline popup.
     function historyBtnHtml(routeUid, assignedId, entityType) {
-        var svg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        var svg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
             'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ' +
-            'style="vertical-align:-1px;margin-right:4px;">' +
+            'style="vertical-align:-1px;">' +
             '<polyline points="3 3 3 21 21 21"/>' +
             '<polyline points="7 14 11 10 15 13 20 6"/>' +
             '</svg>';
-        return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show historical timeline for this row" ' +
+        return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show 14-day arrival/departure history for this row" ' +
             'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
-            'data-entity-type="' + entityType + '">' + svg + ' History</span>';
+            'data-entity-type="' + entityType + '">' + svg + '<span>14 Day history</span></span>';
     }
 
     // ========== REVERSE GEOCODE CACHE ==========
@@ -4805,10 +4811,7 @@
             var pastWindow = isToday ? (now >= dayBaseMs + endMin * 60000) : true;
             var varianceCell = row.querySelector('.rpVarianceCell');
             if (varianceCell) {
-                var aId4 = uid.substring(dashIdx + 1);
-                var entType4 = r.trackBy === 'driver' ? 'driver' : 'vehicle';
-                varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow) +
-                    historyBtnHtml(routeUid, aId4, entType4);
+                varianceCell.innerHTML = formatTargetVariance(eventMs, r, dateStr, now, pastWindow);
             }
             // Engine cell ("No signal" after 15 min of stale GPS) is also time-relative —
             // re-evaluate staleness on the tick even when Go Live is off. We use the
@@ -5431,11 +5434,12 @@
             var btns = document.querySelectorAll('.rpRowTlBtn');
             for (var i = 0; i < btns.length; i++) {
                 forceStyle(btns[i], {
-                    'display': 'inline-flex', 'align-items': 'center', 'padding': '2px 8px',
-                    'margin': '0 0 0 8px', 'border-radius': '10px', 'background': '#fff',
-                    'border': '1px solid #d0d0d0', 'color': '#0078d4',
-                    'font-size': '11px', 'font-weight': '600', 'line-height': '1',
-                    'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle'
+                    'display': 'inline-flex', 'align-items': 'center', 'gap': '4px',
+                    'padding': '6px 14px', 'margin': '0', 'border-radius': '14px',
+                    'background': '#fff', 'border': '1px solid #b8daff', 'color': '#0078d4',
+                    'font-size': '13px', 'font-weight': '700', 'line-height': '1',
+                    'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle',
+                    'box-shadow': '0 1px 2px rgba(0,120,212,0.15)'
                 });
             }
         }
