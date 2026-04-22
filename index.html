@@ -2337,7 +2337,7 @@
                     // rendered once and never changes content.
                     varianceCell.innerHTML = _tickVKind === 'onTime' ? '' : formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
                 }
-                if (distCell && r.direction === 'outside' && lastStopLat !== null && zone && zone.points) {
+                if (distCell && lastStopLat !== null && lastStopLng !== null && zone && zone.points) {
                     distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
                 if (locationCell) {
@@ -2632,7 +2632,7 @@
                     '<th class="rpth rpthSm" title="' + targetColTip + '">Compare to Target</th>' +
                     '<th class="rpth rpthSm" title="Historical arrival/departure trend for this driver or vehicle">History</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
-                    '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
+                    '<th class="rpth rpthSm" title="How far the vehicle is from the zone right now">Distance</th>' +
                     '<th class="rpth rpthSm" title="Engine state derived from the latest log\'s speed. On = moving, Stopped = stationary. An age note appears when the log is older than 15 min.">Engine</th>' +
                     '</tr></thead><tbody>';
 
@@ -2719,15 +2719,14 @@
                         var _isProblem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
                         if (_isProblem) { rLate++; lateCount++; }
 
+                        // Always show distance to the zone regardless of
+                        // direction — 'inside' routes (bus heading to school)
+                        // benefit from it just as much as 'outside' routes do.
                         var distCol;
-                        if (r.direction === 'outside') {
-                            if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
-                                distCol = '<td class="rptd rpDistCell">' + distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km</td>';
-                            } else {
-                                distCol = '<td class="rptd rpDistCell" style="color:#aaa;">N/A</td>';
-                            }
+                        if (lastStopLat !== null && lastStopLng !== null && zone && zone.points && zone.points.length) {
+                            distCol = '<td class="rptd rpDistCell">' + distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km</td>';
                         } else {
-                            distCol = '<td class="rptd rpDistCell" style="color:#ccc;">—</td>';
+                            distCol = '<td class="rptd rpDistCell" style="color:#aaa;">N/A</td>';
                         }
 
                         var timeDisplay = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
