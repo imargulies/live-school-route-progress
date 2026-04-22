@@ -2449,19 +2449,21 @@
                     '<colgroup>' +
                         '<col class="rpColName" style="width:9%">' +
                         '<col class="rpColCurVeh" style="width:6%">' +
-                        '<col class="rpColLoc" style="width:13%">' +
-                        '<col class="rpColStatus" style="width:9%">' +
+                        '<col class="rpColLoc" style="width:10%">' +
+                        '<col class="rpColMap" style="width:4%">' +
+                        '<col class="rpColStatus" style="width:8%">' +
                         '<col class="rpColEvent" style="width:11%">' +
                         '<col class="rpColVariance" style="width:14%">' +
-                        '<col class="rpColHistory" style="width:10%">' +
+                        '<col class="rpColHistory" style="width:9%">' +
                         '<col class="rpColTime" style="width:10%">' +
                         '<col class="rpColDist" style="width:7%">' +
-                        '<col class="rpColEngine" style="width:11%">' +
+                        '<col class="rpColEngine" style="width:12%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
                     '<th class="rpth rpthSm" title="Which vehicle the driver is currently using">' + (isDriverRoute ? 'Current Vehicle' : '') + '</th>' +
                     '<th class="rpth rpthSm" title="Latest known street address. Click to open in Google Maps.">Current Location</th>' +
+                    '<th class="rpth rpthSm" title="Open the vehicle on Geotab live map">Map</th>' +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
@@ -2474,7 +2476,7 @@
                 var rCompleted = 0, rTotal = 0, rLate = 0;
                 var rArrivedNames = [];
                 if (!assignedIds.length) {
-                    html += '<tr><td colspan="10" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
+                    html += '<tr><td colspan="11" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
                     var vehRows = [];
                     for (var vi = 0; vi < assignedIds.length; vi++) {
@@ -2482,7 +2484,7 @@
                         var aName = idLookup[aId];
 
                         if (!aName) {
-                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="10"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
+                            vehRows.push({ sortOrder: 3, html: '<tr><td class="rptd" colspan="11"><span class="rpWarn">' + (isDriverRoute ? 'Driver' : 'Vehicle') + ' Removed</span></td></tr>' });
                             continue;
                         }
 
@@ -2578,7 +2580,9 @@
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpLocationCell">' +
                                     '<span class="rpLocAddrSlot">' + formatLocationCell(presence.lastLat, presence.lastLng) + '</span>' +
-                                    ' <span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
+                                '</td>' +
+                                '<td class="rptd rpMapCell" style="vertical-align:top;">' +
+                                    '<span class="rpMapLinkWrap">' + mapLinkButton(currentVehicleId, 'Open ' + (cachedDevices[currentVehicleId] || 'vehicle') + ' on live map') + '</span>' +
                                 '</td>' +
                                 '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span></td>' +
                                 eventCell +
@@ -2688,9 +2692,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '9%', 'rpColCurVeh': '6%', 'rpColStatus': '9%',
-            'rpColEvent': '11%', 'rpColVariance': '14%', 'rpColHistory': '10%', 'rpColTime': '10%',
-            'rpColDist': '7%', 'rpColLoc': '13%', 'rpColEngine': '11%' };
+        var colWidths = { 'rpColName': '9%', 'rpColCurVeh': '6%', 'rpColStatus': '8%',
+            'rpColEvent': '11%', 'rpColVariance': '14%', 'rpColHistory': '9%', 'rpColTime': '10%',
+            'rpColDist': '7%', 'rpColLoc': '10%', 'rpColMap': '4%', 'rpColEngine': '12%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
@@ -2702,6 +2706,12 @@
         for (var p = 0; p < ptds.length; p++) {
             forceStyle(ptds[p], { 'overflow': 'hidden', 'text-overflow': 'ellipsis', 'word-break': 'break-word',
                 'text-align': 'center', 'vertical-align': 'middle', 'border-right': '1px solid #e8e8e8' });
+        }
+        // Map cell: map link anchors to the top of the cell so it reads as a
+        // standalone button above the row's vertical center.
+        var mapTds = document.querySelectorAll('#rpProgressContent .rpProgressTable .rpMapCell');
+        for (var mt = 0; mt < mapTds.length; mt++) {
+            forceStyle(mapTds[mt], { 'vertical-align': 'top' });
         }
         var lastCells = document.querySelectorAll('#rpProgressContent .rpProgressTable tr > .rptd:last-child, #rpProgressContent .rpProgressTable tr > .rpth:last-child');
         for (var lc = 0; lc < lastCells.length; lc++) forceStyle(lastCells[lc], { 'border-right': 'none' });
@@ -3043,8 +3053,8 @@
                 var vSuffix = r.varianceMin === 0 ? '' : ' <span style="color:#888;font-weight:400;font-size:11px;">(' + (r.varianceMin > 0 ? '+' : '') + r.varianceMin + 'm)</span>';
                 varianceCellHtml = '<span style="color:#28a745;font-weight:600;">On time</span>' + vSuffix;
             }
-            else if (r.varianceMin > 0) varianceCellHtml = '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(r.varianceMin) + '</span>';
-            else varianceCellHtml = '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(-r.varianceMin) + '</span>';
+            else if (r.varianceMin > 0) varianceCellHtml = '<span style="color:#dc3545;font-weight:600;">Late: ' + formatMinutesHM(r.varianceMin) + '</span>';
+            else varianceCellHtml = '<span style="color:#e67e22;font-weight:600;">Early: ' + formatMinutesHM(-r.varianceMin) + '</span>';
             html += '<tr>' +
                 '<td class="rptd">' + escapeHtml(r.routeName) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.vehicleName) + '</td>' +
@@ -3726,7 +3736,7 @@
         var href = geotabMapLink(vehicleId);
         if (!href) return '';
         return '<a class="rpMapLink" href="' + href + '" target="_blank" rel="noopener" title="' + (title || 'Open live map') + '" ' +
-            'style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;background:#fff;border:1px solid #d0d0d0;color:#0078d4;font-size:11px;line-height:1;cursor:pointer;text-decoration:none;vertical-align:middle;">\u{1F4CD} Map</a>';
+            'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:12px;background:#fff;border:1px solid #b8daff;color:#0078d4;font-size:12px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;box-shadow:0 1px 2px rgba(0,120,212,0.15);">\u{1F4CD} Map</a>';
     }
 
     // Small "History" pill (line-graph icon + label) used in the vs Target cell.
@@ -5337,8 +5347,8 @@
             var dayMs = new Date(dateStr + 'T00:00:00').getTime();
             var tsMs = dayMs + targetStartMs, teMs = dayMs + targetEndMs;
             if (evMs >= tsMs - graceMs && evMs <= teMs + graceMs) return { label: 'On time', color: '#28a745' };
-            if (evMs > teMs) return { label: 'Late ' + formatMinutesHM(Math.round((evMs - teMs) / 60000)), color: '#dc3545' };
-            return { label: 'Early ' + formatMinutesHM(Math.round((tsMs - evMs) / 60000)), color: '#e67e22' };
+            if (evMs > teMs) return { label: 'Late: ' + formatMinutesHM(Math.round((evMs - teMs) / 60000)), color: '#dc3545' };
+            return { label: 'Early: ' + formatMinutesHM(Math.round((tsMs - evMs) / 60000)), color: '#e67e22' };
         }
         var pathPts = [];
         for (var k = 0; k < n; k++) {
@@ -5768,11 +5778,11 @@
             }
             if (eventMs > targetEndMs) {
                 var lateMin = Math.round((eventMs - targetEndMs) / 60000);
-                return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(lateMin) + '</span>' +
+                return '<span style="color:#dc3545;font-weight:600;">Late: ' + formatMinutesHM(lateMin) + '</span>' +
                     ' <span style="color:#888;font-weight:400;font-size:11px;">' + vsRouteEnd(eventMs) + '</span>';
             }
             var earlyMin = Math.round((targetStartMs - eventMs) / 60000);
-            return '<span style="color:#e67e22;font-weight:600;">Early ' + formatMinutesHM(earlyMin) + '</span>';
+            return '<span style="color:#e67e22;font-weight:600;">Early: ' + formatMinutesHM(earlyMin) + '</span>';
         }
         if (windowEnded) {
             return '<span class="rpNoShow" style="color:#fff;background:#dc3545;padding:2px 8px;border-radius:10px;font-weight:700;">No-show</span>' +
@@ -5783,7 +5793,7 @@
             var verb = route.direction === 'outside'
                 ? 'no departure yet'
                 : (route.direction === 'engineStart' ? 'no engine start yet' : 'no arrival yet');
-            return '<span style="color:#dc3545;font-weight:600;">Late ' + formatMinutesHM(overdueMin) + '</span>' +
+            return '<span style="color:#dc3545;font-weight:600;">Late: ' + formatMinutesHM(overdueMin) + '</span>' +
                 ' <span style="color:#888;font-weight:400;font-size:11px;">' + verb + ' · ' + vsRouteEnd(nowMs) + '</span>';
         }
         return '<span style="color:#aaa">Pending</span>';
