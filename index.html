@@ -2445,15 +2445,15 @@
                 // so they line up across the page.
                 html += '<table class="rpProgressTable">' +
                     '<colgroup>' +
-                        '<col class="rpColName" style="width:12%">' +
-                        '<col class="rpColCurVeh" style="width:9%">' +
+                        '<col class="rpColName" style="width:10%">' +
+                        '<col class="rpColCurVeh" style="width:7%">' +
                         '<col class="rpColLoc" style="width:13%">' +
                         '<col class="rpColStatus" style="width:9%">' +
                         '<col class="rpColEvent" style="width:12%">' +
                         '<col class="rpColVariance" style="width:20%">' +
                         '<col class="rpColTime" style="width:10%">' +
                         '<col class="rpColDist" style="width:8%">' +
-                        '<col class="rpColEngine" style="width:7%">' +
+                        '<col class="rpColEngine" style="width:11%">' +
                     '</colgroup>' +
                     '<thead><tr>' +
                     '<th class="rpth rpthSm">' + (isDriverRoute ? 'Driver' : 'Vehicle') + '</th>' +
@@ -2682,9 +2682,9 @@
         var tbls = document.querySelectorAll('.rpProgressTable');
         for (var i = 0; i < tbls.length; i++) forceStyle(tbls[i], { 'width': '100%', 'table-layout': 'fixed', 'border-collapse': 'collapse', 'font-size': '13px' });
         // Force fixed col widths with !important so they line up across cards.
-        var colWidths = { 'rpColName': '12%', 'rpColCurVeh': '9%', 'rpColStatus': '9%',
+        var colWidths = { 'rpColName': '10%', 'rpColCurVeh': '7%', 'rpColStatus': '9%',
             'rpColEvent': '12%', 'rpColVariance': '20%', 'rpColTime': '10%', 'rpColDist': '8%',
-            'rpColLoc': '13%', 'rpColEngine': '7%' };
+            'rpColLoc': '13%', 'rpColEngine': '11%' };
         for (var cls in colWidths) {
             if (!colWidths.hasOwnProperty(cls)) continue;
             var cols = document.querySelectorAll('#rpProgressContent col.' + cls);
