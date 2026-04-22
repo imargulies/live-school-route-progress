@@ -5366,6 +5366,43 @@
         document.head.appendChild(s);
     }
 
+    // Visual route-window bar: a thin horizontal band rendered above the
+    // trend chart in the Route Trend popup. The full scheduled window is a
+    // muted grey track; the target portion is overlaid in red. Time labels
+    // (start / end / target range) are printed below for clarity.
+    function routeWindowBarHtml(route) {
+        if (!route) return '';
+        var startMin = timeToMinutes(route.startTime);
+        var endMin = timeToMinutes(route.endTime);
+        var span = Math.max(1, endMin - startMin);
+        var hasTarget = routeHasTarget(route);
+        var tb = hasTarget ? routeTargetBounds(route) : null;
+        var tStartMin = tb ? timeToMinutes(tb.start) : null;
+        var tEndMin = tb ? timeToMinutes(tb.end) : null;
+        var leftPct = tb ? Math.max(0, (tStartMin - startMin) / span * 100) : 0;
+        var widthPct = tb ? Math.max(2, (tEndMin - tStartMin) / span * 100) : 0;
+        var startLbl = formatTime12(route.startTime);
+        var endLbl = formatTime12(route.endTime);
+        var targetLbl = tb ? (formatTime12(tb.start) + (tb.start !== tb.end ? ' – ' + formatTime12(tb.end) : '')) : '';
+        var graceMin = Math.max(0, parseInt(route.graceMin, 10) || 0);
+        var graceLbl = graceMin ? ' (±' + graceMin + ' min grace)' : '';
+        return (
+            '<div style="margin:0 0 14px 0;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:12px;color:#374151;">' +
+                    '<span style="font-weight:700;">Route window</span>' +
+                    (tb ? '<span style="color:#dc3545;font-weight:700;">Target ' + escapeHtml(targetLbl) + escapeHtml(graceLbl) + '</span>' : '<span style="color:#888;">No target set</span>') +
+                '</div>' +
+                '<div style="position:relative;height:18px;background:#e5e7eb;border-radius:9px;overflow:hidden;">' +
+                    (tb ? '<div style="position:absolute;top:0;bottom:0;left:' + leftPct.toFixed(1) + '%;width:' + widthPct.toFixed(1) + '%;background:rgba(214,48,49,0.85);"></div>' : '') +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:#6b7280;font-weight:600;">' +
+                    '<span>' + escapeHtml(startLbl) + '</span>' +
+                    '<span>' + escapeHtml(endLbl) + '</span>' +
+                '</div>' +
+            '</div>'
+        );
+    }
+
     function sparklineSvg(values, width, height) {
         width = width || 280; height = height || 60;
         var pad = 8;
@@ -5382,7 +5419,28 @@
             var y = pad + (1 - rate) * innerH;
             path += (path === '' ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
             var color = rate >= 0.9 ? '#28a745' : (rate >= 0.6 ? '#e67e22' : '#dc3545');
-            dots += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3.5" fill="' + color + '"/>';
+            // Build a rich hover-tooltip describing this day's on-time rate
+            // and the breakdown. The generic .rpHoverTip handler (wireTlHover)
+            // shows it as a floating card on mouseover.
+            var vday = values[i];
+            var pctLabel = Math.round(rate * 100) + '%';
+            var onT = (typeof vday.onTime === 'number') ? vday.onTime : null;
+            var tot = (typeof vday.total === 'number') ? vday.total : null;
+            var ratio = (onT !== null && tot !== null) ? (onT + ' / ' + tot + ' on target time') : '';
+            var verdict = rate >= 0.9 ? 'Hit target' : (rate >= 0.6 ? 'Partial' : 'Struggled');
+            var tipHtml =
+                '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
+                    escapeHtml(formatDateFriendly(vday.dateStr)) +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                    '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';display:inline-block;"></span>' +
+                    '<span style="font-weight:700;font-size:16px;color:' + color + ';">' + pctLabel + '</span>' +
+                    '<span style="font-size:12px;color:#6b7280;">' + verdict + '</span>' +
+                '</div>' +
+                (ratio ? '<div style="font-size:12px;color:#374151;">' + escapeHtml(ratio) + '</div>' : '') +
+                (tot !== null ? '<div style="font-size:12px;color:#6b7280;">' + (tot - (onT || 0)) + ' off target</div>' : '');
+            var tipAttr = tipHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            dots += '<circle class="rpHoverTip" tabindex="0" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="5" fill="' + color + '" stroke="#fff" stroke-width="1.5" data-tip-html="' + tipAttr + '" style="cursor:pointer;"/>';
         }
         if (!hasAny) return '<div style="color:#aaa;padding:8px;">No history yet.</div>';
         // Gridlines at 50% and 100%
@@ -5452,7 +5510,11 @@
         popup.style.display = '';
         if (vals.length) {
             var chart = document.getElementById('rpSparklineChart');
-            chart.innerHTML = sparklineSvg(vals, 570, 120);
+            // Route-window bar: shows the full scheduled window with the target
+            // portion highlighted in red so the user can see the route timing
+            // at a glance above the trend chart.
+            var winBarHtml = route ? routeWindowBarHtml(route) : '';
+            chart.innerHTML = winBarHtml + sparklineSvg(vals, 570, 120);
             var listHtml = '<div style="margin-top:8px;font-size:12px;color:#555;">Last ' + vals.length + ' active day' + (vals.length === 1 ? '' : 's') + ' (inactive weekdays excluded)</div>' +
                 '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">';
             for (var i = vals.length - 1; i >= 0; i--) {
@@ -5755,11 +5817,27 @@
             var pM = ('0' + pDate.getMinutes()).slice(-2);
             var pAp = pDate.getHours() >= 12 ? 'PM' : 'AM';
             var st = evStatus(pathPts[dp].data.eventMs, pathPts[dp].data.dateStr);
-            var tip = formatDateFriendly(pathPts[dp].data.dateStr) + ' \u2022 ' + pH + ':' + pM + ' ' + pAp +
-                (st.label ? ' \u2022 ' + st.label : '');
-            svg += '<circle cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="5" fill="' + st.color + '" stroke="#fff" stroke-width="1.5">' +
-                '<title>' + tip + '</title>' +
-                '</circle>';
+            var pDay = DAY_FULL[pDate.getDay()];
+            var eventVerb = eventVerbForDirection(route.direction);
+            var scheduledWin = formatTime12(route.startTime) + ' to ' + formatTime12(route.endTime);
+            var targetBits = '';
+            if (routeHasTarget(route)) {
+                var _tb = routeTargetBounds(route);
+                targetBits = formatTime12(_tb.start) + (_tb.start !== _tb.end ? ' to ' + formatTime12(_tb.end) : '');
+            }
+            var _tipHtml =
+                '<div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:6px;">' +
+                    escapeHtml(pDay + ', ' + formatDateFriendly(pathPts[dp].data.dateStr)) +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                    '<span style="width:10px;height:10px;border-radius:50%;background:' + st.color + ';display:inline-block;"></span>' +
+                    '<span style="font-weight:700;font-size:14px;color:' + st.color + ';">' + escapeHtml(st.label || 'Recorded') + '</span>' +
+                '</div>' +
+                '<div style="font-size:12px;color:#374151;margin-bottom:2px;"><b>' + eventVerb + ':</b> ' + pH + ':' + pM + ' ' + pAp + '</div>' +
+                '<div style="font-size:12px;color:#6b7280;">Scheduled: ' + escapeHtml(scheduledWin) + '</div>' +
+                (targetBits ? '<div style="font-size:12px;color:#dc3545;">Target: ' + escapeHtml(targetBits) + '</div>' : '');
+            var _tipAttr = _tipHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            svg += '<circle class="rpHoverTip" tabindex="0" cx="' + pathPts[dp].x.toFixed(1) + '" cy="' + pathPts[dp].y.toFixed(1) + '" r="5" fill="' + st.color + '" stroke="#fff" stroke-width="1.5" data-tip-html="' + _tipAttr + '" style="cursor:pointer;"/>';
         }
         // Missed days (route ran, no event): red X near the bottom of the chart.
         // Inactive days (route doesn't run this weekday): grey dash in the same place.
@@ -5993,7 +6071,7 @@
                     if (good) onTime++;
                 }
                 var rate = totalAssigned > 0 ? (onTime / totalAssigned) : null;
-                values.push({ dateStr: dStr, rate: rate });
+                values.push({ dateStr: dStr, rate: rate, onTime: onTime, total: totalAssigned });
                 _sparklineStage[r._uid] = { stage: 'compute', current: d + 1, total: activeDates.length };
                 if (_sparklineOpenUid === r._uid) {
                     renderSparklineLoading(r._uid);
@@ -6626,13 +6704,16 @@
         el.id = 'rpTlTooltip';
         document.body.appendChild(el);
         forceStyle(el, {
-            'position': 'absolute', 'z-index': '9998', 'display': 'none',
+            // Above the sparkline popup (z-index: 9999) so hover tooltips
+            // surface over the route trend dialog when hovering its chart.
+            'position': 'absolute', 'z-index': '10050', 'display': 'none',
             'background': '#fff', 'border': '1px solid #d0d7de', 'border-radius': '8px',
             'box-shadow': '0 10px 30px rgba(0,0,0,0.18)', 'padding': '12px 14px',
-            'min-width': '260px', 'max-width': '360px',
+            'min-width': '240px', 'max-width': '360px',
             'font-family': '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
             'pointer-events': 'none'
         });
+        wireTlHover(); // lazily wire when the tooltip is first requested
         return el;
     }
 
@@ -6662,26 +6743,45 @@
         if (t) t.style.display = 'none';
     }
 
+    // Resolve the hover-tooltip anchor for a given event target. Weekly
+    // timeline uses .rpTlCard (scoped), and every other graph marks its dots /
+    // markers with class .rpHoverTip so the same tooltip infra handles them.
+    function _hoverTipTarget(e) {
+        if (!e.target || !e.target.closest) return null;
+        var card = e.target.closest('#rpTimelineGraph .rpTlCard');
+        if (card) return card;
+        return e.target.closest('.rpHoverTip');
+    }
     var _tlHoverWired = false;
     function wireTlHover() {
         if (_tlHoverWired) return;
         _tlHoverWired = true;
         document.addEventListener('mouseover', function (e) {
-            var card = e.target.closest ? e.target.closest('#rpTimelineGraph .rpTlCard') : null;
-            if (!card) return;
-            var html = card.getAttribute('data-tip-html');
+            var anchor = _hoverTipTarget(e);
+            if (!anchor) return;
+            var html = anchor.getAttribute('data-tip-html');
             if (!html) return;
             var tip = ensureTlTooltip();
             tip.innerHTML = html;
-            positionTlTooltip(tip, card);
+            positionTlTooltip(tip, anchor);
         });
         document.addEventListener('mouseout', function (e) {
-            var card = e.target.closest ? e.target.closest('#rpTimelineGraph .rpTlCard') : null;
-            if (!card) return;
+            var anchor = _hoverTipTarget(e);
+            if (!anchor) return;
             var related = e.relatedTarget;
-            if (related && card.contains(related)) return;
+            if (related && anchor.contains && anchor.contains(related)) return;
             tlHideTooltip();
         });
+        document.addEventListener('focusin', function (e) {
+            var anchor = _hoverTipTarget(e);
+            if (!anchor) return;
+            var html = anchor.getAttribute('data-tip-html');
+            if (!html) return;
+            var tip = ensureTlTooltip();
+            tip.innerHTML = html;
+            positionTlTooltip(tip, anchor);
+        });
+        document.addEventListener('focusout', tlHideTooltip);
         // Hide on scroll so it doesn't float over wrong content
         window.addEventListener('scroll', tlHideTooltip, true);
     }
@@ -6837,7 +6937,11 @@
             // 12min late", "Target 9:30 AM – 9:45 AM", longer route names) fits
             // without ellipsis truncation. The entity body wraps with
             // overflow-x:auto so the grid scrolls horizontally on narrow viewports.
-            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:64px repeat(7, minmax(360px, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;min-width:2590px;">';
+            // Weekly grid fits a full week across a normal 1280px+ viewport:
+            // 48px time column + 7 fluid day columns (min ~140px) so the whole
+            // week reads without horizontal scroll. Cards inside each day use
+            // narrower text and a single-line layout.
+            var inner = '<div class="rpTlGrid" style="display:grid;grid-template-columns:48px repeat(7, minmax(0, 1fr));gap:1px;background:#eee;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;width:100%;">';
             inner += '<div style="background:#fff;padding:6px;font-weight:600;font-size:12px;color:#888;text-align:center;">Time</div>';
             for (var di = 0; di < 7; di++) {
                 var dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
@@ -6938,13 +7042,14 @@
                     inner += '<div class="rpTlCard" ' +
                         'data-tip-html="' + tipAttr + '" ' +
                         'style="position:absolute;top:' + cardTop + 'px;height:' + cardH + 'px;' +
-                        'left:4px;right:4px;' +
-                        'background:' + bg + ';color:#fff;border-radius:4px;padding:4px 6px;' +
-                        'font-size:11px;line-height:1.2;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.15);' +
+                        'left:2px;right:2px;' +
+                        'background:' + bg + ';color:#fff;border-radius:4px;padding:3px 6px;' +
+                        'font-size:11px;line-height:1.15;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,0.15);' +
                         'box-sizing:border-box;border:1px solid rgba(0,0,0,0.15);border-left:3px solid ' + routeColor + ';cursor:default;">' +
-                        '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
-                        '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + line2Html + '</div>' +
-                        (targetLine ? '<div style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + targetLine + '</div>' : '') +
+                        // One-line compact label: '<Route> — <event line>'. Full
+                        // detail lives in the hover tooltip, so the card itself
+                        // stays tight enough to fit in a narrow day column.
+                        '<div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + (line2Html ? ' — ' + line2Html : '') + '</div>' +
                         '</div>';
                 }
                 inner += '</div>';
@@ -6970,7 +7075,7 @@
                     '<span style="font-size:12px;color:#666;"><span style="color:#888;">Routes:</span> ' + escapeHtml(routeNames.join(', ')) + '</span>' +
                     '<span style="font-size:12px;color:#888;margin-left:auto;">' + rsE.length + ' route' + (rsE.length === 1 ? '' : 's') + '</span>' +
                 '</div>' +
-                '<div class="rpTlEntityBody" style="padding:12px;overflow-x:auto;">' + tlRouteLegendHtml(rsE) + renderWeekGridFor(entry) + '</div>' +
+                '<div class="rpTlEntityBody" style="padding:12px;">' + tlRouteLegendHtml(rsE) + renderWeekGridFor(entry) + '</div>' +
             '</div>';
         }
         if (!renderedAny) {
