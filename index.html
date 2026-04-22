@@ -3739,18 +3739,40 @@
             'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:12px;background:#fff;border:1px solid #b8daff;color:#0078d4;font-size:12px;font-weight:700;line-height:1;cursor:pointer;text-decoration:none;box-shadow:0 1px 2px rgba(0,120,212,0.15);">\u{1F4CD} Map</a>';
     }
 
-    // Small "History" pill (line-graph icon + label) used in the vs Target cell.
-    // Uses .rpRowTlBtn so the existing click delegation opens the row timeline popup.
+    // "14 Day history" button used in the History column. Uses .rpRowTlBtn so
+    // the existing click delegation opens the row timeline popup. Rendered as a
+    // pill with a green-to-red gradient border, a mint icon tile on the left
+    // (bar chart + trend line), the dark-green label in the middle, and a red
+    // chevron on the right — matching the mock-up the user provided.
     function historyBtnHtml(routeUid, assignedId, entityType) {
-        var svg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-            'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ' +
-            'style="vertical-align:-1px;">' +
-            '<polyline points="3 3 3 21 21 21"/>' +
-            '<polyline points="7 14 11 10 15 13 20 6"/>' +
+        // Bar-chart-with-trend-line icon. Drawn at 32x32 viewBox so the tile
+        // edges stay clean; CSS sizes the wrapper tile itself.
+        var iconSvg = '<svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">' +
+                // L-shaped axis
+                '<path d="M6 4 L6 27 L29 27" stroke="#1e7e34" stroke-width="2.2" stroke-linecap="round" fill="none"/>' +
+                // Bars: green -> green -> orange -> red (increasing height)
+                '<rect x="9" y="19" width="3.4" height="7" rx="0.5" fill="#2ecc71"/>' +
+                '<rect x="14" y="16" width="3.4" height="10" rx="0.5" fill="#27ae60"/>' +
+                '<rect x="19" y="13" width="3.4" height="13" rx="0.5" fill="#e67e22"/>' +
+                '<rect x="24" y="10" width="3.4" height="16" rx="0.5" fill="#dc3545"/>' +
+                // Trend line with dots
+                '<polyline points="10 18 15.5 14 20.5 11 26 5" stroke="#1e7e34" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+                '<circle cx="10" cy="18" r="1.3" fill="#1e7e34"/>' +
+                '<circle cx="15.5" cy="14" r="1.3" fill="#1e7e34"/>' +
+                '<circle cx="20.5" cy="11" r="1.3" fill="#1e7e34"/>' +
+                // Arrowhead at the end of the trend line
+                '<path d="M22 5 L26 5 L26 9" stroke="#1e7e34" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>';
+        var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<polyline points="9 6 15 12 9 18"/>' +
             '</svg>';
         return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show 14-day arrival/departure history for this row" ' +
             'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
-            'data-entity-type="' + entityType + '">' + svg + '<span>14 Day history</span></span>';
+            'data-entity-type="' + entityType + '">' +
+                '<span class="rpRowTlBtnIcon">' + iconSvg + '</span>' +
+                '<span class="rpRowTlBtnText">14 Day history</span>' +
+                '<span class="rpRowTlBtnChevron">' + chevronSvg + '</span>' +
+            '</span>';
     }
 
     // ========== REVERSE GEOCODE CACHE ==========
@@ -3840,7 +3862,7 @@
         if (typeof speed !== 'number' || !lastLogMs) return '<span style="color:#bbb;">\u2014</span>';
         var ageMin = nowMs ? Math.floor((nowMs - lastLogMs) / 60000) : 0;
         var ageNote = ageMin > 15
-            ? '<div style="color:#888;font-weight:400;font-size:11px;margin-top:1px;">as of ' + formatMinutesHM(ageMin) + ' ago</div>'
+            ? '<div style="color:#111;font-weight:500;font-size:11px;margin-top:6px;">as of ' + formatMinutesHM(ageMin) + ' ago</div>'
             : '';
         var badge;
         if (speed > 3) {
@@ -5446,12 +5468,34 @@
             var btns = document.querySelectorAll('.rpRowTlBtn');
             for (var i = 0; i < btns.length; i++) {
                 forceStyle(btns[i], {
-                    'display': 'inline-flex', 'align-items': 'center', 'gap': '4px',
-                    'padding': '6px 14px', 'margin': '0', 'border-radius': '14px',
-                    'background': '#fff', 'border': '1px solid #b8daff', 'color': '#0078d4',
+                    'display': 'inline-flex', 'align-items': 'center', 'gap': '8px',
+                    // Transparent 2px border filled by a green->red gradient via
+                    // background-clip:border-box. The inner white sits on padding-box.
+                    'background': 'linear-gradient(#fff,#fff) padding-box,linear-gradient(90deg,#1e7e34 0%,#dc3545 100%) border-box',
+                    'border': '2px solid transparent',
+                    'border-radius': '14px',
+                    'padding': '4px 8px 4px 4px', 'margin': '0',
+                    'color': '#1e7e34',
                     'font-size': '13px', 'font-weight': '700', 'line-height': '1',
                     'cursor': 'pointer', 'user-select': 'none', 'vertical-align': 'middle',
-                    'box-shadow': '0 1px 2px rgba(0,120,212,0.15)'
+                    'text-decoration': 'none',
+                    'box-shadow': '0 1px 3px rgba(0,0,0,0.08)'
+                });
+            }
+            var iconTiles = document.querySelectorAll('.rpRowTlBtnIcon');
+            for (var it = 0; it < iconTiles.length; it++) {
+                forceStyle(iconTiles[it], {
+                    'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
+                    'width': '26px', 'height': '26px',
+                    'background': '#e8f5ed', 'border-radius': '7px',
+                    'flex-shrink': '0'
+                });
+            }
+            var chevronSpans = document.querySelectorAll('.rpRowTlBtnChevron');
+            for (var cv = 0; cv < chevronSpans.length; cv++) {
+                forceStyle(chevronSpans[cv], {
+                    'display': 'inline-flex', 'align-items': 'center',
+                    'margin-left': '2px', 'flex-shrink': '0'
                 });
             }
         }
