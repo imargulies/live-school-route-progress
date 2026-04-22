@@ -184,7 +184,7 @@
             </label>
             <label id="rpChkCompareModeLbl" class="rpFilterChk">
                 <input type="checkbox" id="rpChkCompareMode">
-                <span class="rpFilterChkText" title="Show last-7-day average variance vs target under vs Target for each row.">Compare last 7d avg</span>
+                <span class="rpFilterChkText" title="Show last-7-day average variance under the Compare to Target cell for each row.">Compare last 7d avg</span>
             </label>
         </div>
         <div id="rpAutoCollapseWrap" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
@@ -266,7 +266,7 @@
                     <th class="rpth rpReportSortTh" data-sort="direction">Tracking</th>
                     <th class="rpth">Window</th>
                     <th class="rpth">Target</th>
-                    <th class="rpth rpReportSortTh" data-sort="varianceMin">vs Target</th>
+                    <th class="rpth rpReportSortTh" data-sort="varianceMin">Compare to Target</th>
                     <th class="rpth rpReportSortTh" data-sort="durationMin">Duration (min)</th>
                     <th class="rpth rpReportSortTh" data-sort="status">Status</th>
                 </tr></thead>
@@ -2621,7 +2621,7 @@
                     '<th class="rpth rpthSm" title="Open the vehicle on Geotab live map">Map</th>' +
                     '<th class="rpth rpthSm" title="Green = where they should be, Red = not where they should be">Status</th>' +
                     '<th class="rpth rpthSm" title="' + eventColTip + '">' + eventColLabel + '</th>' +
-                    '<th class="rpth rpthSm" title="' + targetColTip + '">vs Target</th>' +
+                    '<th class="rpth rpthSm" title="' + targetColTip + '">Compare to Target</th>' +
                     '<th class="rpth rpthSm" title="Historical arrival/departure trend for this driver or vehicle">History</th>' +
                     '<th class="rpth rpthSm" title="Time spent ' + (r.direction === 'outside' ? 'away from' : 'at') + ' the zone vs elapsed time since route started">' + timeColLabel + '</th>' +
                     '<th class="rpth rpthSm" title="How far the vehicle is from the zone">' + (r.direction === 'outside' ? 'Distance' : '') + '</th>' +
@@ -3449,7 +3449,7 @@
         if (!reportData.length || !reportExportEnabled) return;
         var data = getFilteredReport();
         if (!data.length) { showStatus('reportStatus', 'No data to export.', 'info'); return; }
-        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Target', 'vs Target (min)', 'Duration (min)', 'Status'];
+        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Target', 'Compare to Target (min)', 'Duration (min)', 'Status'];
         function csvEsc(v) {
             if (v === null || v === undefined) return '';
             var s = String(v);
@@ -3477,7 +3477,7 @@
         var data = getFilteredReport();
         if (!data.length) { showStatus('reportStatus', 'No data to export.', 'info'); return; }
 
-        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Target', 'vs Target (min)', 'Duration (min)', 'Status'];
+        var headers = ['Route', 'Vehicle', 'Driver', 'Date', 'Zone', 'Tracking', 'Window', 'Target', 'Compare to Target (min)', 'Duration (min)', 'Status'];
         var ss = []; var ssMap = {};
         function ssIdx(s) { s = String(s == null ? '' : s); if (ssMap[s] !== undefined) return ssMap[s]; ssMap[s] = ss.length; ss.push(s); return ssMap[s]; }
         function colLetter(idx) { return String.fromCharCode(65 + idx); }
