@@ -4363,9 +4363,17 @@
                                 presence.arrivedAtMs = stopMs;
                             }
                         }
-                        // Departure: next trip started (they drove off) during window — keep EARLIEST
+                        // Departure: only fill if the log-based path didn't
+                        // already set one. nextTripStart is Geotab's next
+                        // engine-on time — a bus can idle in the zone after
+                        // the engine comes on (e.g. warming up after kids
+                        // board), so this is often BEFORE the physical
+                        // boundary crossing the GPS logs show. The log-based
+                        // detection in computePresenceFromLogs is the source
+                        // of truth; we only use this as a fallback when logs
+                        // were too sparse to catch the crossing.
                         if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
-                            if (presence.departedAtMs === null || nextStartMs < presence.departedAtMs) {
+                            if (presence.departedAtMs === null) {
                                 presence.departedAtMs = nextStartMs;
                             }
                         }
@@ -4375,15 +4383,18 @@
             // Trip start point: vehicle was there at the moment the trip began, then drove off.
             // We deliberately don't set arrivedAtMs here — we don't actually know when the
             // bus arrived, only that it was parked when the engine started. Guessing
-            // windowFromMs produced misleading early arrivals. departedAtMs and
-            // engineStartedAtMs are real observations, so those still get set.
+            // windowFromMs produced misleading early arrivals. departedAtMs is only filled
+            // as a fallback (engine-on is not the same as physically leaving the zone —
+            // buses can idle inside the zone for minutes after the key is turned). The
+            // log-based crossing time is authoritative; we only fill when logs missed it.
+            // engineStartedAtMs is a real observation and keeps its "earliest wins" logic.
             if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
                 var startMs2 = tr.start ? new Date(tr.start).getTime() : null;
                 if (startMs2 !== null && startMs2 >= windowFromMs && startMs2 <= windowToMs) {
                     if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
                         presence.hasData = true;
                         presence.everInZone = true;
-                        if (presence.departedAtMs === null || startMs2 < presence.departedAtMs) {
+                        if (presence.departedAtMs === null) {
                             presence.departedAtMs = startMs2;
                         }
                         if (presence.engineStartedAtMs === null || startMs2 < presence.engineStartedAtMs) {
