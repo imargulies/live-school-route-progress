@@ -39,11 +39,13 @@ Under the status badge, each row also shows a short target-comparison line (see 
 
 For a row to flip to **Arrived**, all three rules must hold:
 
-### Rule 1 — Bus was OUTSIDE the zone when the route started
-A bus that was already parked at school (e.g., stayed overnight, garaged on-site, arrived 10 minutes before tracking opened) is not "arriving" — it's already there. We look at the last GPS reading at or just before the route start time to decide the starting state. If the bus was inside the zone at that moment, no arrival will be recorded for the entire window.
+### Rule 1 — Bus was observed OUTSIDE the zone at some point during the window
+The bus has to have actually driven in from outside. A bus that was parked at school for the whole window (stayed overnight, garaged on-site, etc.) without ever leaving is not "arriving" — it's already there. If we never see an out-of-zone log, no arrival will be recorded.
+
+Note that the bus doesn't have to be outside *at route start*. A bus that starts the route window already inside the zone, then leaves, then comes back and parks, still counts as arrived — the mid-window out-observation is enough.
 
 ### Rule 2 — Bus drove into the zone during the window
-We need at least one GPS log inside the zone polygon, with a subsequent log outside, or vice-versa — i.e., we have to see the actual crossing. A bus that was never inside the zone in any log cannot be arrived.
+We need at least one in-zone GPS log following an out-of-zone log during the window — i.e., we have to see the actual crossing inward.
 
 ### Rule 3 — Bus stopped for at least 30 seconds
 Driving through the parking lot without stopping is not an arrival. The bus must be inside the zone AND moving at 3 km/h or less for a continuous 30-second stretch. This is the same speed threshold that powers the Engine "Stopped" badge. If the bus speeds up mid-stop, the clock resets.
