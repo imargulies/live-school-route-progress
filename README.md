@@ -73,6 +73,19 @@ When all three hold, **Departed At** is the moment the bus first crossed out of 
 
 ---
 
+## 4b. Events are sticky for the rest of the day
+
+Once **Arrived At** or **Departed At** has been committed for a given row on a given day, it stays committed for the rest of that day even if the bus's subsequent movement would have caused a different answer. For example:
+
+- Bus parks at school at **4:30 PM**, the row flips to **Arrived: 4:30 PM**.
+- Bus briefly pulls out of the zone at **4:45 PM** (driver moved up one spot in the line).
+- Row does **not** flip back to Not Arrived. It stays Arrived: 4:30 PM.
+- Bus parks again, nothing changes.
+
+Same rule for Departures. This prevents a confusing flicker where a row bounces between Departed and Not Departed as the bus moves around the zone edge. Switching the date picker or clicking **Refresh** re-evaluates from scratch (sticky memory is wiped when the page does a full render).
+
+---
+
 ## 5. Target comparison — how the subline is chosen
 
 Each route can have a **target window** inside the broader route window, plus a **grace** in minutes. Example:

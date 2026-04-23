@@ -2280,6 +2280,9 @@
                 var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                 augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                 adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
+                // Keep event timestamps sticky across ticks — once committed
+                // they stay committed for the rest of the day.
+                applyStickyEvents(presence, dateStr, r._uid, aId);
                 var eventMs = getRouteEventMs(presence, r.direction);
                 var zoneMinutes = presence.zoneMinutes;
                 if (r.direction === 'outside') {
@@ -2457,7 +2460,10 @@
         // Full render resets the live-log delta cache so the first live tick
         // afterwards re-seeds cleanly (date may have changed, routes may have
         // been edited, or the user may have clicked Refresh to force fresh data).
+        // Also wipe the sticky-events memo so manual refresh = truly fresh
+        // evaluation; normal live ticks keep the memo intact.
         _liveLogCache = {};
+        resetStickyEvents();
 
         var container = document.getElementById('rpProgressContent');
         container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
@@ -2728,6 +2734,7 @@
                         var presence = computePresenceFromLogs(mergedLogs, zone && zone.points, windowFromMs, windowToMs);
                         augmentPresenceWithTrips(presence, trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), zone && zone.points, windowFromMs, windowToMs);
                         adjustPresenceForAdjacentRoutes(presence, r, aId, mergedLogs, trips, rowDeviceIds, zone && zone.points, dateStr, isToday, now.getTime());
+                        applyStickyEvents(presence, dateStr, r._uid, aId);
                         var eventMs = getRouteEventMs(presence, r.direction);
                         var zoneMinutes = Math.round(presence.zoneMinutes * 10) / 10;
                         var lastStopLat = presence.lastLat;
@@ -3895,6 +3902,33 @@
     // cachedLogRecordsByDevice / fetchLogRecordsByDevice which are already
     // TTL-cached for fixed ranges.
     var _liveLogCache = {}; // key "deviceId|dateStr" -> { logs: [], lastFetchToMs: Number }
+    // Sticky per-row event cache. Once computePresenceFromLogs +
+    // augmentPresenceWithTrips commit an arrivedAtMs / departedAtMs /
+    // engineStartedAtMs for a given row on a given day, we remember it here
+    // and merge it back into every subsequent live-tick computation for the
+    // same row. That way a bus that "Departed at 4:49" doesn't flicker back
+    // to "Not Departed" just because it re-entered the zone for 10 seconds
+    // later, or because the next tick's log delta happened to not catch the
+    // crossing. Keyed by "dateStr|routeUid|assignedId" so a date change
+    // naturally isolates yesterday's events from today's. renderProgress()
+    // wipes this for the current date when the route hash changes.
+    var _stickyEvents = {}; // { [key]: { arrivedAtMs, departedAtMs, engineStartedAtMs } }
+    function _stickyKey(dateStr, routeUid, aId) { return dateStr + '|' + routeUid + '|' + aId; }
+    function applyStickyEvents(presence, dateStr, routeUid, aId) {
+        if (!presence || !dateStr || !routeUid || !aId) return;
+        var k = _stickyKey(dateStr, routeUid, aId);
+        var prev = _stickyEvents[k] || {};
+        // Remember any newly-committed event timestamp.
+        if (presence.arrivedAtMs && !prev.arrivedAtMs) prev.arrivedAtMs = presence.arrivedAtMs;
+        if (presence.departedAtMs && !prev.departedAtMs) prev.departedAtMs = presence.departedAtMs;
+        if (presence.engineStartedAtMs && !prev.engineStartedAtMs) prev.engineStartedAtMs = presence.engineStartedAtMs;
+        // Restore any previously-seen event that this tick's computation lost.
+        if (!presence.arrivedAtMs && prev.arrivedAtMs) presence.arrivedAtMs = prev.arrivedAtMs;
+        if (!presence.departedAtMs && prev.departedAtMs) presence.departedAtMs = prev.departedAtMs;
+        if (!presence.engineStartedAtMs && prev.engineStartedAtMs) presence.engineStartedAtMs = prev.engineStartedAtMs;
+        _stickyEvents[k] = prev;
+    }
+    function resetStickyEvents() { _stickyEvents = {}; }
     var LIVE_LOG_BACKDATE_BUFFER_MS = 60 * 1000;
     var LIVE_LOG_STALE_RESET_MS = 10 * 60 * 1000; // a device silent this long → treat next tick as reconnect (full refetch)
 
