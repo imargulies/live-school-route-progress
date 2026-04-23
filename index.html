@@ -4265,14 +4265,13 @@
                 if (haveSeenIn || firstInZ === true) {
                     stopStartMs = null;
                     if (pendingDepartMs === null) pendingDepartMs = t;
-                    // Departure counts if EITHER the bus was inside at route
-                    // start (already at school) OR it truly arrived during
-                    // the window (arrivedAtMs got committed — 30s stopped
-                    // dwell). That covers afternoon dismissal buses that pull
-                    // in mid-window, without letting a brief drive-through
-                    // register as a departure.
-                    var departOk = (firstInZ === true) || (out.arrivedAtMs !== null);
-                    if (departOk && out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
+                    // Departure counts as soon as the bus has been observed
+                    // IN the zone at any point during the window (or was in
+                    // the zone at route start) and has now stayed OUT for
+                    // >= 30s. No "must have parked 30s" gate — afternoon
+                    // pickups often take only a few seconds per stop, and
+                    // requiring a stopped-dwell would silently drop them.
+                    if (out.departedAtMs === null && (t - pendingDepartMs) >= MIN_OUT_DWELL_MS) {
                         out.departedAtMs = pendingDepartMs;
                     }
                 }

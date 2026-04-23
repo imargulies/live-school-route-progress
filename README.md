@@ -56,20 +56,20 @@ When all three hold, **Arrived At** is set to the moment the bus first became st
 
 For a row to flip to **Departed**, all three rules must hold:
 
-### Rule 1 — Bus was at school "legitimately"
-At least one of the following is true:
-- **Inside the zone at route start** — e.g., parked at school since earlier in the day or overnight. Same last-pre-window-log check Arrivals use, inverted.
-- **Truly arrived during the window** — the bus came in from outside and parked (stopped ≤ 3 km/h in the zone for 30+ seconds). This covers afternoon dismissal buses that pull in just before departure.
+### Rule 1 — The bus was at school at some point
+Either:
+- It was **inside the zone at route start** (parked from earlier, overnight, prior run, etc.), or
+- It was **observed inside the zone** at any point during the window (including a brief pickup of just a few seconds — afternoon pickups don't always involve a full stop).
 
-A drive-through (brief in-zone ping with no stop) is rejected by this rule.
+A bus that never entered the zone at all during the window can't depart it.
 
-### Rule 2 — Bus drove out of the zone during the window
-There must be at least one in-zone and one out-of-zone log in sequence.
+### Rule 2 — Bus drove out of the zone
+There must be at least one in-zone and one out-of-zone GPS log in sequence.
 
 ### Rule 3 — Bus stayed out for at least 30 seconds
 A one-ping GPS wobble at the edge of the school zone does not count as a departure. The bus must be outside the zone continuously for 30 seconds. If it re-enters before the 30-second mark, the pending departure is discarded and we start over.
 
-When all three hold, **Departed At** is the moment the bus first crossed out of the zone for that sustained leave, not the moment the 30 seconds confirmed it.
+When all three hold, **Departed At** is the moment the bus first crossed out of the zone for that sustained leave — coming from the GPS log, not from Geotab's "trip start" timestamp (which fires when the key is turned, often minutes before the bus actually moves).
 
 ---
 
