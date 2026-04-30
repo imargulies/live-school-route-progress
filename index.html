@@ -2355,21 +2355,31 @@
                     // vs Target cell.
                     statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>' +
                         statusSublineHtml(eventMs, r, dateStr, now.getTime(), pastWindow);
+                    flashCellOnSigChange(statusCell, vStatus + '|' + _tickVKind);
                 }
                 if (timeCell) {
+                    var _zoneRounded = Math.round(zoneMinutes * 10);
                     timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
+                    flashCellOnSigChange(timeCell, String(_zoneRounded));
                 }
                 if (eventCell) {
+                    // The "(X min ago)" suffix updates every tick by design, so we
+                    // sig on the underlying timestamp and skip the ago text — only
+                    // a brand-new arrival/departure should flash.
                     eventCell.innerHTML = formatTimeWithAgo(eventMs, now.getTime());
+                    flashCellOnSigChange(eventCell, String(eventMs || ''));
                 }
                 if (varianceCell) {
                     // History pill lives in its own column now, so the variance cell
                     // only needs the target-variance text. The history cell is
                     // rendered once and never changes content.
                     varianceCell.innerHTML = _tickVKind === 'onTime' ? '' : formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
+                    flashCellOnSigChange(varianceCell, _tickVKind + '|' + (eventMs || '') + '|' + (pastWindow ? 1 : 0) + '|' + (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || '') + '|' + (r.graceMin || 0));
                 }
                 if (distCell && lastStopLat !== null && lastStopLng !== null && zone && zone.points) {
-                    distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
+                    var _distVal = distanceToZone(lastStopLat, lastStopLng, zone.points);
+                    distCell.textContent = _distVal + ' km';
+                    flashCellOnSigChange(distCell, String(_distVal));
                 }
                 if (locationCell) {
                     // Update only the address slot so the adjacent map-link wrap
@@ -2377,10 +2387,20 @@
                     var locSlot = locationCell.querySelector('.rpLocAddrSlot');
                     if (locSlot) locSlot.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
                     else locationCell.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
+                    var _locSig = (presence.lastLat == null || presence.lastLng == null)
+                        ? ''
+                        : (presence.lastLat.toFixed(5) + ',' + presence.lastLng.toFixed(5));
+                    flashCellOnSigChange(locationCell, _locSig);
                 }
-                if (engineCell) engineCell.innerHTML = formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime());
-                var newSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
-                flashRowOnChange(row, newSig);
+                if (engineCell) {
+                    engineCell.innerHTML = formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime());
+                    // Sig on speed bucket only (moving vs stopped); the "as of Xm ago"
+                    // suffix changes every tick so we don't include it.
+                    var _engSig = (typeof presence.lastSpeed === 'number')
+                        ? (presence.lastSpeed > 3 ? 'on' : 'stop')
+                        : (presence.lastLogMs ? 'unk' : 'na');
+                    flashCellOnSigChange(engineCell, _engSig);
+                }
                 row.dataset.eventMs = eventMs || '';
                 row.dataset.lastLogMs = presence.lastLogMs || '';
                 row.dataset.lastSpeed = (typeof presence.lastSpeed === 'number') ? presence.lastSpeed : '';
@@ -5430,6 +5450,31 @@
         var prev = row.dataset.sig;
         if (prev !== undefined && prev !== newSig) flashRow(row);
         row.dataset.sig = newSig;
+    }
+
+    // Flash a single cell. Same animation as flashRow but scoped so a single
+    // changed value doesn't paint the whole row yellow.
+    function flashCell(cell) {
+        if (!cell) return;
+        cell.style.setProperty('transition', 'none', 'important');
+        cell.style.setProperty('background-color', '#fff3b0', 'important');
+        void cell.offsetWidth;
+        cell.style.setProperty('transition', 'background-color 2s ease-out', 'important');
+        cell.style.setProperty('background-color', 'transparent', 'important');
+        setTimeout(function () {
+            cell.style.removeProperty('background-color');
+            cell.style.removeProperty('transition');
+        }, 2100);
+    }
+
+    // Flash only when this cell's underlying value changed (sig differs from
+    // last tick). The first time a sig is recorded we never flash, so the
+    // initial render doesn't immediately blink every cell.
+    function flashCellOnSigChange(cell, sig) {
+        if (!cell) return;
+        var prev = cell.dataset.sig;
+        if (prev !== undefined && prev !== sig) flashCell(cell);
+        cell.dataset.sig = sig;
     }
 
     // ========== 14-ACTIVE-DAY ON-TIME TREND (popup) ==========
