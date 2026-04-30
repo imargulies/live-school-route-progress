@@ -2358,9 +2358,10 @@
                     flashCellOnSigChange(statusCell, vStatus + '|' + _tickVKind);
                 }
                 if (timeCell) {
-                    var _zoneRounded = Math.round(zoneMinutes * 10);
+                    // Zone-minutes is a continuous counter; updating it should NOT
+                    // flash, otherwise every active row's time column blinks every
+                    // tick and looks like the whole table is flashing.
                     timeCell.textContent = formatMinutesHM(zoneMinutes) + ' / ' + formatMinutesHM(Math.round(elapsedMin));
-                    flashCellOnSigChange(timeCell, String(_zoneRounded));
                 }
                 if (eventCell) {
                     // The "(X min ago)" suffix updates every tick by design, so we
@@ -2374,28 +2375,25 @@
                     // only needs the target-variance text. The history cell is
                     // rendered once and never changes content.
                     varianceCell.innerHTML = _tickVKind === 'onTime' ? '' : formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
-                    flashCellOnSigChange(varianceCell, _tickVKind + '|' + (eventMs || '') + '|' + (pastWindow ? 1 : 0) + '|' + (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || '') + '|' + (r.graceMin || 0));
+                    // Flash only on variance-kind transitions (e.g. pending→late),
+                    // not whenever the underlying eventMs ticks forward.
+                    flashCellOnSigChange(varianceCell, _tickVKind + '|' + (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || '') + '|' + (r.graceMin || 0));
                 }
                 if (distCell && lastStopLat !== null && lastStopLng !== null && zone && zone.points) {
-                    var _distVal = distanceToZone(lastStopLat, lastStopLng, zone.points);
-                    distCell.textContent = _distVal + ' km';
-                    flashCellOnSigChange(distCell, String(_distVal));
+                    // Distance is continuous as the vehicle moves; no flash.
+                    distCell.textContent = distanceToZone(lastStopLat, lastStopLng, zone.points) + ' km';
                 }
                 if (locationCell) {
+                    // Lat/lng moves with the vehicle every tick; no flash.
                     // Update only the address slot so the adjacent map-link wrap
                     // (same cell) survives the tick.
                     var locSlot = locationCell.querySelector('.rpLocAddrSlot');
                     if (locSlot) locSlot.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
                     else locationCell.innerHTML = formatLocationCell(presence.lastLat, presence.lastLng);
-                    var _locSig = (presence.lastLat == null || presence.lastLng == null)
-                        ? ''
-                        : (presence.lastLat.toFixed(5) + ',' + presence.lastLng.toFixed(5));
-                    flashCellOnSigChange(locationCell, _locSig);
                 }
                 if (engineCell) {
                     engineCell.innerHTML = formatEngineCell(presence.lastSpeed, presence.lastLogMs, now.getTime());
-                    // Sig on speed bucket only (moving vs stopped); the "as of Xm ago"
-                    // suffix changes every tick so we don't include it.
+                    // Flash only on actual on→stopped transitions (and vice versa).
                     var _engSig = (typeof presence.lastSpeed === 'number')
                         ? (presence.lastSpeed > 3 ? 'on' : 'stop')
                         : (presence.lastLogMs ? 'unk' : 'na');
