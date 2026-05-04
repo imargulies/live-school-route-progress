@@ -5022,26 +5022,19 @@
         }
     }
 
-    // Fancy engine icons for the engine-watch indicator line.
-    // ON: a key + radiating lines (engine running). OFF: the same key tag
-    // shown faded with a slash through it.
+    // Engine-watch icons — a power button (universally read as ignition state).
+    // ON: filled green, with a small ⚡ accent. OFF: muted with a slash.
     function engineOnIconSvg() {
-        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-            '<circle cx="9" cy="14" r="3.5"/>' +
-            '<path d="M12 14h6"/>' +
-            '<path d="M16 14v3"/>' +
-            '<path d="M19 14v2.5"/>' +
-            '<path d="M5 5l1.6 1.6"/>' +
-            '<path d="M9 3v2.2"/>' +
-            '<path d="M13 4l-.8 2"/>' +
+        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 3v9"/>' +
+            '<path d="M6.4 7.6a8 8 0 1 0 11.2 0"/>' +
             '</svg>';
     }
     function engineOffIconSvg() {
         return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-            '<circle cx="9" cy="14" r="3.5"/>' +
-            '<path d="M12 14h6"/>' +
-            '<path d="M16 14v3"/>' +
-            '<path d="M4 4l16 16"/>' +
+            '<path d="M12 3v9"/>' +
+            '<path d="M6.4 7.6a8 8 0 1 0 11.2 0"/>' +
+            '<path d="M5 5l14 14" stroke-width="2.4"/>' +
             '</svg>';
     }
 
@@ -5095,6 +5088,7 @@
             }
             // Optional engine-watch breakdown: only meaningful for the
             // not-yet-arrived/departed crowd, so we just show their split.
+            // ON listed first so "about to go" is the eye's first stop.
             if (c.engineWatch) {
                 var onN = c.engineOnNames || [];
                 var offN = c.engineOffNames || [];
@@ -5102,6 +5096,7 @@
                     var zoneSuffix = c.engineZoneName
                         ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
                         : '';
+                    var totalSuffix = ' <span class="rpEngineCountChip">' + onN.length + ' on · ' + offN.length + ' off</span>';
                     var engineParts = '';
                     if (onN.length) {
                         engineParts += '<span class="rpEnginePill rpEngineOnPill" title="Trip started inside the engine zone — about to go">' +
@@ -5113,7 +5108,7 @@
                             engineOffIconSvg() + '<span class="rpEngineWord">OFF</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(offN.join(', ')) + '</span></span>';
                     }
-                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="Engine ON means a trip started inside the engine zone in this window — these vehicles are about to go.">Engine' + zoneSuffix + ':</span> ' + engineParts + '</div>';
+                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="Engine ON means a trip started inside the engine zone in this window — these vehicles are about to go.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
                 }
             }
             rows[i].innerHTML = html;
@@ -5172,8 +5167,17 @@
             forceStyle(engOnPills[eo], {
                 'background': 'linear-gradient(135deg,#d1fae5 0%,#a7f3d0 100%)',
                 'color': '#065f46', 'border-color': '#34d399',
-                'box-shadow': '0 0 0 0 rgba(52,211,153,0.6)',
-                'animation': 'rpEnginePulse 1.6s ease-in-out infinite'
+                'box-shadow': '0 0 0 0 rgba(52,211,153,0.5)',
+                'animation': 'rpEnginePulse 2.4s ease-in-out infinite'
+            });
+        }
+        var engCountChips = document.querySelectorAll('.rpEngineCountChip');
+        for (var ec = 0; ec < engCountChips.length; ec++) {
+            forceStyle(engCountChips[ec], {
+                'display': 'inline-block', 'margin-left': '4px',
+                'padding': '1px 8px', 'border-radius': '999px',
+                'background': '#f3f4f6', 'color': '#374151',
+                'font-size': '11px', 'font-weight': '600'
             });
         }
         var engOffPills = document.querySelectorAll('.rpEngineOffPill');
@@ -5207,8 +5211,8 @@
         if (_enginePulseInjected) return;
         var style = document.createElement('style');
         style.textContent = '@keyframes rpEnginePulse { ' +
-            '0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.55); } ' +
-            '70% { box-shadow: 0 0 0 6px rgba(52,211,153,0); } ' +
+            '0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.45); } ' +
+            '70% { box-shadow: 0 0 0 5px rgba(52,211,153,0); } ' +
             '100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }';
         document.head.appendChild(style);
         _enginePulseInjected = true;
