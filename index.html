@@ -2478,7 +2478,7 @@
                 if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
                     var _engState = computeEngineWatchState(
                         rowDeviceIds,
-                        presence.lastLat, presence.lastLng,
+                        presence.lastLat, presence.lastLng, presence.lastLogMs,
                         engineZone && engineZone.points
                     );
                     if (_engState === 'on') rEngineOnNames.push(aName);
@@ -2948,7 +2948,7 @@
                         if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
                             var _engState2 = computeEngineWatchState(
                                 rowDeviceIds,
-                                presence.lastLat, presence.lastLng,
+                                presence.lastLat, presence.lastLng, presence.lastLogMs,
                                 engineZone && engineZone.points
                             );
                             if (_engState2 === 'on') rEngineOnNames.push(aName);
@@ -4658,6 +4658,13 @@
     var _engineLastPollMs = 0;
     var IGNITION_BOOTSTRAP_HOURS = 24;
     var IGNITION_POLL_THROTTLE_MS = 25 * 1000;
+    // Per-row freshness gate. We trust "ON" only when either the ignition
+    // record itself is recent OR the device has pinged GPS recently — older
+    // than this and the device might just be silent, so a stale "ON" record
+    // gets degraded to Unknown rather than a green badge we can't verify.
+    // Stale "OFF" stays OFF: a vehicle that's been parked for a day is, in
+    // fact, off.
+    var ENGINE_FRESHNESS_MS = 30 * 60 * 1000;
     var IGNITION_PERSIST_KEY = 'rpEngineFeedTokens_v1';
     var IGNITION_PERSIST_MAX_AGE_MS = 6 * 60 * 60 * 1000;
     var IGNITION_DIAG_ID_IGN = 'DiagnosticIgnitionId';
@@ -4841,26 +4848,40 @@
 
     // Returns 'on' | 'off' | 'unknown' for an engine-watch row.
     //   'on'      = ignition is currently on AND the vehicle's last known
-    //               position is inside the engine zone polygon (i.e. parked
-    //               at the depot with the key turned — about to go).
+    //               position is inside the engine zone polygon AND either
+    //               the ignition record or the GPS feed is fresh (so we can
+    //               defend the green badge).
     //   'off'     = ignition known to be off, OR ignition on but vehicle is
     //               outside the engine zone (already left / not at depot).
-    //   'unknown' = no ignition/RPM data for this device, OR no GPS yet.
+    //   'unknown' = no ignition/RPM data, no GPS yet, missing zone polygon,
+    //               or the ON claim is too stale to verify.
     // Driver-mode rows pass the full set of devices the driver might be on;
     // vehicle-mode rows pass a single-element array.
-    function computeEngineWatchState(deviceIds, lastLat, lastLng, engineZonePoints) {
+    function computeEngineWatchState(deviceIds, lastLat, lastLng, lastLogMs, engineZonePoints) {
         if (!deviceIds || !deviceIds.length) return 'unknown';
         var sawData = false;
         var anyOn = false;
+        var newestAsOfMs = 0;
         for (var i = 0; i < deviceIds.length; i++) {
             var entry = _getEngineEntry(deviceIds[i]);
             if (!entry) continue;
             sawData = true;
             if (entry.on) anyOn = true;
+            if (entry.asOfMs > newestAsOfMs) newestAsOfMs = entry.asOfMs;
         }
         if (!sawData) return 'unknown';
+        // Stale OFF stays OFF — a parked vehicle legitimately goes quiet,
+        // and the user is correctly told "not ready".
         if (!anyOn) return 'off';
-        // Engine on — does the location agree?
+        // ON requires fresh corroboration: either the ignition record itself
+        // is recent, or the device is pinging GPS recently. Without either,
+        // the device may simply have lost contact while the engine state
+        // was last reported on — degrade to Unknown.
+        var nowMs = Date.now();
+        var ignitionFresh = (nowMs - newestAsOfMs) < ENGINE_FRESHNESS_MS;
+        var gpsFresh = lastLogMs != null && (nowMs - lastLogMs) < ENGINE_FRESHNESS_MS;
+        if (!ignitionFresh && !gpsFresh) return 'unknown';
+        // Engine on and fresh — does the location agree?
         if (lastLat == null || lastLng == null) return 'unknown';
         // Engine zone is required when engine watch is enabled. If its
         // polygon is missing (zone deleted or stripped from cache), we
