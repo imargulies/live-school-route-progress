@@ -4985,6 +4985,31 @@
         var eventField = isOutside ? 'departedAtMs' : 'arrivedAtMs';
         var reverseField = isOutside ? 'arrivedAtMs' : 'departedAtMs';
 
+        // (a) Prior contiguous route may own this event.
+        var prior = findContiguousRouteNeighbor(route, aId, 'prior', savedRoutes, dateStr);
+        if (prior) {
+            var priorStartMs = dayMs + timeToMinutes(prior.startTime) * 60000;
+            var priorEndMs = dayMs + timeToMinutes(prior.endTime) * 60000;
+            var priorOwns = false;
+            var priorPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorStartMs, priorEndMs);
+            augmentPresenceWithTrips(priorPresence, trips, driverFilter, devSet, zonePoints, priorStartMs, priorEndMs);
+            if (priorPresence[eventField] && priorPresence[reverseField] === null) {
+                // Driver produced the event during prior window and never reversed
+                // it — any event we see in our window is just continuation.
+                priorOwns = true;
+            } else if (!priorPresence[eventField]) {
+                // Prior window had no event — check the tail grace [priorEnd, min(priorEnd+30m, ourEnd)].
+                var tailTo = Math.min(priorEndMs + 30 * 60000, routeEndMs);
+                if (isToday && nowMs) tailTo = Math.min(tailTo, nowMs);
+                if (tailTo > priorEndMs) {
+                    var tailPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorEndMs, tailTo);
+                    augmentPresenceWithTrips(tailPresence, trips, driverFilter, devSet, zonePoints, priorEndMs, tailTo);
+                    if (tailPresence[eventField]) priorOwns = true;
+                }
+            }
+            if (priorOwns) presence[eventField] = null;
+        }
+
         // (c) Overlapping prior routes — same entity, same direction, started
         // before us, window extends into ours. The earliest committed event
         // belongs to the earlier route; ours must come AFTER that event AND
@@ -4992,10 +5017,10 @@
         // detection from just past the latest prior event time —
         // computePresenceFromLogs's own dwell rules then require the bus to
         // leave-and-return (inside route) or return-and-leave (outside route)
-        // before an event will commit. If no such event exists in our window,
-        // we end up with null and the row reads "Not Arrived / Not Departed",
-        // which is the correct outcome for a driver who arrived/departed once
-        // and didn't cycle back.
+        // before an event will commit. Runs AFTER (a) so any later event we
+        // find here can't be wiped by the contiguous-prior tail-capture
+        // logic above (which is only correct when our event matches the
+        // tail-captured one — not when ours is genuinely later).
         var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
         if (overlappingPriors.length) {
             var maxPriorEventMs = 0;
@@ -5022,48 +5047,19 @@
                     if (!isOutside) {
                         if (adjusted.everInZone) presence.everInZone = true;
                     } else {
-                        // For outside routes, the goodDir status check has an
-                        // everInZone-and-not-currently-inside fallback that
-                        // would still read "Departed" from the original
-                        // window even after we cleared departedAtMs. Override
-                        // both flags with what's true in the post-cutoff
-                        // window so the fallback can't fire on the prior
-                        // route's departure.
+                        // Reset the everInZone fallback for outside routes —
+                        // see comment in goodDir check; without this the
+                        // status would still read "Departed" from the
+                        // pre-overlap window even after we cleared
+                        // departedAtMs.
                         presence.everInZone = adjusted.everInZone;
                         presence.isCurrentlyInZone = adjusted.isCurrentlyInZone;
                     }
                 } else {
                     presence[eventField] = null;
-                    if (isOutside) {
-                        presence.everInZone = false;
-                    }
+                    if (isOutside) presence.everInZone = false;
                 }
             }
-        }
-
-        // (a) Prior contiguous route may own this event.
-        var prior = findContiguousRouteNeighbor(route, aId, 'prior', savedRoutes, dateStr);
-        if (prior) {
-            var priorStartMs = dayMs + timeToMinutes(prior.startTime) * 60000;
-            var priorEndMs = dayMs + timeToMinutes(prior.endTime) * 60000;
-            var priorOwns = false;
-            var priorPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorStartMs, priorEndMs);
-            augmentPresenceWithTrips(priorPresence, trips, driverFilter, devSet, zonePoints, priorStartMs, priorEndMs);
-            if (priorPresence[eventField] && priorPresence[reverseField] === null) {
-                // Driver produced the event during prior window and never reversed
-                // it — any event we see in our window is just continuation.
-                priorOwns = true;
-            } else if (!priorPresence[eventField]) {
-                // Prior window had no event — check the tail grace [priorEnd, min(priorEnd+30m, ourEnd)].
-                var tailTo = Math.min(priorEndMs + 30 * 60000, routeEndMs);
-                if (isToday && nowMs) tailTo = Math.min(tailTo, nowMs);
-                if (tailTo > priorEndMs) {
-                    var tailPresence = computePresenceFromLogs(mergedLogs, zonePoints, priorEndMs, tailTo);
-                    augmentPresenceWithTrips(tailPresence, trips, driverFilter, devSet, zonePoints, priorEndMs, tailTo);
-                    if (tailPresence[eventField]) priorOwns = true;
-                }
-            }
-            if (priorOwns) presence[eventField] = null;
         }
 
         // (b) We have no own-window event; check if a late event slipped into the next route.
