@@ -2471,9 +2471,11 @@
                 else if (_st.kind === 'bad') { missedCount++; rNotArrivedNames.push(aName); }
                 else notStartedCount++;
                 // Engine watch is a live signal — only meaningful for today's
-                // not-yet-arrived/departed rows. Past dates would show current
-                // ignition next to historical rows, which is misleading.
-                if (engineWatchOn && _st.kind !== 'good' && isToday) {
+                // rows whose route window hasn't ended yet (after the window
+                // ends, presence.lastLat is the position at window-end, not
+                // now, so the location filter would be wrong) and that
+                // haven't yet hit their primary event.
+                if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
                     var _engState = computeEngineWatchState(
                         rowDeviceIds,
                         presence.lastLat, presence.lastLng,
@@ -2938,10 +2940,12 @@
                         else if (_st.kind === 'bad') { missedCount++; sortOrder = 0; rNotArrivedNames.push(aName); }
                         else { notStartedCount++; sortOrder = 2; }
                         // Engine watch is a live signal — only meaningful for
-                        // today's not-yet-arrived/departed rows. Past dates
-                        // would show current ignition next to historical rows,
-                        // which is misleading.
-                        if (engineWatchOn && _st.kind !== 'good' && isToday) {
+                        // today's rows whose route window hasn't ended yet
+                        // (after the window ends, presence.lastLat is the
+                        // position at window-end, not now, so the location
+                        // filter would be wrong) and that haven't yet hit
+                        // their primary event.
+                        if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
                             var _engState2 = computeEngineWatchState(
                                 rowDeviceIds,
                                 presence.lastLat, presence.lastLng,
@@ -4709,24 +4713,40 @@
     // One-time seed: pull the last 24h for both diagnostics in parallel so
     // long-running states (engine on for hours before page load) show the
     // right value immediately. GetFeed alone returns only "recent" records.
+    // Diagnostics are queried independently — a database that doesn't have
+    // RPM data still gets the ignition seed (and vice versa).
     async function bootstrapEngineMaps() {
         var nowMs = Date.now();
         var fromIso = new Date(nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000).toISOString();
         var toIso = new Date(nowMs).toISOString();
-        var calls = [
-            ['Get', { typeName: 'StatusData', search: { diagnosticSearch: { id: IGNITION_DIAG_ID_IGN }, fromDate: fromIso, toDate: toIso } }],
-            ['Get', { typeName: 'StatusData', search: { diagnosticSearch: { id: IGNITION_DIAG_ID_RPM }, fromDate: fromIso, toDate: toIso } }]
+        var jobs = [
+            { diag: IGNITION_DIAG_ID_IGN, target: _engineState.ignition },
+            { diag: IGNITION_DIAG_ID_RPM, target: _engineState.rpm }
         ];
-        var results = await apiMultiCall(calls);
-        var ignRecs = (results && results[0]) || [];
-        var rpmRecs = (results && results[1]) || [];
-        for (var i = 0; i < ignRecs.length; i++) _mergeEngineRecord(_engineState.ignition, ignRecs[i]);
-        for (var j = 0; j < rpmRecs.length; j++) _mergeEngineRecord(_engineState.rpm, rpmRecs[j]);
+        var settled = await Promise.allSettled(jobs.map(function (j) {
+            return apiCall('Get', {
+                typeName: 'StatusData',
+                search: { diagnosticSearch: { id: j.diag }, fromDate: fromIso, toDate: toIso }
+            });
+        }));
+        for (var i = 0; i < settled.length; i++) {
+            if (settled[i].status !== 'fulfilled') continue;
+            var recs = settled[i].value || [];
+            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(jobs[i].target, recs[k]);
+        }
+    }
+
+    // True if a feed error message indicates the cursor is no longer valid
+    // (Geotab rejects fromVersion tokens older than its retention window).
+    // We surface the error once, then reset so the next tick re-bootstraps.
+    function _isStaleCursorError(msg) {
+        return /version|fromVersion|cursor|too old|expired/i.test(String(msg || ''));
     }
 
     // Pull only ignition/RPM transitions newer than our last cursors. Skipped
     // when called too soon after the previous successful poll (engine events
-    // are rare; tick-rate polling is wasteful).
+    // are rare; tick-rate polling is wasteful). Each diagnostic is fetched
+    // independently so a per-feed failure can't sink the other.
     async function fetchIgnitionFeedDelta() {
         if (_engineFeedInflight) return _engineFeedInflight;
         var nowMs = Date.now();
@@ -4737,7 +4757,6 @@
             try {
                 if (!_engineBootstrapped) {
                     if (!_engineFeedTokens.ignition && !_engineFeedTokens.rpm) {
-                        // Cold start (no persisted cursor) — seed from history.
                         try { await bootstrapEngineMaps(); }
                         catch (bootErr) {
                             showErrorBanner('Engine-watch bootstrap failed: ' +
@@ -4747,15 +4766,42 @@
                     }
                     _engineBootstrapped = true;
                 }
-                var calls = [
-                    ['GetFeed', _buildEngineFeedQuery(IGNITION_DIAG_ID_IGN, _engineFeedTokens.ignition)],
-                    ['GetFeed', _buildEngineFeedQuery(IGNITION_DIAG_ID_RPM, _engineFeedTokens.rpm)]
+                var jobs = [
+                    { tokenKey: 'ignition', diag: IGNITION_DIAG_ID_IGN, target: _engineState.ignition },
+                    { tokenKey: 'rpm',      diag: IGNITION_DIAG_ID_RPM, target: _engineState.rpm }
                 ];
-                var results = await apiMultiCall(calls);
-                _absorbEngineFeedResult(results && results[0], _engineState.ignition, 'ignition');
-                _absorbEngineFeedResult(results && results[1], _engineState.rpm, 'rpm');
+                var settled = await Promise.allSettled(jobs.map(function (j) {
+                    return apiCall('GetFeed', _buildEngineFeedQuery(j.diag, _engineFeedTokens[j.tokenKey]));
+                }));
+                var anyStale = false;
+                var firstErr = null;
+                for (var i = 0; i < settled.length; i++) {
+                    var s = settled[i];
+                    var j = jobs[i];
+                    if (s.status === 'fulfilled') {
+                        _absorbEngineFeedResult(s.value, j.target, j.tokenKey);
+                    } else {
+                        var em = s.reason && s.reason.message ? s.reason.message : 'unknown error';
+                        if (_isStaleCursorError(em)) {
+                            // Bad cursor — clear so next call re-bootstraps fresh.
+                            anyStale = true;
+                            _engineFeedTokens[j.tokenKey] = null;
+                        } else if (!firstErr) {
+                            firstErr = em;
+                        }
+                    }
+                }
                 _persistEngineFeedTokens();
                 _engineLastPollMs = Date.now();
+                if (anyStale) {
+                    _engineBootstrapped = false;
+                    try { localStorage.removeItem(IGNITION_PERSIST_KEY); } catch (e) {}
+                    showErrorBanner('Engine-watch feed cursor was stale; will re-seed on next tick.',
+                        { autoDismissMs: 6000 });
+                } else if (firstErr) {
+                    showErrorBanner('Engine-watch ignition feed failed: ' + firstErr,
+                        { autoDismissMs: 8000 });
+                }
             } catch (err) {
                 showErrorBanner('Engine-watch ignition feed failed: ' +
                     (err && err.message ? err.message : 'unknown error'),
@@ -4816,7 +4862,11 @@
         if (!anyOn) return 'off';
         // Engine on — does the location agree?
         if (lastLat == null || lastLng == null) return 'unknown';
-        if (!engineZonePoints || !engineZonePoints.length) return 'on';
+        // Engine zone is required when engine watch is enabled. If its
+        // polygon is missing (zone deleted or stripped from cache), we
+        // can't resolve "at the depot" vs "elsewhere" — say so honestly
+        // rather than reporting a green ON we can't actually verify.
+        if (!engineZonePoints || !engineZonePoints.length) return 'unknown';
         return pointInPolygon(lastLat, lastLng, engineZonePoints) ? 'on' : 'off';
     }
 
