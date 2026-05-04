@@ -5019,9 +5019,24 @@
                     var adjusted = computePresenceFromLogs(mergedLogs, zonePoints, newFromMs, newToMs);
                     augmentPresenceWithTrips(adjusted, trips, driverFilter, devSet, zonePoints, newFromMs, newToMs);
                     presence[eventField] = adjusted[eventField] || null;
-                    if (!isOutside && adjusted.everInZone) presence.everInZone = true;
+                    if (!isOutside) {
+                        if (adjusted.everInZone) presence.everInZone = true;
+                    } else {
+                        // For outside routes, the goodDir status check has an
+                        // everInZone-and-not-currently-inside fallback that
+                        // would still read "Departed" from the original
+                        // window even after we cleared departedAtMs. Override
+                        // both flags with what's true in the post-cutoff
+                        // window so the fallback can't fire on the prior
+                        // route's departure.
+                        presence.everInZone = adjusted.everInZone;
+                        presence.isCurrentlyInZone = adjusted.isCurrentlyInZone;
+                    }
                 } else {
                     presence[eventField] = null;
+                    if (isOutside) {
+                        presence.everInZone = false;
+                    }
                 }
             }
         }
