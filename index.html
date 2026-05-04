@@ -2355,12 +2355,13 @@
 
         // Engine-watch ignition state — only when a route is using it AND
         // we're rendering today. GetFeed pulls only ignition transitions
-        // since our last cursor, so subsequent ticks are very cheap.
+        // since our last cursor, so subsequent ticks are very cheap; and
+        // the throttle inside fetchIgnitionFeedDelta returns immediately
+        // when called more often than every IGNITION_POLL_THROTTLE_MS.
         if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
             await fetchIgnitionFeedDelta();
             if (runId !== _refreshInlineRunId) return;
         }
-        var ignitionMap = _ignitionByDevice;
 
         // Update each vehicle row inline
         // Unique vehicle/driver tracking across all routes so the Total
@@ -2383,6 +2384,7 @@
             var rNotArrivedNames = [];
             var rEngineOnNames = [];
             var rEngineOffNames = [];
+            var rEngineUnknownNames = [];
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -2472,9 +2474,14 @@
                 // not-yet-arrived/departed rows. Past dates would show current
                 // ignition next to historical rows, which is misleading.
                 if (engineWatchOn && _st.kind !== 'good' && isToday) {
-                    var engineOn = computeEngineWatchOn(ignitionMap, rowDeviceIds);
-                    if (engineOn) rEngineOnNames.push(aName);
-                    else rEngineOffNames.push(aName);
+                    var _engState = computeEngineWatchState(
+                        rowDeviceIds,
+                        presence.lastLat, presence.lastLng,
+                        engineZone && engineZone.points
+                    );
+                    if (_engState === 'on') rEngineOnNames.push(aName);
+                    else if (_engState === 'off') rEngineOffNames.push(aName);
+                    else rEngineUnknownNames.push(aName);
                 }
                 // A row counts as a "problem" for the filter when it's late vs target,
                 // overdue, no-show, or not arrived / not departed after the window ended.
@@ -2552,7 +2559,8 @@
                 engineWatch: engineWatchOn,
                 engineZoneName: engineZone ? engineZone.name : (r.engineZoneName || ''),
                 engineOnNames: rEngineOnNames,
-                engineOffNames: rEngineOffNames
+                engineOffNames: rEngineOffNames,
+                engineUnknownNames: rEngineUnknownNames
             };
         }
 
@@ -2680,7 +2688,6 @@
             if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
                 await fetchIgnitionFeedDelta();
             }
-            var ignitionMap = _ignitionByDevice;
 
             // Sort routes by proximity to current time
             // Filter routes by active day
@@ -2854,6 +2861,7 @@
                 var rNotArrivedNames = [];
                 var rEngineOnNames = [];
                 var rEngineOffNames = [];
+                var rEngineUnknownNames = [];
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="11" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -2934,9 +2942,14 @@
                         // would show current ignition next to historical rows,
                         // which is misleading.
                         if (engineWatchOn && _st.kind !== 'good' && isToday) {
-                            var engineOn = computeEngineWatchOn(ignitionMap, rowDeviceIds);
-                            if (engineOn) rEngineOnNames.push(aName);
-                            else rEngineOffNames.push(aName);
+                            var _engState2 = computeEngineWatchState(
+                                rowDeviceIds,
+                                presence.lastLat, presence.lastLng,
+                                engineZone && engineZone.points
+                            );
+                            if (_engState2 === 'on') rEngineOnNames.push(aName);
+                            else if (_engState2 === 'off') rEngineOffNames.push(aName);
+                            else rEngineUnknownNames.push(aName);
                         }
                         // A row counts as a "problem" for the filter when it's late vs target,
                         // overdue, no-show, or not arrived / not departed after the window ended.
@@ -2998,7 +3011,8 @@
                     engineWatch: engineWatchOn,
                     engineZoneName: engineZone ? engineZone.name : (r.engineZoneName || ''),
                     engineOnNames: rEngineOnNames,
-                    engineOffNames: rEngineOffNames
+                    engineOffNames: rEngineOffNames,
+                    engineUnknownNames: rEngineUnknownNames
                 };
                 html += '</tbody></table></div>';
             }
@@ -4625,52 +4639,150 @@
     // fromVersion) return only events since last tick. We keep a cumulative
     // per-device map so a row whose ignition was set hours ago is still
     // remembered even though that record won't appear in later deltas.
-    var _ignitionByDevice = {};   // deviceId -> { ignitionOn: bool, asOfMs: number }
-    var _ignitionFeedToken = null;
-    var _ignitionFeedInflight = null;
+    // Per-device engine state, derived from two Geotab diagnostics:
+    //   primary  = DiagnosticIgnitionId (OEM "key on/off" — most reliable)
+    //   fallback = DiagnosticGoEngineRpmStatusId (RPM>0 = running; covers
+    //              older devices/vehicles that don't report ignition)
+    // Each map stores { on: bool, asOfMs: number }. Lookup: prefer ignition;
+    // fall back to RPM if no ignition record exists for that device.
+    var _engineState = { ignition: {}, rpm: {} };
+    // GetFeed cursors per diagnostic; persisted so a page reload doesn't
+    // rewind to a fresh bootstrap when our last cursor is still valid.
+    var _engineFeedTokens = { ignition: null, rpm: null };
+    var _engineFeedInflight = null;
+    var _engineBootstrapped = false;
+    var _engineLastPollMs = 0;
+    var IGNITION_BOOTSTRAP_HOURS = 24;
+    var IGNITION_POLL_THROTTLE_MS = 25 * 1000;
+    var IGNITION_PERSIST_KEY = 'rpEngineFeedTokens_v1';
+    var IGNITION_PERSIST_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+    var IGNITION_DIAG_ID_IGN = 'DiagnosticIgnitionId';
+    var IGNITION_DIAG_ID_RPM = 'DiagnosticGoEngineRpmStatusId';
 
-    function resetIgnitionFeed() {
-        _ignitionByDevice = {};
-        _ignitionFeedToken = null;
-        _ignitionFeedInflight = null;
+    (function _restoreEngineFeedTokens() {
+        try {
+            var raw = localStorage.getItem(IGNITION_PERSIST_KEY);
+            if (!raw) return;
+            var parsed = JSON.parse(raw);
+            if (!parsed || (Date.now() - (parsed.savedAt || 0)) > IGNITION_PERSIST_MAX_AGE_MS) return;
+            if (parsed.tokens) _engineFeedTokens = {
+                ignition: parsed.tokens.ignition || null,
+                rpm: parsed.tokens.rpm || null
+            };
+        } catch (e) {}
+    })();
+
+    function _persistEngineFeedTokens() {
+        try {
+            localStorage.setItem(IGNITION_PERSIST_KEY, JSON.stringify({
+                tokens: _engineFeedTokens, savedAt: Date.now()
+            }));
+        } catch (e) {}
     }
 
-    async function fetchIgnitionFeedDelta() {
-        if (_ignitionFeedInflight) return _ignitionFeedInflight;
-        var query = {
-            typeName: 'StatusData',
-            search: { diagnosticSearch: { id: 'DiagnosticIgnitionId' } },
-            resultsLimit: 50000
+    function resetIgnitionFeed() {
+        _engineState = { ignition: {}, rpm: {} };
+        _engineFeedTokens = { ignition: null, rpm: null };
+        _engineFeedInflight = null;
+        _engineBootstrapped = false;
+        _engineLastPollMs = 0;
+        try { localStorage.removeItem(IGNITION_PERSIST_KEY); } catch (e) {}
+    }
+
+    function _mergeEngineRecord(map, r) {
+        if (!r || !r.device || !r.device.id) return;
+        var t = r.dateTime ? new Date(r.dateTime).getTime() : 0;
+        var prev = map[r.device.id];
+        if (prev && t <= prev.asOfMs) return;
+        map[r.device.id] = {
+            on: typeof r.data === 'number' ? r.data > 0 : !!r.data,
+            asOfMs: t
         };
-        if (_ignitionFeedToken) query.fromVersion = _ignitionFeedToken;
-        _ignitionFeedInflight = apiCall('GetFeed', query)
-            .then(function (result) {
-                var records = (result && result.data) || [];
-                for (var i = 0; i < records.length; i++) {
-                    var r = records[i];
-                    if (!r || !r.device || !r.device.id) continue;
-                    var t = r.dateTime ? new Date(r.dateTime).getTime() : 0;
-                    var prev = _ignitionByDevice[r.device.id];
-                    if (!prev || t >= prev.asOfMs) {
-                        _ignitionByDevice[r.device.id] = {
-                            ignitionOn: typeof r.data === 'number' ? r.data > 0 : !!r.data,
-                            asOfMs: t
-                        };
+    }
+
+    function _getEngineEntry(deviceId) {
+        // Ignition takes priority; fall back to RPM only when ignition has no
+        // record for this device.
+        return _engineState.ignition[deviceId] || _engineState.rpm[deviceId] || null;
+    }
+
+    // One-time seed: pull the last 24h for both diagnostics in parallel so
+    // long-running states (engine on for hours before page load) show the
+    // right value immediately. GetFeed alone returns only "recent" records.
+    async function bootstrapEngineMaps() {
+        var nowMs = Date.now();
+        var fromIso = new Date(nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000).toISOString();
+        var toIso = new Date(nowMs).toISOString();
+        var calls = [
+            ['Get', { typeName: 'StatusData', search: { diagnosticSearch: { id: IGNITION_DIAG_ID_IGN }, fromDate: fromIso, toDate: toIso } }],
+            ['Get', { typeName: 'StatusData', search: { diagnosticSearch: { id: IGNITION_DIAG_ID_RPM }, fromDate: fromIso, toDate: toIso } }]
+        ];
+        var results = await apiMultiCall(calls);
+        var ignRecs = (results && results[0]) || [];
+        var rpmRecs = (results && results[1]) || [];
+        for (var i = 0; i < ignRecs.length; i++) _mergeEngineRecord(_engineState.ignition, ignRecs[i]);
+        for (var j = 0; j < rpmRecs.length; j++) _mergeEngineRecord(_engineState.rpm, rpmRecs[j]);
+    }
+
+    // Pull only ignition/RPM transitions newer than our last cursors. Skipped
+    // when called too soon after the previous successful poll (engine events
+    // are rare; tick-rate polling is wasteful).
+    async function fetchIgnitionFeedDelta() {
+        if (_engineFeedInflight) return _engineFeedInflight;
+        var nowMs = Date.now();
+        if (_engineBootstrapped && (nowMs - _engineLastPollMs) < IGNITION_POLL_THROTTLE_MS) {
+            return _engineState;
+        }
+        var run = (async function () {
+            try {
+                if (!_engineBootstrapped) {
+                    if (!_engineFeedTokens.ignition && !_engineFeedTokens.rpm) {
+                        // Cold start (no persisted cursor) — seed from history.
+                        try { await bootstrapEngineMaps(); }
+                        catch (bootErr) {
+                            showErrorBanner('Engine-watch bootstrap failed: ' +
+                                (bootErr && bootErr.message ? bootErr.message : 'unknown error'),
+                                { autoDismissMs: 8000 });
+                        }
                     }
+                    _engineBootstrapped = true;
                 }
-                if (result && result.toVersion) _ignitionFeedToken = result.toVersion;
-                return _ignitionByDevice;
-            })
-            .catch(function (err) {
-                // Surface but don't block the rest of the render.
+                var calls = [
+                    ['GetFeed', _buildEngineFeedQuery(IGNITION_DIAG_ID_IGN, _engineFeedTokens.ignition)],
+                    ['GetFeed', _buildEngineFeedQuery(IGNITION_DIAG_ID_RPM, _engineFeedTokens.rpm)]
+                ];
+                var results = await apiMultiCall(calls);
+                _absorbEngineFeedResult(results && results[0], _engineState.ignition, 'ignition');
+                _absorbEngineFeedResult(results && results[1], _engineState.rpm, 'rpm');
+                _persistEngineFeedTokens();
+                _engineLastPollMs = Date.now();
+            } catch (err) {
                 showErrorBanner('Engine-watch ignition feed failed: ' +
                     (err && err.message ? err.message : 'unknown error'),
                     { autoDismissMs: 8000 });
-                return _ignitionByDevice;
-            });
-        var p = _ignitionFeedInflight;
-        p.finally(function () { if (_ignitionFeedInflight === p) _ignitionFeedInflight = null; });
-        return p;
+            }
+            return _engineState;
+        })().finally(function () {
+            if (_engineFeedInflight === run) _engineFeedInflight = null;
+        });
+        _engineFeedInflight = run;
+        return run;
+    }
+
+    function _buildEngineFeedQuery(diagnosticId, fromVersion) {
+        var q = {
+            typeName: 'StatusData',
+            search: { diagnosticSearch: { id: diagnosticId } },
+            resultsLimit: 50000
+        };
+        if (fromVersion) q.fromVersion = fromVersion;
+        return q;
+    }
+
+    function _absorbEngineFeedResult(result, targetMap, tokenKey) {
+        var records = (result && result.data) || [];
+        for (var i = 0; i < records.length; i++) _mergeEngineRecord(targetMap, records[i]);
+        if (result && result.toVersion) _engineFeedTokens[tokenKey] = result.toVersion;
     }
 
     function anyRouteUsesEngineWatch(routes) {
@@ -4681,16 +4793,31 @@
         return false;
     }
 
-    // True if any of the given devices currently has ignition on. Driver-mode
-    // rows pass the full set of devices the driver might be on; vehicle-mode
-    // rows pass a single-element array.
-    function computeEngineWatchOn(ignitionMap, deviceIds) {
-        if (!ignitionMap || !deviceIds || !deviceIds.length) return false;
+    // Returns 'on' | 'off' | 'unknown' for an engine-watch row.
+    //   'on'      = ignition is currently on AND the vehicle's last known
+    //               position is inside the engine zone polygon (i.e. parked
+    //               at the depot with the key turned — about to go).
+    //   'off'     = ignition known to be off, OR ignition on but vehicle is
+    //               outside the engine zone (already left / not at depot).
+    //   'unknown' = no ignition/RPM data for this device, OR no GPS yet.
+    // Driver-mode rows pass the full set of devices the driver might be on;
+    // vehicle-mode rows pass a single-element array.
+    function computeEngineWatchState(deviceIds, lastLat, lastLng, engineZonePoints) {
+        if (!deviceIds || !deviceIds.length) return 'unknown';
+        var sawData = false;
+        var anyOn = false;
         for (var i = 0; i < deviceIds.length; i++) {
-            var entry = ignitionMap[deviceIds[i]];
-            if (entry && entry.ignitionOn) return true;
+            var entry = _getEngineEntry(deviceIds[i]);
+            if (!entry) continue;
+            sawData = true;
+            if (entry.on) anyOn = true;
         }
-        return false;
+        if (!sawData) return 'unknown';
+        if (!anyOn) return 'off';
+        // Engine on — does the location agree?
+        if (lastLat == null || lastLng == null) return 'unknown';
+        if (!engineZonePoints || !engineZonePoints.length) return 'on';
+        return pointInPolygon(lastLat, lastLng, engineZonePoints) ? 'on' : 'off';
     }
 
     // Find the closest route for the same driver/vehicle that sits right before
@@ -5114,6 +5241,13 @@
             '<path d="M5 5l14 14" stroke-width="2.4"/>' +
             '</svg>';
     }
+    function engineUnknownIconSvg() {
+        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<circle cx="12" cy="12" r="9"/>' +
+            '<path d="M9.5 9.2a2.6 2.6 0 1 1 3.4 2.5c-.7.3-1.1.7-1.1 1.4v0.6"/>' +
+            '<circle cx="11.9" cy="16.5" r="0.7" fill="currentColor"/>' +
+            '</svg>';
+    }
 
     // Fill in each route card's progress badge placeholder using a counts map.
     // counts: { [routeUid]: { completed, total, direction } }
@@ -5165,27 +5299,36 @@
             }
             // Optional engine-watch breakdown: only meaningful for the
             // not-yet-arrived/departed crowd, so we just show their split.
-            // ON listed first so "about to go" is the eye's first stop.
+            // ON listed first so "about to go" is the eye's first stop;
+            // Unknown last because it's the lowest-signal bucket.
             if (c.engineWatch) {
                 var onN = c.engineOnNames || [];
                 var offN = c.engineOffNames || [];
-                if (onN.length || offN.length) {
+                var unkN = c.engineUnknownNames || [];
+                if (onN.length || offN.length || unkN.length) {
                     var zoneSuffix = c.engineZoneName
                         ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
                         : '';
-                    var totalSuffix = ' <span class="rpEngineCountChip">' + onN.length + ' on · ' + offN.length + ' off</span>';
+                    var countParts = onN.length + ' on · ' + offN.length + ' off';
+                    if (unkN.length) countParts += ' · ' + unkN.length + ' ?';
+                    var totalSuffix = ' <span class="rpEngineCountChip">' + countParts + '</span>';
                     var engineParts = '';
                     if (onN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineOnPill" title="Trip started inside the engine zone — about to go">' +
+                        engineParts += '<span class="rpEnginePill rpEngineOnPill" title="Ignition is on AND vehicle is currently inside the engine zone — about to go">' +
                             engineOnIconSvg() + '<span class="rpEngineWord">ON</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(onN.join(', ')) + '</span></span>';
                     }
                     if (offN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineOffPill" title="No engine start in the engine zone yet">' +
+                        engineParts += '<span class="rpEnginePill rpEngineOffPill" title="Ignition is off, or vehicle is not currently inside the engine zone">' +
                             engineOffIconSvg() + '<span class="rpEngineWord">OFF</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(offN.join(', ')) + '</span></span>';
                     }
-                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="Engine ON means a trip started inside the engine zone in this window — these vehicles are about to go.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
+                    if (unkN.length) {
+                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition or RPM data, or no recent GPS — engine state cannot be determined">' +
+                            engineUnknownIconSvg() + '<span class="rpEngineWord">?</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
+                            escapeHtml(unkN.join(', ')) + '</span></span>';
+                    }
+                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="Engine ON = ignition on at the engine zone (about to go). OFF = ignition off OR vehicle not at the zone. ? = no ignition or position data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
                 }
             }
             rows[i].innerHTML = html;
@@ -5261,6 +5404,13 @@
         for (var ef = 0; ef < engOffPills.length; ef++) {
             forceStyle(engOffPills[ef], {
                 'background': '#f3f4f6', 'color': '#6b7280', 'border-color': '#d1d5db'
+            });
+        }
+        var engUnkPills = document.querySelectorAll('.rpEngineUnknownPill');
+        for (var eu = 0; eu < engUnkPills.length; eu++) {
+            forceStyle(engUnkPills[eu], {
+                'background': '#fff7ed', 'color': '#9a3412',
+                'border-color': '#fed7aa', 'border-style': 'dashed'
             });
         }
         var engWords = document.querySelectorAll('.rpEngineWord');
