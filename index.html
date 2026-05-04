@@ -4927,6 +4927,35 @@
         return best;
     }
 
+    // Find earlier-starting same-direction routes for the same entity whose
+    // window overlaps the current route's window. Sorted earliest-first.
+    // Used to enforce "the first arrival/departure in the overlap region
+    // belongs to the earlier route — the later route only records its own
+    // event after a reverse transition." Without this, two overlapping
+    // routes for the same driver both claim the same arrival/departure.
+    function findOverlappingPriorRoutes(currentRoute, assignedId, routesList, dateStr) {
+        if (!currentRoute || !assignedId || !routesList) return [];
+        var dayOfWeek = new Date(dateStr + 'T12:00:00').getDay();
+        var assignedField = currentRoute.trackBy === 'driver' ? 'driverIds' : 'vehicleIds';
+        var curStart = timeToMinutes(currentRoute.startTime);
+        var matches = [];
+        for (var i = 0; i < routesList.length; i++) {
+            var r = routesList[i];
+            if (!r || r._uid === currentRoute._uid) continue;
+            if (r.direction !== currentRoute.direction) continue;
+            if (r.trackBy !== currentRoute.trackBy) continue;
+            var ids = r[assignedField] || [];
+            if (ids.indexOf(assignedId) === -1) continue;
+            var days = r.activeDays || [0,1,2,3,4,5];
+            if (days.indexOf(dayOfWeek) === -1) continue;
+            var rStart = timeToMinutes(r.startTime);
+            var rEnd = timeToMinutes(r.endTime);
+            if (rStart < curStart && rEnd > curStart) matches.push(r);
+        }
+        matches.sort(function (a, b) { return timeToMinutes(a.startTime) - timeToMinutes(b.startTime); });
+        return matches;
+    }
+
     // Re-attribute late arrivals/departures between two adjacent routes for the
     // same driver (driver-mode) or vehicle (vehicle-mode). Without this, a
     // driver late out of Route A (7:30-8:30) arriving at 8:45 gets credited to
@@ -4955,6 +4984,47 @@
         // just continuation from the prior route.
         var eventField = isOutside ? 'departedAtMs' : 'arrivedAtMs';
         var reverseField = isOutside ? 'arrivedAtMs' : 'departedAtMs';
+
+        // (c) Overlapping prior routes — same entity, same direction, started
+        // before us, window extends into ours. The earliest committed event
+        // belongs to the earlier route; ours must come AFTER that event AND
+        // after a reverse transition. We enforce this by re-running our
+        // detection from just past the latest prior event time —
+        // computePresenceFromLogs's own dwell rules then require the bus to
+        // leave-and-return (inside route) or return-and-leave (outside route)
+        // before an event will commit. If no such event exists in our window,
+        // we end up with null and the row reads "Not Arrived / Not Departed",
+        // which is the correct outcome for a driver who arrived/departed once
+        // and didn't cycle back.
+        var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
+        if (overlappingPriors.length) {
+            var maxPriorEventMs = 0;
+            for (var op = 0; op < overlappingPriors.length; op++) {
+                var oPrior = overlappingPriors[op];
+                var oStartMs = dayMs + timeToMinutes(oPrior.startTime) * 60000;
+                var oEndMs = dayMs + timeToMinutes(oPrior.endTime) * 60000;
+                if (isToday && nowMs) oEndMs = Math.min(oEndMs, nowMs);
+                if (oEndMs <= oStartMs) continue;
+                var oPresence = computePresenceFromLogs(mergedLogs, zonePoints, oStartMs, oEndMs);
+                augmentPresenceWithTrips(oPresence, trips, driverFilter, devSet, zonePoints, oStartMs, oEndMs);
+                var oEvent = oPresence[eventField];
+                if (oEvent && oEvent > maxPriorEventMs) maxPriorEventMs = oEvent;
+            }
+            if (maxPriorEventMs > 0) {
+                var ourStartMs = dayMs + timeToMinutes(route.startTime) * 60000;
+                var newFromMs = Math.max(ourStartMs, maxPriorEventMs + 1);
+                var newToMs = routeEndMs;
+                if (isToday && nowMs) newToMs = Math.min(newToMs, nowMs);
+                if (newFromMs < newToMs) {
+                    var adjusted = computePresenceFromLogs(mergedLogs, zonePoints, newFromMs, newToMs);
+                    augmentPresenceWithTrips(adjusted, trips, driverFilter, devSet, zonePoints, newFromMs, newToMs);
+                    presence[eventField] = adjusted[eventField] || null;
+                    if (!isOutside && adjusted.everInZone) presence.everInZone = true;
+                } else {
+                    presence[eventField] = null;
+                }
+            }
+        }
 
         // (a) Prior contiguous route may own this event.
         var prior = findContiguousRouteNeighbor(route, aId, 'prior', savedRoutes, dateStr);
