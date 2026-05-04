@@ -2476,9 +2476,15 @@
                 // now, so the location filter would be wrong) and that
                 // haven't yet hit their primary event.
                 if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
+                    // Pre-window views have no in-window presence data; fall
+                    // back to the latest log overall so we can still tell
+                    // whether the bus is currently sitting at the depot.
+                    var _engPos = (presence.lastLat != null)
+                        ? { lat: presence.lastLat, lng: presence.lastLng, ms: presence.lastLogMs }
+                        : findLatestLogPosition(mergedLogs);
                     var _engState = computeEngineWatchState(
                         rowDeviceIds,
-                        presence.lastLat, presence.lastLng, presence.lastLogMs,
+                        _engPos.lat, _engPos.lng, _engPos.ms,
                         engineZone && engineZone.points
                     );
                     if (_engState === 'on') rEngineOnNames.push(aName);
@@ -2946,9 +2952,12 @@
                         // filter would be wrong) and that haven't yet hit
                         // their primary event.
                         if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
+                            var _engPos2 = (presence.lastLat != null)
+                                ? { lat: presence.lastLat, lng: presence.lastLng, ms: presence.lastLogMs }
+                                : findLatestLogPosition(mergedLogs);
                             var _engState2 = computeEngineWatchState(
                                 rowDeviceIds,
-                                presence.lastLat, presence.lastLng, presence.lastLogMs,
+                                _engPos2.lat, _engPos2.lng, _engPos2.ms,
                                 engineZone && engineZone.points
                             );
                             if (_engState2 === 'on') rEngineOnNames.push(aName);
@@ -4636,6 +4645,22 @@
         return s;
     }
 
+    // Latest known position from a (possibly unsorted) log list, regardless
+    // of any window. Used by engine-watch for pre-window views (the route
+    // hasn't started yet so presence has no in-window data, but the device
+    // is still pinging GPS in the meantime).
+    function findLatestLogPosition(logs) {
+        var lat = null, lng = null, ms = null;
+        if (!logs) return { lat: null, lng: null, ms: null };
+        for (var i = 0; i < logs.length; i++) {
+            var lg = logs[i];
+            if (typeof lg.latitude !== 'number' || typeof lg.longitude !== 'number') continue;
+            var t = lg.dateTime ? new Date(lg.dateTime).getTime() : 0;
+            if (ms === null || t > ms) { lat = lg.latitude; lng = lg.longitude; ms = t; }
+        }
+        return { lat: lat, lng: lng, ms: ms };
+    }
+
     // Optional engine-watch indicator. We poll Geotab's StatusData feed
     // filtered to DiagnosticIgnitionId — a real-time, OEM-reported "key on /
     // key off" diagnostic. GetFeed is delta-based: the first call returns a
@@ -4764,14 +4789,23 @@
             try {
                 if (!_engineBootstrapped) {
                     if (!_engineFeedTokens.ignition && !_engineFeedTokens.rpm) {
-                        try { await bootstrapEngineMaps(); }
-                        catch (bootErr) {
+                        try {
+                            await bootstrapEngineMaps();
+                            _engineBootstrapped = true;
+                        } catch (bootErr) {
+                            // Don't flip the flag — let the next call retry
+                            // the bootstrap once the throttle expires. The
+                            // GetFeed below still runs and keeps live state
+                            // flowing in the meantime.
                             showErrorBanner('Engine-watch bootstrap failed: ' +
                                 (bootErr && bootErr.message ? bootErr.message : 'unknown error'),
                                 { autoDismissMs: 8000 });
                         }
+                    } else {
+                        // Persisted cursors exist — skip the 24h seed and
+                        // rely on the resumed feed cursor.
+                        _engineBootstrapped = true;
                     }
-                    _engineBootstrapped = true;
                 }
                 var jobs = [
                     { tokenKey: 'ignition', diag: IGNITION_DIAG_ID_IGN, target: _engineState.ignition },
@@ -4950,10 +4984,68 @@
             if (days.indexOf(dayOfWeek) === -1) continue;
             var rStart = timeToMinutes(r.startTime);
             var rEnd = timeToMinutes(r.endTime);
-            if (rStart < curStart && rEnd > curStart) matches.push(r);
+            if (rEnd <= curStart) continue;
+            // r is "prior" if it strictly starts earlier, OR starts at the
+            // exact same minute but has a smaller _uid. _uid encodes
+            // creation time (generateUid uses Date.now), so lex order
+            // matches creation order — older route wins the tiebreak.
+            var isPrior = (rStart < curStart) ||
+                (rStart === curStart && r._uid && currentRoute._uid && r._uid < currentRoute._uid);
+            if (isPrior) matches.push(r);
         }
-        matches.sort(function (a, b) { return timeToMinutes(a.startTime) - timeToMinutes(b.startTime); });
+        matches.sort(function (a, b) {
+            var d = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+            if (d !== 0) return d;
+            return (a._uid || '').localeCompare(b._uid || '');
+        });
         return matches;
+    }
+
+    // Returns the post-overlap-adjustment event time (ms) for a given route
+    // and assigned id, or null if no event survives. Used by both the public
+    // adjustPresenceForAdjacentRoutes function and recursively by itself so
+    // chains of 3+ overlapping routes (A overlaps B overlaps C) resolve
+    // correctly — without the recursion C would use B's *raw* event time
+    // (which equals A's, since B alone would still see the same first
+    // arrival), causing C's cutoff to be one slot too early.
+    // The cache (keyed by routeUid|aId) prevents redundant recomputation
+    // and protects against accidental cycles. depth caps the recursion.
+    function _adjustedEventForOverlap(route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs, cache, depth) {
+        if (depth > 8) return null;
+        var key = (route._uid || '') + '|' + aId;
+        if (cache && (key in cache)) return cache[key];
+        if (cache) cache[key] = null; // tentative, prevents cycles
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var startMs = dayMs + timeToMinutes(route.startTime) * 60000;
+        var endMs = dayMs + timeToMinutes(route.endTime) * 60000;
+        if (isToday && nowMs) endMs = Math.min(endMs, nowMs);
+        if (endMs <= startMs) return null;
+        var isOutside = route.direction === 'outside';
+        var eventField = isOutside ? 'departedAtMs' : 'arrivedAtMs';
+        var devSet = deviceIdSetFromList(rowDeviceIds);
+        var driverFilter = (route.trackBy === 'driver') ? aId : null;
+
+        // Recursively get the latest adjusted event among prior overlaps —
+        // each prior may itself have priors, so chains resolve top-down.
+        var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
+        var maxPriorEventMs = 0;
+        for (var op = 0; op < overlappingPriors.length; op++) {
+            var priorEvent = _adjustedEventForOverlap(
+                overlappingPriors[op], aId, mergedLogs, trips, rowDeviceIds,
+                zonePoints, dateStr, isToday, nowMs, cache, depth + 1
+            );
+            if (priorEvent && priorEvent > maxPriorEventMs) maxPriorEventMs = priorEvent;
+        }
+        var winFromMs = (maxPriorEventMs > 0) ? Math.max(startMs, maxPriorEventMs + 1) : startMs;
+        if (winFromMs >= endMs) {
+            if (cache) cache[key] = null;
+            return null;
+        }
+        var pres = computePresenceFromLogs(mergedLogs, zonePoints, winFromMs, endMs);
+        augmentPresenceWithTrips(pres, trips, driverFilter, devSet, zonePoints, winFromMs, endMs);
+        var ev = pres[eventField] || null;
+        if (cache) cache[key] = ev;
+        return ev;
     }
 
     // Re-attribute late arrivals/departures between two adjacent routes for the
@@ -5014,26 +5106,23 @@
         // before us, window extends into ours. The earliest committed event
         // belongs to the earlier route; ours must come AFTER that event AND
         // after a reverse transition. We enforce this by re-running our
-        // detection from just past the latest prior event time —
+        // detection from just past the latest *adjusted* prior event time —
         // computePresenceFromLogs's own dwell rules then require the bus to
-        // leave-and-return (inside route) or return-and-leave (outside route)
-        // before an event will commit. Runs AFTER (a) so any later event we
-        // find here can't be wiped by the contiguous-prior tail-capture
-        // logic above (which is only correct when our event matches the
-        // tail-captured one — not when ours is genuinely later).
+        // leave-and-return (inside) or return-and-leave (outside) before an
+        // event will commit. Uses _adjustedEventForOverlap which recurses
+        // through chains of overlaps so 3+ layered routes resolve correctly.
+        // Runs AFTER (a) so any later event we find here can't be wiped by
+        // the contiguous-prior tail-capture logic above.
         var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
         if (overlappingPriors.length) {
+            var overlapCache = {};
             var maxPriorEventMs = 0;
             for (var op = 0; op < overlappingPriors.length; op++) {
-                var oPrior = overlappingPriors[op];
-                var oStartMs = dayMs + timeToMinutes(oPrior.startTime) * 60000;
-                var oEndMs = dayMs + timeToMinutes(oPrior.endTime) * 60000;
-                if (isToday && nowMs) oEndMs = Math.min(oEndMs, nowMs);
-                if (oEndMs <= oStartMs) continue;
-                var oPresence = computePresenceFromLogs(mergedLogs, zonePoints, oStartMs, oEndMs);
-                augmentPresenceWithTrips(oPresence, trips, driverFilter, devSet, zonePoints, oStartMs, oEndMs);
-                var oEvent = oPresence[eventField];
-                if (oEvent && oEvent > maxPriorEventMs) maxPriorEventMs = oEvent;
+                var priorEv = _adjustedEventForOverlap(
+                    overlappingPriors[op], aId, mergedLogs, trips, rowDeviceIds,
+                    zonePoints, dateStr, isToday, nowMs, overlapCache, 0
+                );
+                if (priorEv && priorEv > maxPriorEventMs) maxPriorEventMs = priorEv;
             }
             if (maxPriorEventMs > 0) {
                 var ourStartMs = dayMs + timeToMinutes(route.startTime) * 60000;
