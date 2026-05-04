@@ -2353,6 +2353,15 @@
         } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
         if (runId !== _refreshInlineRunId) return;
 
+        // Engine-watch ignition state — only when a route is using it AND
+        // we're rendering today. GetFeed pulls only ignition transitions
+        // since our last cursor, so subsequent ticks are very cheap.
+        if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
+            await fetchIgnitionFeedDelta();
+            if (runId !== _refreshInlineRunId) return;
+        }
+        var ignitionMap = _ignitionByDevice;
+
         // Update each vehicle row inline
         // Unique vehicle/driver tracking across all routes so the Total
         // Vehicles card isn't inflated when the same entity is assigned to
@@ -2459,8 +2468,11 @@
                 if (_st.kind === 'good') { completedCount++; rCompleted++; rArrivedNames.push(aName); }
                 else if (_st.kind === 'bad') { missedCount++; rNotArrivedNames.push(aName); }
                 else notStartedCount++;
-                if (engineWatchOn && engineZone && engineZone.points && _st.kind !== 'good') {
-                    var engineOn = computeEngineWatchOn(trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), engineZone.points, windowFromMs, windowToMs);
+                // Engine watch is a live signal — only meaningful for today's
+                // not-yet-arrived/departed rows. Past dates would show current
+                // ignition next to historical rows, which is misleading.
+                if (engineWatchOn && _st.kind !== 'good' && isToday) {
+                    var engineOn = computeEngineWatchOn(ignitionMap, rowDeviceIds);
                     if (engineOn) rEngineOnNames.push(aName);
                     else rEngineOffNames.push(aName);
                 }
@@ -2662,6 +2674,13 @@
             try {
                 logsByDevice = await fetchLogRecordsByDevice(allDeviceIds, logFromIso, logToIso);
             } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
+
+            // Engine-watch ignition feed — only fetched for today's view
+            // when at least one visible route has engineWatch enabled.
+            if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
+                await fetchIgnitionFeedDelta();
+            }
+            var ignitionMap = _ignitionByDevice;
 
             // Sort routes by proximity to current time
             // Filter routes by active day
@@ -2910,11 +2929,12 @@
                         if (_st.kind === 'good') { completedCount++; rCompleted++; sortOrder = 1; rArrivedNames.push(aName); }
                         else if (_st.kind === 'bad') { missedCount++; sortOrder = 0; rNotArrivedNames.push(aName); }
                         else { notStartedCount++; sortOrder = 2; }
-                        // Engine-watch indicator. Only meaningful for rows that
-                        // haven't yet hit their primary event (arrived/departed)
-                        // — once they're on track, the badge would be noise.
-                        if (engineWatchOn && engineZone && engineZone.points && _st.kind !== 'good') {
-                            var engineOn = computeEngineWatchOn(trips, isDriverRoute ? aId : null, deviceIdSetFromList(rowDeviceIds), engineZone.points, windowFromMs, windowToMs);
+                        // Engine watch is a live signal — only meaningful for
+                        // today's not-yet-arrived/departed rows. Past dates
+                        // would show current ignition next to historical rows,
+                        // which is misleading.
+                        if (engineWatchOn && _st.kind !== 'good' && isToday) {
+                            var engineOn = computeEngineWatchOn(ignitionMap, rowDeviceIds);
                             if (engineOn) rEngineOnNames.push(aName);
                             else rEngineOffNames.push(aName);
                         }
@@ -4598,20 +4618,77 @@
         return s;
     }
 
-    // Optional engine-watch indicator for inside/outside routes. Returns true
-    // when any Trip for the row started inside the engineZone within the
-    // window — i.e. the engine was turned on at that location, so the
-    // vehicle is "about to go." Used only when route.engineWatch is set.
-    function computeEngineWatchOn(trips, driverIdFilter, deviceIdSet, engineZonePoints, windowFromMs, windowToMs) {
-        if (!trips || !trips.length || !engineZonePoints || !engineZonePoints.length) return false;
-        for (var i = 0; i < trips.length; i++) {
-            var tr = trips[i];
-            if (!tr.device || !tr.device.id || !deviceIdSet[tr.device.id]) continue;
-            if (driverIdFilter && (!tr.driver || tr.driver.id !== driverIdFilter)) continue;
-            if (!tr.startPoint || typeof tr.startPoint.x !== 'number' || typeof tr.startPoint.y !== 'number') continue;
-            var startMs = tr.start ? new Date(tr.start).getTime() : null;
-            if (startMs === null || startMs < windowFromMs || startMs > windowToMs) continue;
-            if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, engineZonePoints)) return true;
+    // Optional engine-watch indicator. We poll Geotab's StatusData feed
+    // filtered to DiagnosticIgnitionId — a real-time, OEM-reported "key on /
+    // key off" diagnostic. GetFeed is delta-based: the first call returns a
+    // recent snapshot, subsequent calls (with the prior toVersion as
+    // fromVersion) return only events since last tick. We keep a cumulative
+    // per-device map so a row whose ignition was set hours ago is still
+    // remembered even though that record won't appear in later deltas.
+    var _ignitionByDevice = {};   // deviceId -> { ignitionOn: bool, asOfMs: number }
+    var _ignitionFeedToken = null;
+    var _ignitionFeedInflight = null;
+
+    function resetIgnitionFeed() {
+        _ignitionByDevice = {};
+        _ignitionFeedToken = null;
+        _ignitionFeedInflight = null;
+    }
+
+    async function fetchIgnitionFeedDelta() {
+        if (_ignitionFeedInflight) return _ignitionFeedInflight;
+        var query = {
+            typeName: 'StatusData',
+            search: { diagnosticSearch: { id: 'DiagnosticIgnitionId' } },
+            resultsLimit: 50000
+        };
+        if (_ignitionFeedToken) query.fromVersion = _ignitionFeedToken;
+        _ignitionFeedInflight = apiCall('GetFeed', query)
+            .then(function (result) {
+                var records = (result && result.data) || [];
+                for (var i = 0; i < records.length; i++) {
+                    var r = records[i];
+                    if (!r || !r.device || !r.device.id) continue;
+                    var t = r.dateTime ? new Date(r.dateTime).getTime() : 0;
+                    var prev = _ignitionByDevice[r.device.id];
+                    if (!prev || t >= prev.asOfMs) {
+                        _ignitionByDevice[r.device.id] = {
+                            ignitionOn: typeof r.data === 'number' ? r.data > 0 : !!r.data,
+                            asOfMs: t
+                        };
+                    }
+                }
+                if (result && result.toVersion) _ignitionFeedToken = result.toVersion;
+                return _ignitionByDevice;
+            })
+            .catch(function (err) {
+                // Surface but don't block the rest of the render.
+                showErrorBanner('Engine-watch ignition feed failed: ' +
+                    (err && err.message ? err.message : 'unknown error'),
+                    { autoDismissMs: 8000 });
+                return _ignitionByDevice;
+            });
+        var p = _ignitionFeedInflight;
+        p.finally(function () { if (_ignitionFeedInflight === p) _ignitionFeedInflight = null; });
+        return p;
+    }
+
+    function anyRouteUsesEngineWatch(routes) {
+        if (!routes) return false;
+        for (var i = 0; i < routes.length; i++) {
+            if (routes[i] && routes[i].engineWatch && routes[i].engineZoneId) return true;
+        }
+        return false;
+    }
+
+    // True if any of the given devices currently has ignition on. Driver-mode
+    // rows pass the full set of devices the driver might be on; vehicle-mode
+    // rows pass a single-element array.
+    function computeEngineWatchOn(ignitionMap, deviceIds) {
+        if (!ignitionMap || !deviceIds || !deviceIds.length) return false;
+        for (var i = 0; i < deviceIds.length; i++) {
+            var entry = ignitionMap[deviceIds[i]];
+            if (entry && entry.ignitionOn) return true;
         }
         return false;
     }
