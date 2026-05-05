@@ -2355,13 +2355,16 @@
 
         // Engine-watch ignition state — only when a route is using it AND
         // we're rendering today. Per-device Get StatusData (with
-        // diagnosticSearch) for each route-relevant device; subsequent
-        // ticks fetch only the delta since the last successful poll, and
-        // the throttle inside fetchIgnitionFeedDelta returns immediately
-        // when called more often than every IGNITION_POLL_THROTTLE_MS.
+        // diagnosticSearch) for engine-watch routes' devices only;
+        // subsequent ticks fetch only the delta since the last successful
+        // poll for that device, and the per-device throttle inside
+        // pollEngineState skips devices polled within IGNITION_POLL_THROTTLE_MS.
         if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
-            await fetchIgnitionFeedDelta(allDeviceIds);
-            if (runId !== _refreshInlineRunId) return;
+            var engineDeviceIds = collectEngineWatchDeviceIds(savedRoutes, trips);
+            if (engineDeviceIds.length) {
+                await pollEngineState(engineDeviceIds);
+                if (runId !== _refreshInlineRunId) return;
+            }
         }
 
         // Update each vehicle row inline
@@ -2697,7 +2700,10 @@
             // Pass the route-relevant device set so we can scope the Get
             // by deviceSearch (per Geotab's documented pattern).
             if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
-                await fetchIgnitionFeedDelta(allDeviceIds);
+                var engineDeviceIds = collectEngineWatchDeviceIds(savedRoutes, trips);
+                if (engineDeviceIds.length) {
+                    await pollEngineState(engineDeviceIds);
+                }
             }
 
             // Sort routes by proximity to current time
@@ -3482,7 +3488,7 @@
                         // and GPS wobbles don't silently count. Outside falls back to
                         // "was in-zone and is now out" for sparse-log cases.
                         var passedThrough = (r.direction === 'inside' && !!presenceR.arrivedAtMs) ||
-                                            (r.direction === 'outside' && (!!presenceR.departedAtMs || (presenceR.everInZone && !presenceR.isCurrentlyInZone)));
+                                            (r.direction === 'outside' && (!!presenceR.departedAtMs || presenceShowsSustainedDeparture(presenceR)));
                         var status;
                         if (pct >= 80) status = 'Completed';
                         else if (zoneMinutes > 0 || passedThrough) status = 'Incomplete';
@@ -4442,8 +4448,26 @@
         return badge + ageNote;
     }
 
+    // True if the bus was inside the zone at some point and is now
+    // sustainably outside — i.e. the most recent log is outside AND
+    // it's been at least 30s since the last in-zone log. Used as the
+    // "Departed" fallback for outside routes when departedAtMs wasn't
+    // committed (sparse logs). Without the dwell check, a single GPS
+    // wobble at the zone boundary used to read as a false "Departed".
+    function presenceShowsSustainedDeparture(presence) {
+        if (!presence || !presence.everInZone || presence.isCurrentlyInZone) return false;
+        if (presence.lastInZoneMs == null || presence.lastLogMs == null) {
+            // We saw the bus inside (everInZone) but don't have a timestamp
+            // for it (could only happen via trip-based augmentation, where
+            // lastInZoneMs isn't set). Be conservative: trust the
+            // log-based currently-out reading.
+            return true;
+        }
+        return (presence.lastLogMs - presence.lastInZoneMs) >= 30000;
+    }
+
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
-        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null };
+        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null, lastInZoneMs: null };
         if (!logs || !logs.length || !zonePoints || !zonePoints.length) return out;
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
@@ -4482,6 +4506,7 @@
             if (firstInZ === null) firstInZ = (preWindowInZ !== null) ? preWindowInZ : inZ;
             if (inZ) {
                 out.everInZone = true;
+                out.lastInZoneMs = t;
                 haveSeenIn = true;
                 pendingDepartMs = null; // they came back, so any tentative departure is void
                 var stopped = (spd === null) || spd <= STOP_SPEED_KPH;
@@ -4603,17 +4628,38 @@
                             }
                         }
                         // Departure: only fill if the log-based path didn't
-                        // already set one. nextTripStart is Geotab's next
-                        // engine-on time — a bus can idle in the zone after
-                        // the engine comes on (e.g. warming up after kids
-                        // board), so this is often BEFORE the physical
-                        // boundary crossing the GPS logs show. The log-based
-                        // detection in computePresenceFromLogs is the source
-                        // of truth; we only use this as a fallback when logs
-                        // were too sparse to catch the crossing.
+                        // already set one, AND we have positive evidence the
+                        // bus actually left the zone. nextTripStart is just
+                        // Geotab's next engine-on time — a bus that warms up
+                        // and turns off without leaving still produces a
+                        // nextTripStart, which used to read as a false
+                        // "Departed". Two sources of evidence we accept:
+                        //   1. The next trip's stopPoint is outside the zone
+                        //      (definitive — the bus drove somewhere else).
+                        //   2. log-based presence shows the bus was in the
+                        //      zone and is now outside (the everInZone &
+                        //      !isCurrentlyInZone fallback already used by
+                        //      goodDir).
                         if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
                             if (presence.departedAtMs === null) {
-                                presence.departedAtMs = nextStartMs;
+                                var nextTripLeftZone = false;
+                                for (var ni = 0; ni < trips.length; ni++) {
+                                    var ntr = trips[ni];
+                                    if (!ntr || !ntr.start) continue;
+                                    if (new Date(ntr.start).getTime() !== nextStartMs) continue;
+                                    if (driverIdFilter && (!ntr.driver || ntr.driver.id !== driverIdFilter)) continue;
+                                    if (!ntr.device || !ntr.device.id || !deviceIdSet[ntr.device.id]) continue;
+                                    if (ntr.stopPoint && typeof ntr.stopPoint.x === 'number' && typeof ntr.stopPoint.y === 'number') {
+                                        if (!pointInPolygon(ntr.stopPoint.y, ntr.stopPoint.x, zonePoints)) {
+                                            nextTripLeftZone = true;
+                                        }
+                                    }
+                                    break;
+                                }
+                                var logsSayLeft = presenceShowsSustainedDeparture(presence);
+                                if (nextTripLeftZone || logsSayLeft) {
+                                    presence.departedAtMs = nextStartMs;
+                                }
                             }
                         }
                     }
@@ -4632,8 +4678,23 @@
                     if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
                         presence.hasData = true;
                         presence.everInZone = true;
+                        // Same guard as the stop-point branch above: only
+                        // credit a trip-based departure when we have evidence
+                        // the bus actually left the zone. A trip whose
+                        // startPoint is inside the zone but whose stopPoint
+                        // is also inside it (engine warm-up, idle, off) is
+                        // not a departure.
                         if (presence.departedAtMs === null) {
-                            presence.departedAtMs = startMs2;
+                            var thisTripLeftZone = false;
+                            if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
+                                if (!pointInPolygon(tr.stopPoint.y, tr.stopPoint.x, zonePoints)) {
+                                    thisTripLeftZone = true;
+                                }
+                            }
+                            var logsSayLeft2 = presenceShowsSustainedDeparture(presence);
+                            if (thisTripLeftZone || logsSayLeft2) {
+                                presence.departedAtMs = startMs2;
+                            }
                         }
                     }
                 }
@@ -4676,11 +4737,11 @@
     // Per-device engine state from DiagnosticIgnitionId — { on: bool,
     // asOfMs: number } per device.
     var _engineByDevice = {};
-    // Per-device last successful poll-window upper bound (ms). Used to
-    // compute the next delta window per device; absence means "needs the
-    // 24h bootstrap fetch."
+    // Per-device last successful poll-window upper bound (ms). Used both
+    // for throttling (skip a device whose last poll is < throttle ago) and
+    // for delta windows (next fetch starts at last - overlap). Absence
+    // means "needs the 24h bootstrap fetch."
     var _engineLastPollMsByDevice = {};
-    var _engineLastBootstrapMs = 0;
     var _engineInflight = null;
     var IGNITION_BOOTSTRAP_HOURS = 24;
     var IGNITION_POLL_THROTTLE_MS = 25 * 1000;
@@ -4699,7 +4760,6 @@
     function resetIgnitionFeed() {
         _engineByDevice = {};
         _engineLastPollMsByDevice = {};
-        _engineLastBootstrapMs = 0;
         _engineInflight = null;
     }
 
@@ -4718,17 +4778,16 @@
         return _engineByDevice[deviceId] || null;
     }
 
-    // Build the StatusData query for one device + diagnostic over a window.
-    // Matches Geotab's documented form for "ignition status for a vehicle
-    // over a time range" — narrowing by deviceSearch is the canonical
-    // pattern and works reliably across databases regardless of broader
-    // permissions.
-    function _buildStatusDataQuery(deviceId, diagnosticId, fromIso, toIso) {
+    // StatusData query for one device's ignition over a window. Matches
+    // Geotab's documented form for "ignition status for a vehicle over a
+    // time range" — narrowing by deviceSearch is the canonical pattern
+    // and works reliably across databases regardless of broader scoping.
+    function _buildIgnitionQuery(deviceId, fromIso, toIso) {
         return {
             typeName: 'StatusData',
             search: {
                 deviceSearch: { id: deviceId },
-                diagnosticSearch: { id: diagnosticId },
+                diagnosticSearch: { id: IGNITION_DIAG_ID_IGN },
                 fromDate: fromIso,
                 toDate: toIso
             },
@@ -4736,26 +4795,24 @@
         };
     }
 
-    // Fetch ignition for the given devices over [fromMs, toMs] in a single
-    // multiCall (one call per device, batched). Per-call failures are
-    // tolerated — a missing diagnostic on one device doesn't sink the rest.
-    // On success, _engineLastPollMsByDevice is advanced for every device in
-    // the call so subsequent ticks fetch only deltas.
-    async function _fetchStatusDataForDevices(deviceIds, fromMs, toMs) {
-        if (!deviceIds || !deviceIds.length || toMs <= fromMs) return;
-        var fromIso = new Date(fromMs).toISOString();
+    // Fetch ignition for the given (device, fromMs) jobs. We pass per-job
+    // windows so a never-polled device gets its 24h bootstrap in the same
+    // multiCall as already-polled devices' deltas. Per-call failures are
+    // tolerated — a missing diagnostic on one device doesn't sink others.
+    async function _fetchIgnitionForJobs(jobs, toMs) {
+        if (!jobs || !jobs.length) return;
         var toIso = new Date(toMs).toISOString();
         var calls = [];
-        for (var i = 0; i < deviceIds.length; i++) {
-            calls.push(['Get', _buildStatusDataQuery(deviceIds[i], IGNITION_DIAG_ID_IGN, fromIso, toIso)]);
+        for (var i = 0; i < jobs.length; i++) {
+            var fromIso = new Date(jobs[i].fromMs).toISOString();
+            calls.push(['Get', _buildIgnitionQuery(jobs[i].deviceId, fromIso, toIso)]);
         }
         var results;
         try {
             results = await apiMultiCall(calls);
         } catch (e) {
             // Whole multiCall failed (rare — usually transport-level).
-            // Fall back to per-call Promise.allSettled so one bad call
-            // doesn't take down the rest.
+            // Fall back per-call so one bad call doesn't sink the rest.
             var settled = await Promise.allSettled(calls.map(function (c) { return apiCall(c[0], c[1]); }));
             results = settled.map(function (s) { return s.status === 'fulfilled' ? s.value : []; });
         }
@@ -4763,58 +4820,35 @@
             var recs = results[j] || [];
             for (var k = 0; k < recs.length; k++) _mergeEngineRecord(_engineByDevice, recs[k]);
         }
-        for (var d = 0; d < deviceIds.length; d++) _engineLastPollMsByDevice[deviceIds[d]] = toMs;
+        for (var d = 0; d < jobs.length; d++) _engineLastPollMsByDevice[jobs[d].deviceId] = toMs;
     }
 
-    // Poll engine state for the given devices. Devices we've never polled
-    // get a 24h bootstrap; the rest get a small delta from their last
-    // successful poll. Throttled so live-tick callers (every 5s) don't
-    // hammer StatusData. Name kept as fetchIgnitionFeedDelta for callers
-    // — internally this is a per-device Get-based pipeline now (not the
-    // database-wide GetFeed of the prior implementation).
-    async function fetchIgnitionFeedDelta(deviceIds) {
+    // Poll engine state for the given devices. Per-device throttle: each
+    // device gets its own staleness check, so a newly-added device (route
+    // edit, driver swap) gets its 24h bootstrap on the very next call
+    // without waiting for a fleet-wide cooldown. Devices polled within
+    // IGNITION_POLL_THROTTLE_MS are skipped this round.
+    async function pollEngineState(deviceIds) {
         if (_engineInflight) return _engineInflight;
         if (!deviceIds || !deviceIds.length) return _engineByDevice;
         var nowMs = Date.now();
-        if (_engineLastBootstrapMs > 0 && (nowMs - _engineLastBootstrapMs) < IGNITION_POLL_THROTTLE_MS) {
-            return _engineByDevice;
+        var jobs = [];
+        for (var i = 0; i < deviceIds.length; i++) {
+            var id = deviceIds[i];
+            var last = _engineLastPollMsByDevice[id] || 0;
+            if (!last) {
+                // First poll for this device — bootstrap with 24h history.
+                jobs.push({ deviceId: id, fromMs: nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000 });
+            } else if (nowMs - last >= IGNITION_POLL_THROTTLE_MS) {
+                // Stale — fetch a delta from last poll (with backdating overlap).
+                jobs.push({ deviceId: id, fromMs: last - IGNITION_DELTA_OVERLAP_MS });
+            }
+            // Else: device polled recently — skip this round.
         }
+        if (!jobs.length) return _engineByDevice;
         var run = (async function () {
             try {
-                var needsBootstrap = [];
-                var deltaIds = [];
-                var deltaFrom = Infinity;
-                for (var i = 0; i < deviceIds.length; i++) {
-                    var id = deviceIds[i];
-                    var last = _engineLastPollMsByDevice[id];
-                    if (!last) {
-                        needsBootstrap.push(id);
-                    } else {
-                        deltaIds.push(id);
-                        var since = last - IGNITION_DELTA_OVERLAP_MS;
-                        if (since < deltaFrom) deltaFrom = since;
-                    }
-                }
-                if (needsBootstrap.length) {
-                    var bootFrom = nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000;
-                    try {
-                        await _fetchStatusDataForDevices(needsBootstrap, bootFrom, nowMs);
-                    } catch (bootErr) {
-                        showErrorBanner('Engine-watch bootstrap failed: ' +
-                            (bootErr && bootErr.message ? bootErr.message : 'unknown error'),
-                            { autoDismissMs: 8000 });
-                    }
-                }
-                if (deltaIds.length && deltaFrom < nowMs) {
-                    try {
-                        await _fetchStatusDataForDevices(deltaIds, deltaFrom, nowMs);
-                    } catch (deltaErr) {
-                        showErrorBanner('Engine-watch delta failed: ' +
-                            (deltaErr && deltaErr.message ? deltaErr.message : 'unknown error'),
-                            { autoDismissMs: 8000 });
-                    }
-                }
-                _engineLastBootstrapMs = nowMs;
+                await _fetchIgnitionForJobs(jobs, nowMs);
             } catch (err) {
                 showErrorBanner('Engine-watch failed: ' +
                     (err && err.message ? err.message : 'unknown error'),
@@ -4834,6 +4868,17 @@
             if (routes[i] && routes[i].engineWatch && routes[i].engineZoneId) return true;
         }
         return false;
+    }
+
+    // Devices that belong to routes with engine-watch enabled. We only fetch
+    // ignition StatusData for these so a fleet using engine-watch on one or
+    // two routes doesn't pay for ignition reads on every device.
+    function collectEngineWatchDeviceIds(routes, trips) {
+        var watchRoutes = (routes || []).filter(function (r) {
+            return r && r.engineWatch && r.engineZoneId;
+        });
+        if (!watchRoutes.length) return [];
+        return collectRouteDeviceIds(watchRoutes, trips);
     }
 
     // Returns 'on' | 'off' | 'unknown' for an engine-watch row.
@@ -6998,7 +7043,7 @@
                     // and GPS wobbles don't silently count. Outside falls back to
                     // "was in-zone and is now out" for sparse-log cases.
                     var passed = (r.direction === 'inside' && !!presence.arrivedAtMs) ||
-                                 (r.direction === 'outside' && (!!presence.departedAtMs || (presence.everInZone && !presence.isCurrentlyInZone)));
+                                 (r.direction === 'outside' && (!!presence.departedAtMs || presenceShowsSustainedDeparture(presence)));
                     var good;
                     if (routeHasTarget(r)) {
                         if (!evMs) { good = false; }
@@ -7124,7 +7169,7 @@
         // routes we also accept "was observed in-zone and is now out" as a
         // fallback when logs were too sparse to record a transition.
         var goodDir = (route.direction === 'inside' && !!presence.arrivedAtMs) ||
-                      (route.direction === 'outside' && (!!presence.departedAtMs || (everInZone && !isCurrentlyInZone)));
+                      (route.direction === 'outside' && (!!presence.departedAtMs || presenceShowsSustainedDeparture(presence)));
         var vStatus = routeStatusLabel(route.direction, goodDir);
         var statusTip;
         if (route.direction === 'inside') {

@@ -3,16 +3,14 @@
  * Geotab ignition probe — diagnoses why engine-watch is showing all
  * "Unavailable". Prints, for the database:
  *
- *   1. The full Ignition / Engine-RPM diagnostic registry (so we see the
- *      actual id values: 'DiagnosticIgnitionId' literal vs. an aXXXX GUID).
- *   2. A StatusData sample for each well-known diagnostic id we currently
- *      query (DiagnosticIgnitionId, DiagnosticGoEngineRpmStatusId) over the
- *      last N hours — record count, first/last timestamp, distinct device
- *      count.
- *   3. The same StatusData query but searched by the resolved diagnostic
- *      id from step 1 — if step 2 returns 0 records but this returns
- *      records, the well-known id string isn't being honored on this DB
- *      and we need to use the GUID.
+ *   1. Diagnostic registry: every Diagnostic with "Ignition" in its name,
+ *      so you see the actual id values (well-known string vs aXXXX GUID).
+ *   2. StatusData sample by well-known string id ('DiagnosticIgnitionId') —
+ *      what the app sends today. Record count, distinct device count,
+ *      first/last timestamp, on/off counts.
+ *   3. Same StatusData query but using the resolved id from section 1 —
+ *      if section 2 is empty and section 3 has data, the well-known id
+ *      isn't honored on this DB and we need to use the GUID.
  *
  * Usage:
  *   GEOTAB_DB=Bethrochel GEOTAB_USER=apiuser GEOTAB_PASS=xxx \
@@ -109,12 +107,11 @@ async function main() {
     console.log('  user     = ' + credentials.userName);
     console.log('  server   = ' + host);
 
-    // ---- 1. Diagnostic registry: anything with "ignition" or "rpm" in the name ----
-    console.log('\n## 1. Diagnostic registry (search: name contains "Ignition" or "RPM")');
-    var [ignDiagsByName, rpmDiagsByName] = await Promise.all([
-        rpc(host, 'Get', { typeName: 'Diagnostic', search: { name: 'Ignition' }, credentials: credentials }),
-        rpc(host, 'Get', { typeName: 'Diagnostic', search: { name: 'RPM' }, credentials: credentials })
-    ]);
+    // ---- 1. Diagnostic registry: anything with "ignition" in the name ----
+    console.log('\n## 1. Diagnostic registry (search: name contains "Ignition")');
+    var ignDiagsByName = await rpc(host, 'Get', {
+        typeName: 'Diagnostic', search: { name: 'Ignition' }, credentials: credentials
+    });
     function dumpDiag(d) {
         return '  - id=' + d.id + '\n    name="' + d.name + '"' +
             (d.diagnosticType ? ('\n    type=' + d.diagnosticType) : '') +
@@ -126,75 +123,58 @@ async function main() {
     } else {
         console.log('  (no Diagnostic with name containing "Ignition")');
     }
-    console.log('---');
-    if (rpmDiagsByName && rpmDiagsByName.length) {
-        rpmDiagsByName.forEach(function (d) { console.log(dumpDiag(d)); });
-    } else {
-        console.log('  (no Diagnostic with name containing "RPM")');
-    }
 
-    // Also try fetching by the well-known string IDs directly.
+    // Also try fetching by the well-known string id directly.
     console.log('\n## 1b. Diagnostic lookup by well-known string id');
-    var wellKnown = ['DiagnosticIgnitionId', 'DiagnosticGoEngineRpmStatusId'];
-    for (var w = 0; w < wellKnown.length; w++) {
-        var id = wellKnown[w];
-        try {
-            var hit = await rpc(host, 'Get', { typeName: 'Diagnostic', search: { id: id }, credentials: credentials });
-            if (hit && hit.length) {
-                console.log('  ' + id + ' resolves to:');
-                console.log(dumpDiag(hit[0]));
-            } else {
-                console.log('  ' + id + ' returned 0 results');
-            }
-        } catch (e) {
-            console.log('  ' + id + ' ERROR: ' + e.message);
+    var wellKnown = 'DiagnosticIgnitionId';
+    try {
+        var hit = await rpc(host, 'Get', { typeName: 'Diagnostic', search: { id: wellKnown }, credentials: credentials });
+        if (hit && hit.length) {
+            console.log('  ' + wellKnown + ' resolves to:');
+            console.log(dumpDiag(hit[0]));
+        } else {
+            console.log('  ' + wellKnown + ' returned 0 results');
         }
+    } catch (e) {
+        console.log('  ' + wellKnown + ' ERROR: ' + e.message);
     }
 
-    // ---- 2. StatusData sample using the well-known string ids (what the app does today) ----
+    // ---- 2. StatusData sample using the well-known string id (what the app does today) ----
     var nowMs = Date.now();
     var fromIso = new Date(nowMs - hoursBack * 60 * 60 * 1000).toISOString();
     var toIso = new Date(nowMs).toISOString();
     console.log('\n## 2. StatusData sample (last ' + hoursBack + 'h, query by well-known string id — what the app does)');
     console.log('  window = ' + fromIso + ' -> ' + toIso);
-    for (var k = 0; k < wellKnown.length; k++) {
-        var diagId = wellKnown[k];
-        try {
-            var recs = await rpc(host, 'Get', {
-                typeName: 'StatusData',
-                search: { diagnosticSearch: { id: diagId }, fromDate: fromIso, toDate: toIso },
-                resultsLimit: 50000,
-                credentials: credentials
-            });
-            console.log('\n  ' + diagId + ':');
-            console.log('    ' + JSON.stringify(summarizeStatusData(recs), null, 2).split('\n').join('\n    '));
-        } catch (e) {
-            console.log('\n  ' + diagId + ' ERROR: ' + e.message);
-        }
+    try {
+        var recs = await rpc(host, 'Get', {
+            typeName: 'StatusData',
+            search: { diagnosticSearch: { id: wellKnown }, fromDate: fromIso, toDate: toIso },
+            resultsLimit: 50000,
+            credentials: credentials
+        });
+        console.log('\n  ' + wellKnown + ':');
+        console.log('    ' + JSON.stringify(summarizeStatusData(recs), null, 2).split('\n').join('\n    '));
+    } catch (e) {
+        console.log('\n  ' + wellKnown + ' ERROR: ' + e.message);
     }
 
-    // ---- 3. Same query but using the resolved id from the registry ----
+    // ---- 3. Same query using the resolved id from the registry ----
     console.log('\n## 3. StatusData sample using resolved id from registry');
     var realIgn = (ignDiagsByName || []).find(function (d) { return /ignition/i.test(d.name) && !/aux|auxiliary/i.test(d.name); });
-    var realRpm = (rpmDiagsByName || []).find(function (d) { return /engine.*rpm/i.test(d.name); });
-    var resolved = [];
-    if (realIgn) resolved.push({ label: 'Ignition (resolved=' + realIgn.id + ')', id: realIgn.id });
-    if (realRpm) resolved.push({ label: 'EngineRpm (resolved=' + realRpm.id + ')', id: realRpm.id });
-    if (!resolved.length) {
-        console.log('  No resolved ids — skipping.');
-    }
-    for (var r = 0; r < resolved.length; r++) {
+    if (!realIgn) {
+        console.log('  No resolved id — skipping.');
+    } else {
         try {
             var recs2 = await rpc(host, 'Get', {
                 typeName: 'StatusData',
-                search: { diagnosticSearch: { id: resolved[r].id }, fromDate: fromIso, toDate: toIso },
+                search: { diagnosticSearch: { id: realIgn.id }, fromDate: fromIso, toDate: toIso },
                 resultsLimit: 50000,
                 credentials: credentials
             });
-            console.log('\n  ' + resolved[r].label + ':');
+            console.log('\n  Ignition (resolved=' + realIgn.id + '):');
             console.log('    ' + JSON.stringify(summarizeStatusData(recs2), null, 2).split('\n').join('\n    '));
         } catch (e) {
-            console.log('\n  ' + resolved[r].label + ' ERROR: ' + e.message);
+            console.log('\n  Ignition (resolved) ERROR: ' + e.message);
         }
     }
 
