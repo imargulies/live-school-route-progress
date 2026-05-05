@@ -5541,12 +5541,15 @@
             // Optional engine-watch breakdown: only meaningful for the
             // not-yet-arrived/departed crowd, so we just show their split.
             // ON listed first so "about to go" is the eye's first stop;
-            // Unknown last because it's the lowest-signal bucket.
+            // Unavailable last because it's the lowest-signal bucket.
+            // We also require at least one row with a confirmed ON or OFF
+            // before rendering — when ignition data isn't flowing at all,
+            // an "Engine: 0 on · 0 off · N unavailable" line is just noise.
             if (c.engineWatch) {
                 var onN = c.engineOnNames || [];
                 var offN = c.engineOffNames || [];
                 var unkN = c.engineUnknownNames || [];
-                if (onN.length || offN.length || unkN.length) {
+                if (onN.length || offN.length) {
                     var zoneSuffix = c.engineZoneName
                         ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
                         : '';
