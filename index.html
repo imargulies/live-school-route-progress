@@ -4448,21 +4448,21 @@
         return badge + ageNote;
     }
 
-    // True if the bus was inside the zone at some point and is now
+    // True if the bus was inside the zone at some point AND is now
     // sustainably outside — i.e. the most recent log is outside AND
-    // it's been at least 30s since the last in-zone log. Used as the
-    // "Departed" fallback for outside routes when departedAtMs wasn't
-    // committed (sparse logs). Without the dwell check, a single GPS
-    // wobble at the zone boundary used to read as a false "Departed".
+    // it's been at least 30s since the last log that put it inside.
+    // Used as the "Departed" fallback for outside routes when
+    // departedAtMs wasn't committed (sparse logs).
+    //
+    // We require lastInZoneMs (set by log-based detection only) — i.e.
+    // an actual in-window log that placed the bus inside the polygon.
+    // Trip-augmentation also sets everInZone but doesn't update
+    // lastInZoneMs; without this gate, a bus parked overnight (trip
+    // says in-zone, no in-window logs) plus a single GPS wobble "out"
+    // log would fire a false Departed.
     function presenceShowsSustainedDeparture(presence) {
         if (!presence || !presence.everInZone || presence.isCurrentlyInZone) return false;
-        if (presence.lastInZoneMs == null || presence.lastLogMs == null) {
-            // We saw the bus inside (everInZone) but don't have a timestamp
-            // for it (could only happen via trip-based augmentation, where
-            // lastInZoneMs isn't set). Be conservative: trust the
-            // log-based currently-out reading.
-            return true;
-        }
+        if (presence.lastInZoneMs == null || presence.lastLogMs == null) return false;
         return (presence.lastLogMs - presence.lastInZoneMs) >= 30000;
     }
 
