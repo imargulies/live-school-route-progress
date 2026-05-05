@@ -4673,13 +4673,9 @@
     // the last successful poll. We keep a cumulative per-device map so a
     // record committed hours ago is still remembered even though it won't
     // appear in later delta windows.
-    // Per-device engine state, derived from two Geotab diagnostics:
-    //   primary  = DiagnosticIgnitionId (OEM "key on/off" — most reliable)
-    //   fallback = DiagnosticGoEngineRpmStatusId (RPM>0 = running; covers
-    //              older devices/vehicles that don't report ignition)
-    // Each map stores { on: bool, asOfMs: number }. Lookup: prefer ignition;
-    // fall back to RPM if no ignition record exists for that device.
-    var _engineState = { ignition: {}, rpm: {} };
+    // Per-device engine state from DiagnosticIgnitionId — { on: bool,
+    // asOfMs: number } per device.
+    var _engineByDevice = {};
     // Per-device last successful poll-window upper bound (ms). Used to
     // compute the next delta window per device; absence means "needs the
     // 24h bootstrap fetch."
@@ -4699,10 +4695,9 @@
     // back-dating window so we never miss a transition between ticks.
     var IGNITION_DELTA_OVERLAP_MS = 60 * 1000;
     var IGNITION_DIAG_ID_IGN = 'DiagnosticIgnitionId';
-    var IGNITION_DIAG_ID_RPM = 'DiagnosticGoEngineRpmStatusId';
 
     function resetIgnitionFeed() {
-        _engineState = { ignition: {}, rpm: {} };
+        _engineByDevice = {};
         _engineLastPollMsByDevice = {};
         _engineLastBootstrapMs = 0;
         _engineInflight = null;
@@ -4720,9 +4715,7 @@
     }
 
     function _getEngineEntry(deviceId) {
-        // Ignition takes priority; fall back to RPM only when ignition has no
-        // record for this device.
-        return _engineState.ignition[deviceId] || _engineState.rpm[deviceId] || null;
+        return _engineByDevice[deviceId] || null;
     }
 
     // Build the StatusData query for one device + diagnostic over a window.
@@ -4743,23 +4736,18 @@
         };
     }
 
-    // Fetch ignition + RPM for the given devices over [fromMs, toMs] in a
-    // single multiCall (2 calls per device, batched). Per-device, per-call
-    // failures are tolerated — a missing diagnostic on one device doesn't
-    // sink the rest. On success, _engineLastPollMsByDevice is advanced for
-    // every device in the call so subsequent ticks fetch only deltas.
+    // Fetch ignition for the given devices over [fromMs, toMs] in a single
+    // multiCall (one call per device, batched). Per-call failures are
+    // tolerated — a missing diagnostic on one device doesn't sink the rest.
+    // On success, _engineLastPollMsByDevice is advanced for every device in
+    // the call so subsequent ticks fetch only deltas.
     async function _fetchStatusDataForDevices(deviceIds, fromMs, toMs) {
         if (!deviceIds || !deviceIds.length || toMs <= fromMs) return;
         var fromIso = new Date(fromMs).toISOString();
         var toIso = new Date(toMs).toISOString();
         var calls = [];
-        var meta = []; // parallel to calls: { target }
         for (var i = 0; i < deviceIds.length; i++) {
-            var id = deviceIds[i];
-            calls.push(['Get', _buildStatusDataQuery(id, IGNITION_DIAG_ID_IGN, fromIso, toIso)]);
-            meta.push({ target: _engineState.ignition });
-            calls.push(['Get', _buildStatusDataQuery(id, IGNITION_DIAG_ID_RPM, fromIso, toIso)]);
-            meta.push({ target: _engineState.rpm });
+            calls.push(['Get', _buildStatusDataQuery(deviceIds[i], IGNITION_DIAG_ID_IGN, fromIso, toIso)]);
         }
         var results;
         try {
@@ -4773,7 +4761,7 @@
         }
         for (var j = 0; j < results.length; j++) {
             var recs = results[j] || [];
-            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(meta[j].target, recs[k]);
+            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(_engineByDevice, recs[k]);
         }
         for (var d = 0; d < deviceIds.length; d++) _engineLastPollMsByDevice[deviceIds[d]] = toMs;
     }
@@ -4786,10 +4774,10 @@
     // database-wide GetFeed of the prior implementation).
     async function fetchIgnitionFeedDelta(deviceIds) {
         if (_engineInflight) return _engineInflight;
-        if (!deviceIds || !deviceIds.length) return _engineState;
+        if (!deviceIds || !deviceIds.length) return _engineByDevice;
         var nowMs = Date.now();
         if (_engineLastBootstrapMs > 0 && (nowMs - _engineLastBootstrapMs) < IGNITION_POLL_THROTTLE_MS) {
-            return _engineState;
+            return _engineByDevice;
         }
         var run = (async function () {
             try {
@@ -4832,7 +4820,7 @@
                     (err && err.message ? err.message : 'unknown error'),
                     { autoDismissMs: 8000 });
             }
-            return _engineState;
+            return _engineByDevice;
         })().finally(function () {
             if (_engineInflight === run) _engineInflight = null;
         });
