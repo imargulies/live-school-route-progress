@@ -2354,12 +2354,13 @@
         if (runId !== _refreshInlineRunId) return;
 
         // Engine-watch ignition state — only when a route is using it AND
-        // we're rendering today. GetFeed pulls only ignition transitions
-        // since our last cursor, so subsequent ticks are very cheap; and
+        // we're rendering today. Per-device Get StatusData (with
+        // diagnosticSearch) for each route-relevant device; subsequent
+        // ticks fetch only the delta since the last successful poll, and
         // the throttle inside fetchIgnitionFeedDelta returns immediately
         // when called more often than every IGNITION_POLL_THROTTLE_MS.
         if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
-            await fetchIgnitionFeedDelta();
+            await fetchIgnitionFeedDelta(allDeviceIds);
             if (runId !== _refreshInlineRunId) return;
         }
 
@@ -2693,8 +2694,10 @@
 
             // Engine-watch ignition feed — only fetched for today's view
             // when at least one visible route has engineWatch enabled.
+            // Pass the route-relevant device set so we can scope the Get
+            // by deviceSearch (per Geotab's documented pattern).
             if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
-                await fetchIgnitionFeedDelta();
+                await fetchIgnitionFeedDelta(allDeviceIds);
             }
 
             // Sort routes by proximity to current time
@@ -4661,13 +4664,15 @@
         return { lat: lat, lng: lng, ms: ms };
     }
 
-    // Optional engine-watch indicator. We poll Geotab's StatusData feed
-    // filtered to DiagnosticIgnitionId — a real-time, OEM-reported "key on /
-    // key off" diagnostic. GetFeed is delta-based: the first call returns a
-    // recent snapshot, subsequent calls (with the prior toVersion as
-    // fromVersion) return only events since last tick. We keep a cumulative
-    // per-device map so a row whose ignition was set hours ago is still
-    // remembered even though that record won't appear in later deltas.
+    // Optional engine-watch indicator. We pull DiagnosticIgnitionId
+    // StatusData per-device (using deviceSearch + diagnosticSearch +
+    // a fromDate/toDate window) — Geotab's documented pattern for "ignition
+    // status for a vehicle over a time range". First call per device pulls
+    // the last 24h so a row whose ignition was set hours ago shows the
+    // right state immediately; subsequent ticks fetch only the delta since
+    // the last successful poll. We keep a cumulative per-device map so a
+    // record committed hours ago is still remembered even though it won't
+    // appear in later delta windows.
     // Per-device engine state, derived from two Geotab diagnostics:
     //   primary  = DiagnosticIgnitionId (OEM "key on/off" — most reliable)
     //   fallback = DiagnosticGoEngineRpmStatusId (RPM>0 = running; covers
@@ -4675,12 +4680,12 @@
     // Each map stores { on: bool, asOfMs: number }. Lookup: prefer ignition;
     // fall back to RPM if no ignition record exists for that device.
     var _engineState = { ignition: {}, rpm: {} };
-    // GetFeed cursors per diagnostic; persisted so a page reload doesn't
-    // rewind to a fresh bootstrap when our last cursor is still valid.
-    var _engineFeedTokens = { ignition: null, rpm: null };
-    var _engineFeedInflight = null;
-    var _engineBootstrapped = false;
-    var _engineLastPollMs = 0;
+    // Per-device last successful poll-window upper bound (ms). Used to
+    // compute the next delta window per device; absence means "needs the
+    // 24h bootstrap fetch."
+    var _engineLastPollMsByDevice = {};
+    var _engineLastBootstrapMs = 0;
+    var _engineInflight = null;
     var IGNITION_BOOTSTRAP_HOURS = 24;
     var IGNITION_POLL_THROTTLE_MS = 25 * 1000;
     // Per-row freshness gate. We trust "ON" only when either the ignition
@@ -4690,39 +4695,17 @@
     // Stale "OFF" stays OFF: a vehicle that's been parked for a day is, in
     // fact, off.
     var ENGINE_FRESHNESS_MS = 30 * 60 * 1000;
-    var IGNITION_PERSIST_KEY = 'rpEngineFeedTokens_v1';
-    var IGNITION_PERSIST_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+    // 60s overlap on each delta poll absorbs Geotab's documented log
+    // back-dating window so we never miss a transition between ticks.
+    var IGNITION_DELTA_OVERLAP_MS = 60 * 1000;
     var IGNITION_DIAG_ID_IGN = 'DiagnosticIgnitionId';
     var IGNITION_DIAG_ID_RPM = 'DiagnosticGoEngineRpmStatusId';
 
-    (function _restoreEngineFeedTokens() {
-        try {
-            var raw = localStorage.getItem(IGNITION_PERSIST_KEY);
-            if (!raw) return;
-            var parsed = JSON.parse(raw);
-            if (!parsed || (Date.now() - (parsed.savedAt || 0)) > IGNITION_PERSIST_MAX_AGE_MS) return;
-            if (parsed.tokens) _engineFeedTokens = {
-                ignition: parsed.tokens.ignition || null,
-                rpm: parsed.tokens.rpm || null
-            };
-        } catch (e) {}
-    })();
-
-    function _persistEngineFeedTokens() {
-        try {
-            localStorage.setItem(IGNITION_PERSIST_KEY, JSON.stringify({
-                tokens: _engineFeedTokens, savedAt: Date.now()
-            }));
-        } catch (e) {}
-    }
-
     function resetIgnitionFeed() {
         _engineState = { ignition: {}, rpm: {} };
-        _engineFeedTokens = { ignition: null, rpm: null };
-        _engineFeedInflight = null;
-        _engineBootstrapped = false;
-        _engineLastPollMs = 0;
-        try { localStorage.removeItem(IGNITION_PERSIST_KEY); } catch (e) {}
+        _engineLastPollMsByDevice = {};
+        _engineLastBootstrapMs = 0;
+        _engineInflight = null;
     }
 
     function _mergeEngineRecord(map, r) {
@@ -4742,134 +4725,119 @@
         return _engineState.ignition[deviceId] || _engineState.rpm[deviceId] || null;
     }
 
-    // One-time seed: pull the last 24h for both diagnostics in parallel so
-    // long-running states (engine on for hours before page load) show the
-    // right value immediately. GetFeed alone returns only "recent" records.
-    // Diagnostics are queried independently — a database that doesn't have
-    // RPM data still gets the ignition seed (and vice versa).
-    async function bootstrapEngineMaps() {
-        var nowMs = Date.now();
-        var fromIso = new Date(nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000).toISOString();
-        var toIso = new Date(nowMs).toISOString();
-        var jobs = [
-            { diag: IGNITION_DIAG_ID_IGN, target: _engineState.ignition },
-            { diag: IGNITION_DIAG_ID_RPM, target: _engineState.rpm }
-        ];
-        var settled = await Promise.allSettled(jobs.map(function (j) {
-            return apiCall('Get', {
-                typeName: 'StatusData',
-                search: { diagnosticSearch: { id: j.diag }, fromDate: fromIso, toDate: toIso }
-            });
-        }));
-        for (var i = 0; i < settled.length; i++) {
-            if (settled[i].status !== 'fulfilled') continue;
-            var recs = settled[i].value || [];
-            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(jobs[i].target, recs[k]);
+    // Build the StatusData query for one device + diagnostic over a window.
+    // Matches Geotab's documented form for "ignition status for a vehicle
+    // over a time range" — narrowing by deviceSearch is the canonical
+    // pattern and works reliably across databases regardless of broader
+    // permissions.
+    function _buildStatusDataQuery(deviceId, diagnosticId, fromIso, toIso) {
+        return {
+            typeName: 'StatusData',
+            search: {
+                deviceSearch: { id: deviceId },
+                diagnosticSearch: { id: diagnosticId },
+                fromDate: fromIso,
+                toDate: toIso
+            },
+            resultsLimit: 50000
+        };
+    }
+
+    // Fetch ignition + RPM for the given devices over [fromMs, toMs] in a
+    // single multiCall (2 calls per device, batched). Per-device, per-call
+    // failures are tolerated — a missing diagnostic on one device doesn't
+    // sink the rest. On success, _engineLastPollMsByDevice is advanced for
+    // every device in the call so subsequent ticks fetch only deltas.
+    async function _fetchStatusDataForDevices(deviceIds, fromMs, toMs) {
+        if (!deviceIds || !deviceIds.length || toMs <= fromMs) return;
+        var fromIso = new Date(fromMs).toISOString();
+        var toIso = new Date(toMs).toISOString();
+        var calls = [];
+        var meta = []; // parallel to calls: { target }
+        for (var i = 0; i < deviceIds.length; i++) {
+            var id = deviceIds[i];
+            calls.push(['Get', _buildStatusDataQuery(id, IGNITION_DIAG_ID_IGN, fromIso, toIso)]);
+            meta.push({ target: _engineState.ignition });
+            calls.push(['Get', _buildStatusDataQuery(id, IGNITION_DIAG_ID_RPM, fromIso, toIso)]);
+            meta.push({ target: _engineState.rpm });
         }
+        var results;
+        try {
+            results = await apiMultiCall(calls);
+        } catch (e) {
+            // Whole multiCall failed (rare — usually transport-level).
+            // Fall back to per-call Promise.allSettled so one bad call
+            // doesn't take down the rest.
+            var settled = await Promise.allSettled(calls.map(function (c) { return apiCall(c[0], c[1]); }));
+            results = settled.map(function (s) { return s.status === 'fulfilled' ? s.value : []; });
+        }
+        for (var j = 0; j < results.length; j++) {
+            var recs = results[j] || [];
+            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(meta[j].target, recs[k]);
+        }
+        for (var d = 0; d < deviceIds.length; d++) _engineLastPollMsByDevice[deviceIds[d]] = toMs;
     }
 
-    // True if a feed error message indicates the cursor is no longer valid
-    // (Geotab rejects fromVersion tokens older than its retention window).
-    // We surface the error once, then reset so the next tick re-bootstraps.
-    function _isStaleCursorError(msg) {
-        return /version|fromVersion|cursor|too old|expired/i.test(String(msg || ''));
-    }
-
-    // Pull only ignition/RPM transitions newer than our last cursors. Skipped
-    // when called too soon after the previous successful poll (engine events
-    // are rare; tick-rate polling is wasteful). Each diagnostic is fetched
-    // independently so a per-feed failure can't sink the other.
-    async function fetchIgnitionFeedDelta() {
-        if (_engineFeedInflight) return _engineFeedInflight;
+    // Poll engine state for the given devices. Devices we've never polled
+    // get a 24h bootstrap; the rest get a small delta from their last
+    // successful poll. Throttled so live-tick callers (every 5s) don't
+    // hammer StatusData. Name kept as fetchIgnitionFeedDelta for callers
+    // — internally this is a per-device Get-based pipeline now (not the
+    // database-wide GetFeed of the prior implementation).
+    async function fetchIgnitionFeedDelta(deviceIds) {
+        if (_engineInflight) return _engineInflight;
+        if (!deviceIds || !deviceIds.length) return _engineState;
         var nowMs = Date.now();
-        if (_engineBootstrapped && (nowMs - _engineLastPollMs) < IGNITION_POLL_THROTTLE_MS) {
+        if (_engineLastBootstrapMs > 0 && (nowMs - _engineLastBootstrapMs) < IGNITION_POLL_THROTTLE_MS) {
             return _engineState;
         }
         var run = (async function () {
             try {
-                if (!_engineBootstrapped) {
-                    if (!_engineFeedTokens.ignition && !_engineFeedTokens.rpm) {
-                        try {
-                            await bootstrapEngineMaps();
-                            _engineBootstrapped = true;
-                        } catch (bootErr) {
-                            // Don't flip the flag — let the next call retry
-                            // the bootstrap once the throttle expires. The
-                            // GetFeed below still runs and keeps live state
-                            // flowing in the meantime.
-                            showErrorBanner('Engine-watch bootstrap failed: ' +
-                                (bootErr && bootErr.message ? bootErr.message : 'unknown error'),
-                                { autoDismissMs: 8000 });
-                        }
+                var needsBootstrap = [];
+                var deltaIds = [];
+                var deltaFrom = Infinity;
+                for (var i = 0; i < deviceIds.length; i++) {
+                    var id = deviceIds[i];
+                    var last = _engineLastPollMsByDevice[id];
+                    if (!last) {
+                        needsBootstrap.push(id);
                     } else {
-                        // Persisted cursors exist — skip the 24h seed and
-                        // rely on the resumed feed cursor.
-                        _engineBootstrapped = true;
+                        deltaIds.push(id);
+                        var since = last - IGNITION_DELTA_OVERLAP_MS;
+                        if (since < deltaFrom) deltaFrom = since;
                     }
                 }
-                var jobs = [
-                    { tokenKey: 'ignition', diag: IGNITION_DIAG_ID_IGN, target: _engineState.ignition },
-                    { tokenKey: 'rpm',      diag: IGNITION_DIAG_ID_RPM, target: _engineState.rpm }
-                ];
-                var settled = await Promise.allSettled(jobs.map(function (j) {
-                    return apiCall('GetFeed', _buildEngineFeedQuery(j.diag, _engineFeedTokens[j.tokenKey]));
-                }));
-                var anyStale = false;
-                var firstErr = null;
-                for (var i = 0; i < settled.length; i++) {
-                    var s = settled[i];
-                    var j = jobs[i];
-                    if (s.status === 'fulfilled') {
-                        _absorbEngineFeedResult(s.value, j.target, j.tokenKey);
-                    } else {
-                        var em = s.reason && s.reason.message ? s.reason.message : 'unknown error';
-                        if (_isStaleCursorError(em)) {
-                            // Bad cursor — clear so next call re-bootstraps fresh.
-                            anyStale = true;
-                            _engineFeedTokens[j.tokenKey] = null;
-                        } else if (!firstErr) {
-                            firstErr = em;
-                        }
+                if (needsBootstrap.length) {
+                    var bootFrom = nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000;
+                    try {
+                        await _fetchStatusDataForDevices(needsBootstrap, bootFrom, nowMs);
+                    } catch (bootErr) {
+                        showErrorBanner('Engine-watch bootstrap failed: ' +
+                            (bootErr && bootErr.message ? bootErr.message : 'unknown error'),
+                            { autoDismissMs: 8000 });
                     }
                 }
-                _persistEngineFeedTokens();
-                _engineLastPollMs = Date.now();
-                if (anyStale) {
-                    _engineBootstrapped = false;
-                    try { localStorage.removeItem(IGNITION_PERSIST_KEY); } catch (e) {}
-                    showErrorBanner('Engine-watch feed cursor was stale; will re-seed on next tick.',
-                        { autoDismissMs: 6000 });
-                } else if (firstErr) {
-                    showErrorBanner('Engine-watch ignition feed failed: ' + firstErr,
-                        { autoDismissMs: 8000 });
+                if (deltaIds.length && deltaFrom < nowMs) {
+                    try {
+                        await _fetchStatusDataForDevices(deltaIds, deltaFrom, nowMs);
+                    } catch (deltaErr) {
+                        showErrorBanner('Engine-watch delta failed: ' +
+                            (deltaErr && deltaErr.message ? deltaErr.message : 'unknown error'),
+                            { autoDismissMs: 8000 });
+                    }
                 }
+                _engineLastBootstrapMs = nowMs;
             } catch (err) {
-                showErrorBanner('Engine-watch ignition feed failed: ' +
+                showErrorBanner('Engine-watch failed: ' +
                     (err && err.message ? err.message : 'unknown error'),
                     { autoDismissMs: 8000 });
             }
             return _engineState;
         })().finally(function () {
-            if (_engineFeedInflight === run) _engineFeedInflight = null;
+            if (_engineInflight === run) _engineInflight = null;
         });
-        _engineFeedInflight = run;
+        _engineInflight = run;
         return run;
-    }
-
-    function _buildEngineFeedQuery(diagnosticId, fromVersion) {
-        var q = {
-            typeName: 'StatusData',
-            search: { diagnosticSearch: { id: diagnosticId } },
-            resultsLimit: 50000
-        };
-        if (fromVersion) q.fromVersion = fromVersion;
-        return q;
-    }
-
-    function _absorbEngineFeedResult(result, targetMap, tokenKey) {
-        var records = (result && result.data) || [];
-        for (var i = 0; i < records.length; i++) _mergeEngineRecord(targetMap, records[i]);
-        if (result && result.toVersion) _engineFeedTokens[tokenKey] = result.toVersion;
     }
 
     function anyRouteUsesEngineWatch(routes) {
