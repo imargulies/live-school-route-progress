@@ -5551,7 +5551,7 @@
                         ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
                         : '';
                     var countParts = onN.length + ' on · ' + offN.length + ' off';
-                    if (unkN.length) countParts += ' · ' + unkN.length + ' ?';
+                    if (unkN.length) countParts += ' · ' + unkN.length + ' unavailable';
                     var totalSuffix = ' <span class="rpEngineCountChip">' + countParts + '</span>';
                     var engineParts = '';
                     if (onN.length) {
@@ -5565,11 +5565,11 @@
                             escapeHtml(offN.join(', ')) + '</span></span>';
                     }
                     if (unkN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition or RPM data, or no recent GPS — engine state cannot be determined">' +
-                            engineUnknownIconSvg() + '<span class="rpEngineWord">?</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
+                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition or RPM data reported by the device, or no recent GPS — engine state cannot be determined">' +
+                            engineUnknownIconSvg() + '<span class="rpEngineWord">UNAVAILABLE</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(unkN.join(', ')) + '</span></span>';
                     }
-                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="Engine ON = ignition on at the engine zone (about to go). OFF = ignition off OR vehicle not at the zone. ? = no ignition or position data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
+                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="ON = ignition on at the engine zone (about to go). OFF = ignition off OR vehicle not at the zone. Unavailable = no ignition or position data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
                 }
             }
             rows[i].innerHTML = html;
