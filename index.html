@@ -4843,7 +4843,7 @@
     //               defend the green badge).
     //   'off'     = ignition known to be off, OR ignition on but vehicle is
     //               outside the engine zone (already left / not at depot).
-    //   'unknown' = no ignition/RPM data, no GPS yet, missing zone polygon,
+    //   'unknown' = no ignition data, no GPS yet, missing zone polygon,
     //               or the ON claim is too stale to verify.
     // Driver-mode rows pass the full set of devices the driver might be on;
     // vehicle-mode rows pass a single-element array.
@@ -5524,7 +5524,7 @@
                             escapeHtml(offN.join(', ')) + '</span></span>';
                     }
                     if (unkN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition or RPM data reported by the device, or no recent GPS — engine state cannot be determined">' +
+                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition data reported by the device, or no recent GPS — engine state cannot be determined">' +
                             engineUnknownIconSvg() + '<span class="rpEngineWord">UNAVAILABLE</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(unkN.join(', ')) + '</span></span>';
                     }
