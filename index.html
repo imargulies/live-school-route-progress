@@ -4128,10 +4128,17 @@
         if (!presence || !dateStr || !routeUid || !aId) return;
         var k = _stickyKey(dateStr, routeUid, aId);
         var prev = _stickyEvents[k] || {};
+        // Capture the first time we see arrivedAtMs / departedAtMs and lock
+        // to it. Subsequent recomputations (overlap-adjustment shift,
+        // trip-augmentation evidence catching up, sparser-log delta) might
+        // land on a slightly different timestamp — but the user has
+        // already seen "Arrived 8:45" and we don't want that number
+        // jumping around. The "X min ago" elapsed text still advances
+        // naturally because it's recomputed from the locked timestamp.
         if (presence.arrivedAtMs && !prev.arrivedAtMs) prev.arrivedAtMs = presence.arrivedAtMs;
         if (presence.departedAtMs && !prev.departedAtMs) prev.departedAtMs = presence.departedAtMs;
-        if (!presence.arrivedAtMs && prev.arrivedAtMs) presence.arrivedAtMs = prev.arrivedAtMs;
-        if (!presence.departedAtMs && prev.departedAtMs) presence.departedAtMs = prev.departedAtMs;
+        if (prev.arrivedAtMs) presence.arrivedAtMs = prev.arrivedAtMs;
+        if (prev.departedAtMs) presence.departedAtMs = prev.departedAtMs;
         _stickyEvents[k] = prev;
     }
     function resetStickyEvents() { _stickyEvents = {}; }
