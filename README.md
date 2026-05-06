@@ -47,10 +47,12 @@ Note that the bus doesn't have to be outside *at route start*. A bus that starts
 ### Rule 2 — Bus drove into the zone during the window
 We need at least one in-zone GPS log following an out-of-zone log during the window — i.e., we have to see the actual crossing inward.
 
-### Rule 3 — Bus stopped for at least 30 seconds
-Driving through the parking lot without stopping is not an arrival. The bus must be inside the zone AND moving at 3 km/h or less for a continuous 30-second stretch. This is the same speed threshold that powers the Engine "Stopped" badge. If the bus speeds up mid-stop, the clock resets.
+### Rule 3 — Bus stayed inside the zone for at least 60 seconds
+A drive-through (delivery truck cutting across the school parking lot) is not an arrival. The bus must be **inside the zone continuously for 60 seconds** — moving or stopped, doesn't matter. If it leaves the zone before the 60-second mark, the clock resets.
 
-When all three hold, **Arrived At** is set to the moment the bus first became stopped in the zone (the start of the 30-second dwell), not the moment the 30 seconds expired.
+The 60-second gate (instead of "stopped for 30 seconds") is what makes **Arrived At** reflect the moment the bus actually entered the school zone, not the moment it eventually parked. Schools with large grounds and long parking-lot loops would otherwise show arrivals 5–20 minutes after the bus actually got there.
+
+When all three hold, **Arrived At** is set to the moment the bus first crossed into the zone (the start of the 60-second in-zone dwell), not the moment the 60 seconds expired.
 
 ---
 

@@ -4480,14 +4480,20 @@
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
         var zoneSec = 0;
         var prevMs = null, prevIn = false, haveSeenIn = false, haveSeenOut = false;
-        // Dwell thresholds: bus must linger ~30s to count as truly arrived
-        // (otherwise a drive-through registers) or truly departed (otherwise
-        // a one-ping GPS wobble at the zone edge locks in a bogus time).
+        // Dwell thresholds.
+        //   Departure: bus must stay continuously OUT for 30s — rejects a
+        //   one-ping GPS wobble at the zone edge.
+        //   Arrival:   bus must stay continuously IN for 60s (moving or
+        //   stopped). For school zones with large polygons, the bus often
+        //   crosses the boundary and then drives a parking-lot loop for
+        //   several minutes before parking; the timestamp the user wants
+        //   is the boundary cross, not the eventual park. 60s is enough
+        //   to reject drive-throughs (typically <60s end-to-end through
+        //   a property) without waiting for the bus to come to rest.
         var MIN_OUT_DWELL_MS = 30000;
-        var MIN_STOP_DWELL_MS = 30000;
-        var STOP_SPEED_KPH = 3; // same threshold used by the Engine "Stopped" badge
+        var MIN_IN_ZONE_DWELL_MS = 60000;
         var pendingDepartMs = null;   // first out-log after being in-zone; commit once it persists 30s
-        var stopStartMs = null;       // first in-zone log where the bus was stopped; commit arrival once it persists 30s
+        var inZoneStartMs = null;     // first in-zone log after seeing outside; commit arrival once it persists 60s
         // Captures the zone state at / just before route start (windowFromMs)
         // via the last pre-window log as a proxy. Used by the departure gate
         // as "was the bus inside the zone when the route opened" — a bus
@@ -4509,33 +4515,30 @@
             if (t > windowToMs) continue;
             out.hasData = true;
             var inZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
-            var spd = (typeof lg.speed === 'number') ? lg.speed : null;
             if (firstInZ === null) firstInZ = (preWindowInZ !== null) ? preWindowInZ : inZ;
             if (inZ) {
                 out.everInZone = true;
                 out.lastInZoneMs = t;
                 haveSeenIn = true;
                 pendingDepartMs = null; // they came back, so any tentative departure is void
-                var stopped = (spd === null) || spd <= STOP_SPEED_KPH;
-                if (stopped) {
-                    if (stopStartMs === null) stopStartMs = t;
-                    // Arrival: we must have seen the bus OUTSIDE the zone at
-                    // some point during the window (so it actually drove in)
-                    // AND it has now stayed stopped inside for >= 30s. A bus
-                    // parked at school all day with no out-observation never
-                    // "arrives"; a bus that was inside at route start, left,
-                    // and came back does — the mid-window out-observation
-                    // counts.
-                    if (haveSeenOut && out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
-                        out.arrivedAtMs = stopStartMs;
+                // Arrival: bus must have been observed OUTSIDE the zone at
+                // some point during the window (so it actually drove in —
+                // a bus parked at school all morning never "arrives") AND
+                // has now been continuously inside the zone for >= 60s.
+                // The 60s gate rejects drive-throughs without requiring
+                // the bus to come to a full stop, which lets us commit
+                // the boundary-crossing time as the arrival even when the
+                // bus does a long parking-lot loop before parking.
+                if (haveSeenOut) {
+                    if (inZoneStartMs === null) inZoneStartMs = t;
+                    if (out.arrivedAtMs === null && (t - inZoneStartMs) >= MIN_IN_ZONE_DWELL_MS) {
+                        out.arrivedAtMs = inZoneStartMs;
                     }
-                } else {
-                    stopStartMs = null; // still moving — not parked yet
                 }
             } else {
                 haveSeenOut = true;
+                inZoneStartMs = null; // bus left — any pending in-zone dwell is void
                 if (haveSeenIn || firstInZ === true) {
-                    stopStartMs = null;
                     if (pendingDepartMs === null) pendingDepartMs = t;
                     // Departure counts as soon as the bus has been observed
                     // IN the zone at any point during the window (or was in
