@@ -4785,131 +4785,16 @@
         return Object.keys(set);
     }
 
-    // Augment GPS-based presence with Trip stop/start points. Catches cases where raw
-    // LogRecords are sparse, unavailable, or when the vehicle is parked at the zone from
-    // a prior trip (stop before windowFrom, nextTripStart after windowFrom).
+    // Trip data is no longer consulted for arrival/departure events — those
+    // come exclusively from the raw LogRecord stream in
+    // computePresenceFromLogs. Trips were a noisy signal (engine cycles in
+    // place produced false arrivals/departures) and the log-based detector
+    // is accurate enough on the GO devices we run against.
     //
-    // Because a vehicle can have many drivers and a driver can use many vehicles, in
-    // driver mode we require BOTH trip.driver.id === driverIdFilter AND
-    // trip.device.id ∈ deviceIdSet, so presence is attributed to the correct driver.
-    // In vehicle mode driverIdFilter is null and only the device match is required.
-    function augmentPresenceWithTrips(presence, trips, driverIdFilter, deviceIdSet, zonePoints, windowFromMs, windowToMs) {
-        if (!trips || !trips.length || !zonePoints || !zonePoints.length) return presence;
-        for (var i = 0; i < trips.length; i++) {
-            var tr = trips[i];
-            if (!tr.device || !tr.device.id || !deviceIdSet[tr.device.id]) continue;
-            if (driverIdFilter && (!tr.driver || tr.driver.id !== driverIdFilter)) continue;
-
-            // Trip stop point: vehicle is parked there from tr.stop until tr.nextTripStart (or ∞)
-            if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
-                var stopMs = tr.stop ? new Date(tr.stop).getTime() : null;
-                var nextStartMs = tr.nextTripStart ? new Date(tr.nextTripStart).getTime() : Infinity;
-                if (stopMs !== null && stopMs <= windowToMs && nextStartMs >= windowFromMs) {
-                    if (pointInPolygon(tr.stopPoint.y, tr.stopPoint.x, zonePoints)) {
-                        presence.hasData = true;
-                        presence.everInZone = true;
-                        if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
-                        if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
-                        // Arrival: only record when the trip itself proves the
-                        // bus came in from outside — i.e. its startPoint is
-                        // outside the zone polygon (or unknown, in which case
-                        // we fall back to the log-based haveSeenOut signal,
-                        // captured indirectly via presence.everInZone +
-                        // departure tracking). A trip whose startPoint AND
-                        // stopPoint are both inside the zone (engine cycled
-                        // in place — driver started, idled, turned key off)
-                        // is not a real arrival and used to falsely commit
-                        // arrivedAtMs on the second of two overlapping
-                        // routes. We also keep the original window guard:
-                        // if stopMs is before windowFromMs, the bus was
-                        // already parked there from earlier and never
-                        // 'arrived' during this window.
-                        if (stopMs >= windowFromMs && stopMs <= windowToMs) {
-                            var tripCameInFromOutside = false;
-                            if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
-                                if (!pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
-                                    tripCameInFromOutside = true;
-                                }
-                            }
-                            if (tripCameInFromOutside) {
-                                if (presence.arrivedAtMs === null || stopMs < presence.arrivedAtMs) {
-                                    presence.arrivedAtMs = stopMs;
-                                }
-                            }
-                        }
-                        // Departure: only fill if the log-based path didn't
-                        // already set one, AND we have positive evidence the
-                        // bus actually left the zone. nextTripStart is just
-                        // Geotab's next engine-on time — a bus that warms up
-                        // and turns off without leaving still produces a
-                        // nextTripStart, which used to read as a false
-                        // "Departed". Two sources of evidence we accept:
-                        //   1. The next trip's stopPoint is outside the zone
-                        //      (definitive — the bus drove somewhere else).
-                        //   2. log-based presence shows the bus was in the
-                        //      zone and is now outside (the everInZone &
-                        //      !isCurrentlyInZone fallback already used by
-                        //      goodDir).
-                        if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
-                            if (presence.departedAtMs === null) {
-                                var nextTripLeftZone = false;
-                                for (var ni = 0; ni < trips.length; ni++) {
-                                    var ntr = trips[ni];
-                                    if (!ntr || !ntr.start) continue;
-                                    if (new Date(ntr.start).getTime() !== nextStartMs) continue;
-                                    if (driverIdFilter && (!ntr.driver || ntr.driver.id !== driverIdFilter)) continue;
-                                    if (!ntr.device || !ntr.device.id || !deviceIdSet[ntr.device.id]) continue;
-                                    if (ntr.stopPoint && typeof ntr.stopPoint.x === 'number' && typeof ntr.stopPoint.y === 'number') {
-                                        if (!pointInPolygon(ntr.stopPoint.y, ntr.stopPoint.x, zonePoints)) {
-                                            nextTripLeftZone = true;
-                                        }
-                                    }
-                                    break;
-                                }
-                                var logsSayLeft = presenceShowsSustainedDeparture(presence);
-                                if (nextTripLeftZone || logsSayLeft) {
-                                    presence.departedAtMs = nextStartMs;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // Trip start point: vehicle was there at the moment the trip began, then drove off.
-            // We deliberately don't set arrivedAtMs here — we don't actually know when the
-            // bus arrived, only that it was parked when the engine started. Guessing
-            // windowFromMs produced misleading early arrivals. departedAtMs is only filled
-            // as a fallback (engine-on is not the same as physically leaving the zone —
-            // buses can idle inside the zone for minutes after the key is turned). The
-            // log-based crossing time is authoritative; we only fill when logs missed it.
-            if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
-                var startMs2 = tr.start ? new Date(tr.start).getTime() : null;
-                if (startMs2 !== null && startMs2 >= windowFromMs && startMs2 <= windowToMs) {
-                    if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
-                        presence.hasData = true;
-                        presence.everInZone = true;
-                        // Same guard as the stop-point branch above: only
-                        // credit a trip-based departure when we have evidence
-                        // the bus actually left the zone. A trip whose
-                        // startPoint is inside the zone but whose stopPoint
-                        // is also inside it (engine warm-up, idle, off) is
-                        // not a departure.
-                        if (presence.departedAtMs === null) {
-                            var thisTripLeftZone = false;
-                            if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
-                                if (!pointInPolygon(tr.stopPoint.y, tr.stopPoint.x, zonePoints)) {
-                                    thisTripLeftZone = true;
-                                }
-                            }
-                            var logsSayLeft2 = presenceShowsSustainedDeparture(presence);
-                            if (thisTripLeftZone || logsSayLeft2) {
-                                presence.departedAtMs = startMs2;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // The function is kept as a no-op stub so its existing call sites
+    // continue to compile; it can be removed entirely on a future cleanup
+    // pass.
+    function augmentPresenceWithTrips(presence /*, trips, driverIdFilter, deviceIdSet, zonePoints, windowFromMs, windowToMs */) {
         return presence;
     }
 
