@@ -4664,6 +4664,7 @@
         var MIN_IN_ZONE_DWELL_MS = 60000;
         var pendingDepartMs = null;   // first out-log after being in-zone; commit once it persists 30s
         var inZoneStartMs = null;     // first in-zone log after seeing outside; commit arrival once it persists 60s
+        var sustainedOutMs = null;    // first out-log of current out-streak; haveSeenOut flips only when this persists 30s (rejects a single GPS wobble at the zone edge)
         // Captures the zone state at / just before route start (windowFromMs)
         // via the last pre-window log as a proxy. Used by the departure gate
         // as "was the bus inside the zone when the route opened" — a bus
@@ -4686,14 +4687,20 @@
             out.hasData = true;
             var inZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
             if (firstInZ === null) firstInZ = (preWindowInZ !== null) ? preWindowInZ : inZ;
+            // If the bus was outside the zone in the last log just before the
+            // route window opened, that's strong evidence the bus came in
+            // from outside — flip haveSeenOut on the very first iteration.
+            if (!haveSeenOut && preWindowInZ === false) haveSeenOut = true;
             if (inZ) {
                 out.everInZone = true;
                 out.lastInZoneMs = t;
                 haveSeenIn = true;
                 pendingDepartMs = null; // they came back, so any tentative departure is void
-                // Arrival: bus must have been observed OUTSIDE the zone at
-                // some point during the window (so it actually drove in —
-                // a bus parked at school all morning never "arrives") AND
+                sustainedOutMs = null;  // the out-streak is broken — start over next time
+                // Arrival: bus must have been observed OUTSIDE the zone (with a
+                // sustained 30s out-of-zone observation, not a single wobble
+                // ping) at some point during the window (so it actually drove
+                // in — a bus parked at school all morning never "arrives") AND
                 // has now been continuously inside the zone for >= 60s.
                 // The 60s gate rejects drive-throughs without requiring
                 // the bus to come to a full stop, which lets us commit
@@ -4706,8 +4713,16 @@
                     }
                 }
             } else {
-                haveSeenOut = true;
                 inZoneStartMs = null; // bus left — any pending in-zone dwell is void
+                // haveSeenOut flips only after the bus has been continuously
+                // outside for MIN_OUT_DWELL_MS — one wobble ping at the zone
+                // boundary doesn't count. Without this, a parked bus whose
+                // GPS jitters across the polygon edge for one log and then
+                // settles back inside would falsely qualify a subsequent
+                // 60s in-zone period as a fresh "arrival" (matters most on
+                // the recomputed window of an overlapping later route).
+                if (sustainedOutMs === null) sustainedOutMs = t;
+                if (!haveSeenOut && (t - sustainedOutMs) >= MIN_OUT_DWELL_MS) haveSeenOut = true;
                 if (haveSeenIn || firstInZ === true) {
                     if (pendingDepartMs === null) pendingDepartMs = t;
                     // Departure counts as soon as the bus has been observed
@@ -4795,16 +4810,31 @@
                         presence.everInZone = true;
                         if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
                         if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
-                        // Arrival: only record if the stop itself landed INSIDE
-                        // the window — meaning the vehicle actively drove in and
-                        // parked during the window. If stopMs is before
-                        // windowFromMs, the bus was already parked there from
-                        // earlier and never 'arrived' during this window, so we
-                        // skip setting arrivedAtMs (matches the haveSeenOut
-                        // gate on the log-based path).
+                        // Arrival: only record when the trip itself proves the
+                        // bus came in from outside — i.e. its startPoint is
+                        // outside the zone polygon (or unknown, in which case
+                        // we fall back to the log-based haveSeenOut signal,
+                        // captured indirectly via presence.everInZone +
+                        // departure tracking). A trip whose startPoint AND
+                        // stopPoint are both inside the zone (engine cycled
+                        // in place — driver started, idled, turned key off)
+                        // is not a real arrival and used to falsely commit
+                        // arrivedAtMs on the second of two overlapping
+                        // routes. We also keep the original window guard:
+                        // if stopMs is before windowFromMs, the bus was
+                        // already parked there from earlier and never
+                        // 'arrived' during this window.
                         if (stopMs >= windowFromMs && stopMs <= windowToMs) {
-                            if (presence.arrivedAtMs === null || stopMs < presence.arrivedAtMs) {
-                                presence.arrivedAtMs = stopMs;
+                            var tripCameInFromOutside = false;
+                            if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
+                                if (!pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
+                                    tripCameInFromOutside = true;
+                                }
+                            }
+                            if (tripCameInFromOutside) {
+                                if (presence.arrivedAtMs === null || stopMs < presence.arrivedAtMs) {
+                                    presence.arrivedAtMs = stopMs;
+                                }
                             }
                         }
                         // Departure: only fill if the log-based path didn't
