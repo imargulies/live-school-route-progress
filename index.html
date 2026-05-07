@@ -4559,7 +4559,7 @@
             prevMs = t; prevIn = inZ;
             out.lastLat = lg.latitude;
             out.lastLng = lg.longitude;
-            out.lastSpeed = spd;
+            out.lastSpeed = (typeof lg.speed === 'number') ? lg.speed : null;
             out.lastLogMs = t;
             out.isCurrentlyInZone = inZ;
         }
