@@ -6667,18 +6667,25 @@
 
     // Compact 60x14 SVG sparkline of a route's last-N on-time rates.
     // Empty placeholder when no data yet (light dotted track).
-    // Placeholder shown while real-data sparkline is still loading. A muted,
-    // gently animated mini line-chart icon — clearly "trend" iconography
-    // (line + dots + tiny baseline bars) so the user can tell the row will
-    // grow a real graph once data arrives. Keeps the same 60x14 footprint
-    // as the rendered sparkline so layout doesn't shift on swap.
+    // Placeholder shown while real-data sparkline is still loading. Muted
+    // mini line-chart icon (axis hint + baseline ticks + upward trend
+    // line + dots) so the user can tell the row will grow a real graph
+    // once data arrives. Two layered animations:
+    //   1. The trend line "draws itself" left-to-right via stroke-dashoffset,
+    //      then resets — subtle "graph is being plotted" hint.
+    //   2. The trailing dot pulses gently to draw the eye to the leading
+    //      edge of the draw.
+    // Same 60x14 footprint as the rendered sparkline so layout doesn't
+    // shift on swap.
     function _renderInlineSparklineLoadingSvg(w, h) {
-        ensureLivePillKeyframes();
+        ensureSparklineLoadingKeyframes();
         var ax = 'stroke="#cbd5e1" stroke-width="0.8" stroke-linecap="round"';
-        var line = 'fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
         var dot = 'fill="#94a3b8"';
+        // Length of the polyline used for the stroke-dasharray animation;
+        // a hair longer than the actual path so dashoffset wraps cleanly.
+        var pathLen = 70;
         return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" ' +
-            'style="display:block;opacity:0.85;animation:rpRowJustArrived 2.4s ease-in-out infinite;">' +
+            'style="display:block;">' +
             // tiny axis hint
             '<line x1="2" y1="' + (h - 1.5) + '" x2="' + (w - 2) + '" y2="' + (h - 1.5) + '" ' + ax + '/>' +
             // 4 short baseline ticks (suggests "bars are coming")
@@ -6686,14 +6693,41 @@
             '<line x1="22" y1="' + (h - 1.5) + '" x2="22" y2="' + (h - 5) + '" ' + ax + '/>' +
             '<line x1="34" y1="' + (h - 1.5) + '" x2="34" y2="' + (h - 6) + '" ' + ax + '/>' +
             '<line x1="46" y1="' + (h - 1.5) + '" x2="46" y2="' + (h - 7.5) + '" ' + ax + '/>' +
-            // upward trend line + dots
-            '<polyline points="6,11 18,8.5 30,7 42,5 54,3.5" ' + line + '/>' +
+            // upward trend line — animated draw
+            '<polyline class="rpSparklineLoadingLine" points="6,11 18,8.5 30,7 42,5 54,3.5" ' +
+                'fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" ' +
+                'stroke-dasharray="' + pathLen + '" stroke-dashoffset="' + pathLen + '"/>' +
+            // Static dots
             '<circle cx="6"  cy="11"  r="1.1" ' + dot + '/>' +
             '<circle cx="18" cy="8.5" r="1.1" ' + dot + '/>' +
             '<circle cx="30" cy="7"   r="1.1" ' + dot + '/>' +
             '<circle cx="42" cy="5"   r="1.1" ' + dot + '/>' +
-            '<circle cx="54" cy="3.5" r="1.4" ' + dot + '/>' +
+            // Leading-edge dot pulses subtly
+            '<circle class="rpSparklineLoadingHead" cx="54" cy="3.5" r="1.4" ' + dot + '/>' +
             '</svg>';
+    }
+
+    // Inject keyframes for the loading-state sparkline once.
+    var _sparklineLoadingCssInjected = false;
+    function ensureSparklineLoadingKeyframes() {
+        if (_sparklineLoadingCssInjected) return;
+        var style = document.createElement('style');
+        style.textContent =
+            '@keyframes rpSparklineDraw { ' +
+                '0% { stroke-dashoffset: 70; opacity: 0.45; } ' +
+                '60% { stroke-dashoffset: 0; opacity: 0.9; } ' +
+                '90% { stroke-dashoffset: 0; opacity: 0.9; } ' +
+                '100% { stroke-dashoffset: 0; opacity: 0.45; }' +
+            '} ' +
+            '@keyframes rpSparklineHead { ' +
+                '0% { transform: scale(1); opacity: 0.55; } ' +
+                '50% { transform: scale(1.5); opacity: 1; } ' +
+                '100% { transform: scale(1); opacity: 0.55; }' +
+            '} ' +
+            '.rpSparklineLoadingLine { animation: rpSparklineDraw 2.2s ease-out infinite; } ' +
+            '.rpSparklineLoadingHead { animation: rpSparklineHead 2.2s ease-in-out infinite; transform-origin: 54px 3.5px; transform-box: fill-box; }';
+        document.head.appendChild(style);
+        _sparklineLoadingCssInjected = true;
     }
 
     function renderInlineSparklineSvg(values) {
