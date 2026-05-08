@@ -841,12 +841,30 @@
         }
         var statusEl = document.getElementById('rpAutoRefreshStatus');
         if (autoRefreshActive) {
-            statusEl.innerHTML = '<span class="rpLivePill" title="Auto-refresh on — data refreshing every 5s">' +
-                '<span class="rpLiveDot"></span>' +
-                '<span class="rpLiveLabel">LIVE</span>' +
+            // Structured layout — LIVE pill + circular-ring countdown.
+            // The countdown ring drains 1 second per second via a CSS
+            // transition on stroke-dashoffset, with the inner number kept
+            // in sync. We render once here; the per-second ticker only
+            // updates the ring offset and the number, never the whole
+            // statusEl, so the LIVE pill never flickers.
+            var ringR = 8;
+            var ringC = (2 * Math.PI * ringR).toFixed(2);
+            statusEl.innerHTML =
+                '<span class="rpLivePill" title="Auto-refresh on — data refreshing every 5s">' +
+                    '<span class="rpLiveDot"></span>' +
+                    '<span class="rpLiveLabel">LIVE</span>' +
                 '</span>' +
-                '<span class="rpLiveTick">refreshing every 5s</span>';
-            forceStyle(statusEl, { 'display': 'inline-flex', 'align-items': 'center', 'gap': '8px' });
+                '<span class="rpLiveCountdown" title="Seconds until the next live refresh">' +
+                    '<svg class="rpLiveCountdownRing" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">' +
+                        '<circle cx="11" cy="11" r="' + ringR + '" fill="none" stroke="#e5e7eb" stroke-width="2"/>' +
+                        '<circle class="rpLiveCountdownRingFill" cx="11" cy="11" r="' + ringR + '" fill="none" ' +
+                            'stroke="#28a745" stroke-width="2" stroke-linecap="round" ' +
+                            'stroke-dasharray="' + ringC + '" stroke-dashoffset="0" ' +
+                            'transform="rotate(-90 11 11)"/>' +
+                    '</svg>' +
+                    '<span class="rpLiveCountdownNum">5</span>' +
+                '</span>';
+            forceStyle(statusEl, { 'display': 'inline-flex', 'align-items': 'center', 'gap': '10px' });
             ensureLivePillKeyframes();
             var pill = statusEl.querySelector('.rpLivePill');
             if (pill) forceStyle(pill, {
@@ -864,8 +882,25 @@
                 'box-shadow': '0 0 0 0 rgba(255,255,255,0.85)',
                 'animation': 'rpLiveDotPulse 1.4s ease-out infinite'
             });
-            var tick = statusEl.querySelector('.rpLiveTick');
-            if (tick) forceStyle(tick, { 'font-size': '12px', 'font-weight': '500', 'color': '#6b7280' });
+            var cdWrap = statusEl.querySelector('.rpLiveCountdown');
+            if (cdWrap) forceStyle(cdWrap, {
+                'position': 'relative', 'display': 'inline-flex',
+                'align-items': 'center', 'justify-content': 'center',
+                'width': '22px', 'height': '22px'
+            });
+            var cdNum = statusEl.querySelector('.rpLiveCountdownNum');
+            if (cdNum) forceStyle(cdNum, {
+                'position': 'absolute', 'top': '0', 'left': '0',
+                'width': '100%', 'height': '100%',
+                'display': 'flex', 'align-items': 'center', 'justify-content': 'center',
+                'font-size': '11px', 'font-weight': '800', 'color': '#15803d',
+                'font-variant-numeric': 'tabular-nums'
+            });
+            var cdRingFill = statusEl.querySelector('.rpLiveCountdownRingFill');
+            if (cdRingFill) cdRingFill.style.setProperty('transition', 'stroke-dashoffset 0.95s linear, stroke 0.2s ease', 'important');
+            // Initialize the ring + number for whatever the current
+            // countdown value is, so we don't flash a stale "5" on click.
+            _updateLiveCountdown(typeof autoRefreshCountdown === 'number' ? autoRefreshCountdown : 5);
         } else {
             var now2 = new Date();
             if (now2.getHours() >= 20) {
@@ -874,6 +909,33 @@
             } else {
                 statusEl.textContent = '';
             }
+        }
+    }
+
+    // Update only the countdown number + ring drain — never touch the
+    // surrounding LIVE pill HTML. seconds=0 means "refreshing now" (ring
+    // empty, number replaced with a tiny spinner cue).
+    function _updateLiveCountdown(seconds) {
+        var statusEl = document.getElementById('rpAutoRefreshStatus');
+        if (!statusEl) return;
+        var ring = statusEl.querySelector('.rpLiveCountdownRingFill');
+        var num = statusEl.querySelector('.rpLiveCountdownNum');
+        if (!ring || !num) return;
+        var max = 5;
+        var s = Math.max(0, Math.min(max, seconds));
+        var r = parseFloat(ring.getAttribute('r')) || 8;
+        var c = 2 * Math.PI * r;
+        // dashoffset = c * (1 - s/max)  → s=5 ring full; s=0 ring empty.
+        var offset = c * (1 - (s / max));
+        ring.style.setProperty('stroke-dashoffset', offset.toFixed(2), 'important');
+        if (s <= 0) {
+            ring.style.setProperty('stroke', '#e67e22', 'important');
+            num.textContent = '…';
+            num.style.setProperty('color', '#9a3412', 'important');
+        } else {
+            ring.style.setProperty('stroke', '#28a745', 'important');
+            num.textContent = String(s);
+            num.style.setProperty('color', '#15803d', 'important');
         }
     }
 
@@ -2368,17 +2430,11 @@
         renderProgress();
         autoRefreshCountdown = 5;
 
-        // Countdown ticker every second
+        // Countdown ticker every second — only mutates the ring + number,
+        // never the LIVE pill markup, so the pill keeps pulsing smoothly.
         countdownInterval = setInterval(function () {
             autoRefreshCountdown--;
-            var statusEl = document.getElementById('rpAutoRefreshStatus');
-            if (autoRefreshCountdown > 0) {
-                statusEl.textContent = 'Live - refreshing in ' + autoRefreshCountdown + 's';
-                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#28a745' });
-            } else {
-                statusEl.textContent = 'Live - updating...';
-                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#e67e22' });
-            }
+            _updateLiveCountdown(autoRefreshCountdown);
         }, 1000);
 
         // Data refresh every 5 seconds
