@@ -6667,13 +6667,38 @@
 
     // Compact 60x14 SVG sparkline of a route's last-N on-time rates.
     // Empty placeholder when no data yet (light dotted track).
+    // Placeholder shown while real-data sparkline is still loading. A muted,
+    // gently animated mini line-chart icon — clearly "trend" iconography
+    // (line + dots + tiny baseline bars) so the user can tell the row will
+    // grow a real graph once data arrives. Keeps the same 60x14 footprint
+    // as the rendered sparkline so layout doesn't shift on swap.
+    function _renderInlineSparklineLoadingSvg(w, h) {
+        ensureLivePillKeyframes();
+        var ax = 'stroke="#cbd5e1" stroke-width="0.8" stroke-linecap="round"';
+        var line = 'fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
+        var dot = 'fill="#94a3b8"';
+        return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" ' +
+            'style="display:block;opacity:0.85;animation:rpRowJustArrived 2.4s ease-in-out infinite;">' +
+            // tiny axis hint
+            '<line x1="2" y1="' + (h - 1.5) + '" x2="' + (w - 2) + '" y2="' + (h - 1.5) + '" ' + ax + '/>' +
+            // 4 short baseline ticks (suggests "bars are coming")
+            '<line x1="10" y1="' + (h - 1.5) + '" x2="10" y2="' + (h - 4) + '" ' + ax + '/>' +
+            '<line x1="22" y1="' + (h - 1.5) + '" x2="22" y2="' + (h - 5) + '" ' + ax + '/>' +
+            '<line x1="34" y1="' + (h - 1.5) + '" x2="34" y2="' + (h - 6) + '" ' + ax + '/>' +
+            '<line x1="46" y1="' + (h - 1.5) + '" x2="46" y2="' + (h - 7.5) + '" ' + ax + '/>' +
+            // upward trend line + dots
+            '<polyline points="6,11 18,8.5 30,7 42,5 54,3.5" ' + line + '/>' +
+            '<circle cx="6"  cy="11"  r="1.1" ' + dot + '/>' +
+            '<circle cx="18" cy="8.5" r="1.1" ' + dot + '/>' +
+            '<circle cx="30" cy="7"   r="1.1" ' + dot + '/>' +
+            '<circle cx="42" cy="5"   r="1.1" ' + dot + '/>' +
+            '<circle cx="54" cy="3.5" r="1.4" ' + dot + '/>' +
+            '</svg>';
+    }
+
     function renderInlineSparklineSvg(values) {
         var w = 60, h = 14, pad = 1;
-        if (!values || !values.length) {
-            return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
-                '<line x1="' + pad + '" y1="' + (h / 2) + '" x2="' + (w - pad) + '" y2="' + (h / 2) +
-                '" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/></svg>';
-        }
+        if (!values || !values.length) return _renderInlineSparklineLoadingSvg(w, h);
         var rates = [];
         for (var i = 0; i < values.length; i++) {
             var v = values[i];
@@ -6689,11 +6714,7 @@
             var y = pad + (1 - rates[j]) * (h - 2 * pad);
             pts.push([x, y]);
         }
-        if (!pts.length) {
-            return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
-                '<line x1="' + pad + '" y1="' + (h / 2) + '" x2="' + (w - pad) + '" y2="' + (h / 2) +
-                '" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/></svg>';
-        }
+        if (!pts.length) return _renderInlineSparklineLoadingSvg(w, h);
         var lastRate = rates[rates.length - 1];
         var lineColor = lastRate == null ? '#94a3b8' : (lastRate >= 0.85 ? '#10b981' : (lastRate >= 0.5 ? '#f59e0b' : '#ef4444'));
         var areaColor = lastRate == null ? 'rgba(148,163,184,0.18)' : (lastRate >= 0.85 ? 'rgba(16,185,129,0.18)' : (lastRate >= 0.5 ? 'rgba(245,158,11,0.18)' : 'rgba(239,68,68,0.18)'));
