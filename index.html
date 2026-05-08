@@ -2246,6 +2246,23 @@
         }
     }
 
+    // Chip-toggle progress refresh is deferred two animation frames so the
+    // chip's own active/inactive paint lands first; otherwise the heavy
+    // synchronous slice inside renderProgress blocks the paint and the
+    // user sees the click "stick" until the rerender finishes. Also
+    // coalesces rapid multi-clicks into a single renderProgress call.
+    var _chipRefreshPending = false;
+    function scheduleProgressRefreshAfterChipChange() {
+        if (_chipRefreshPending) return;
+        _chipRefreshPending = true;
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                _chipRefreshPending = false;
+                renderProgress();
+            });
+        });
+    }
+
     document.getElementById('rpRouteChips').addEventListener('click', function (e) {
         var chip = e.target.closest('.rpRouteChip');
         if (!chip) return;
@@ -2254,21 +2271,21 @@
         else selectedRouteChips[uid] = true;
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     document.getElementById('rpChipSelectAll').addEventListener('click', function () {
         for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     document.getElementById('rpChipDeselectAll').addEventListener('click', function () {
         selectedRouteChips = {};
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     var DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
