@@ -51,11 +51,26 @@
                     <span class="rpLbl">Tracking:</span>
                     <span id="rpDirInside" class="rpToggle rpToggleActive" title="Vehicles/drivers should be inside the zone (e.g. parked at school)">Arrived at Location</span>
                     <span id="rpDirOutside" class="rpToggle" title="Vehicles/drivers should have left the zone (e.g. out driving their route)">Departed from Location</span>
-                    <span id="rpDirEngine" class="rpToggle" title="Detect when the engine is first started while the vehicle is inside the zone (marks the start of a route)">Engine Started in Zone</span>
                 </div>
-                <div class="rpFormRow" id="rpDirEngineNoteRow">
+                <div class="rpFormRow">
+                    <span class="rpLbl" title="Optional. When enabled, the route card shows an engine ON/OFF badge for vehicles that haven't arrived/departed yet, so you can see who is about to go.">Engine Watch:</span>
+                    <label id="rpEngineWatchLbl" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                        <input type="checkbox" id="rpEngineWatchEnabled">
+                        <span style="font-size:13px;color:#333;">Show engine ON/OFF on the progress card</span>
+                    </label>
+                </div>
+                <div class="rpFormRow" id="rpEngineZoneRow" style="display:none;">
+                    <span class="rpLbl">Engine Zone:</span>
+                    <div id="rpEngineZoneSearchWrap">
+                        <input type="text" id="rpEngineZoneSearch" placeholder="Search and select a zone where the engine should start..." autocomplete="off">
+                        <div id="rpEngineZoneDropdown"></div>
+                        <input type="hidden" id="rpEngineZoneId" value="">
+                        <span id="rpEngineZoneSelected"></span>
+                    </div>
+                </div>
+                <div class="rpFormRow" id="rpEngineWatchNoteRow" style="display:none;">
                     <span class="rpLbl">&nbsp;</span>
-                    <span id="rpDirEngineNote" style="font-size:11px;color:#666;font-style:italic;">Engine-start routes mark the start of a route. They may overlap other routes and are treated independently.</span>
+                    <span style="font-size:11px;color:#666;font-style:italic;">For rows that have not yet arrived/departed, the card shows whether the engine has started inside this zone — useful to see who is about to go.</span>
                 </div>
                 <div class="rpFormRow">
                     <span class="rpLbl">Start Time:</span>
@@ -666,6 +681,23 @@
             'font-weight': '600', 'margin-left': '8px', 'cursor': 'pointer'
         });
 
+        // Engine-watch zone search (mirrors the main zone styling)
+        forceStyle(document.getElementById('rpEngineZoneSearchWrap'), {
+            'position': 'relative', 'display': 'inline-block'
+        });
+        forceStyle(document.getElementById('rpEngineZoneSearch'), { 'width': '300px' });
+        forceStyle(document.getElementById('rpEngineZoneDropdown'), {
+            'display': 'none', 'position': 'absolute', 'top': '100%', 'left': '0',
+            'width': '300px', 'max-height': '200px', 'overflow-y': 'auto',
+            'background': '#fff', 'border': '1px solid #ccc', 'border-radius': '0 0 4px 4px',
+            'box-shadow': '0 4px 12px rgba(0,0,0,0.15)', 'z-index': '200'
+        });
+        forceStyle(document.getElementById('rpEngineZoneSelected'), {
+            'display': 'none', 'padding': '4px 10px', 'background': '#fff3cd',
+            'border-radius': '4px', 'font-size': '13px', 'color': '#856404',
+            'font-weight': '600', 'margin-left': '8px', 'cursor': 'pointer'
+        });
+
         // Driver search
         forceStyle(document.getElementById('rpDriverSelectWrap'), {
             'position': 'relative', 'display': 'inline-block'
@@ -809,17 +841,123 @@
         }
         var statusEl = document.getElementById('rpAutoRefreshStatus');
         if (autoRefreshActive) {
-            statusEl.textContent = 'Live - refreshing every 5s';
-            forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#28a745' });
+            // LIVE pill + horizontal progress bar. The bar fills 0 → 100%
+            // and shifts colour green → yellow → red over each 5-second
+            // refresh cycle via a single CSS keyframe animation, so no
+            // per-second JS ticker is needed and the pill never flickers.
+            statusEl.innerHTML =
+                '<span class="rpLivePill" title="Auto-refresh on — data refreshing every 5s">' +
+                    '<span class="rpLiveDot"></span>' +
+                    '<span class="rpLiveLabel">LIVE</span>' +
+                '</span>' +
+                '<span class="rpLiveBarTrack" title="Time until the next live refresh">' +
+                    '<span class="rpLiveBarFill"></span>' +
+                '</span>';
+            forceStyle(statusEl, { 'display': 'inline-flex', 'align-items': 'center', 'gap': '10px' });
+            ensureLivePillKeyframes();
+            var pill = statusEl.querySelector('.rpLivePill');
+            if (pill) forceStyle(pill, {
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                'padding': '3px 10px 3px 9px', 'border-radius': '999px',
+                'background': 'linear-gradient(135deg,#dc2626 0%,#b91c1c 100%)',
+                'color': '#fff', 'font-size': '11px', 'font-weight': '800',
+                'letter-spacing': '0.6px',
+                'box-shadow': '0 1px 4px rgba(220,38,38,0.35)'
+            });
+            var dot = statusEl.querySelector('.rpLiveDot');
+            if (dot) forceStyle(dot, {
+                'display': 'inline-block', 'width': '8px', 'height': '8px',
+                'border-radius': '50%', 'background': '#fff',
+                'box-shadow': '0 0 0 0 rgba(255,255,255,0.85)',
+                'animation': 'rpLiveDotPulse 1.4s ease-out infinite'
+            });
+            var barTrack = statusEl.querySelector('.rpLiveBarTrack');
+            if (barTrack) forceStyle(barTrack, {
+                'position': 'relative', 'display': 'inline-block',
+                'width': '110px', 'height': '6px', 'border-radius': '3px',
+                'background': '#e5e7eb', 'overflow': 'hidden'
+            });
+            var barFill = statusEl.querySelector('.rpLiveBarFill');
+            if (barFill) forceStyle(barFill, {
+                'display': 'block', 'height': '100%', 'width': '0%',
+                'border-radius': '3px', 'background': '#28a745',
+                'animation': 'rpLiveBarFill 5s linear infinite'
+            });
         } else {
-            var now = new Date();
-            if (now.getHours() >= 20) {
+            var now2 = new Date();
+            if (now2.getHours() >= 20) {
                 statusEl.textContent = 'Auto-refresh stopped (after 8 PM)';
-                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#dc3545' });
+                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#dc3545', 'display': 'inline-block' });
             } else {
                 statusEl.textContent = '';
             }
         }
+    }
+
+
+    // Inline SVG icon for a status badge — small ✓/✕/⏱ glyph that goes
+    // before the status label. Returns an empty string for kinds we don't
+    // ice with an icon so the badge stays plain text.
+    function statusBadgeIconSvg(vStatusClass) {
+        var path;
+        if (vStatusClass === 'rpStCompleted') {
+            // checkmark
+            path = '<polyline points="5 12 9 16 17 7"/>';
+        } else if (vStatusClass === 'rpStMissed') {
+            // alert triangle dot
+            path = '<path d="M12 5l9 14H3z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/>';
+        } else if (vStatusClass === 'rpStProgress') {
+            // arrow forward
+            path = '<line x1="5" y1="12" x2="17" y2="12"/><polyline points="12 7 17 12 12 17"/>';
+        } else {
+            // clock — pending/waiting/no data
+            path = '<circle cx="12" cy="12" r="8"/><polyline points="12 8 12 12 15 14"/>';
+        }
+        return '<svg class="rpStatusBadgeIcon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            path + '</svg>';
+    }
+
+    var _livePillCssInjected = false;
+    function ensureLivePillKeyframes() {
+        if (_livePillCssInjected) return;
+        var style = document.createElement('style');
+        style.textContent =
+            '@keyframes rpLiveDotPulse { ' +
+                '0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.9); transform: scale(1); } ' +
+                '70% { box-shadow: 0 0 0 8px rgba(255,255,255,0); transform: scale(1.05); } ' +
+                '100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); transform: scale(1); }' +
+            '} ' +
+            '@keyframes rpActiveGlow { ' +
+                '0% { box-shadow: 0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.18); } ' +
+                '50% { box-shadow: 0 0 0 1px #28a745, 0 0 22px rgba(40,167,69,0.45); } ' +
+                '100% { box-shadow: 0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.18); }' +
+            '} ' +
+            '@keyframes rpScanline { ' +
+                '0% { transform: translateX(-100%); opacity: 0; } ' +
+                '15% { opacity: 0.9; } ' +
+                '85% { opacity: 0.9; } ' +
+                '100% { transform: translateX(100%); opacity: 0; }' +
+            '} ' +
+            '@keyframes rpRowJustArrived { ' +
+                '0% { background: rgba(40,167,69,0.30); } ' +
+                '60% { background: rgba(40,167,69,0.20); } ' +
+                '100% { background: transparent; }' +
+            '} ' +
+            '@keyframes rpEtaNowPulse { ' +
+                '0% { box-shadow: 0 0 0 0 rgba(0,120,212,0.55); } ' +
+                '70% { box-shadow: 0 0 0 7px rgba(0,120,212,0); } ' +
+                '100% { box-shadow: 0 0 0 0 rgba(0,120,212,0); }' +
+            '} ' +
+            // 5-second live-update countdown bar. Width fills 0 → 100%
+            // and the colour shifts green → yellow → red so the user can
+            // tell at a glance how soon the next refresh is firing.
+            '@keyframes rpLiveBarFill { ' +
+                '0%   { width: 0%;   background-color: #28a745; } ' +
+                '50%  { width: 50%;  background-color: #f1c40f; } ' +
+                '100% { width: 100%; background-color: #dc3545; }' +
+            '}';
+        document.head.appendChild(style);
+        _livePillCssInjected = true;
     }
 
     function styleModal() {
@@ -1246,7 +1384,7 @@
 
     // ========== DIRECTION TOGGLE ==========
     function applyDirectionToggleStyles() {
-        var map = { 'inside': 'rpDirInside', 'outside': 'rpDirOutside', 'engineStart': 'rpDirEngine' };
+        var map = { 'inside': 'rpDirInside', 'outside': 'rpDirOutside' };
         for (var k in map) {
             if (!map.hasOwnProperty(k)) continue;
             var el = document.getElementById(map[k]);
@@ -1256,9 +1394,6 @@
                 ? { 'background': '#0078d4', 'color': '#fff', 'border-color': '#0078d4' }
                 : { 'background': '#fff', 'color': '#666', 'border-color': '#ccc' });
         }
-        // The explanatory note only applies to the engine-start option.
-        var noteRow = document.getElementById('rpDirEngineNoteRow');
-        if (noteRow) forceStyle(noteRow, { 'display': selectedDirection === 'engineStart' ? '' : 'none' });
     }
     document.getElementById('rpDirInside').addEventListener('click', function () {
         selectedDirection = 'inside';
@@ -1268,9 +1403,58 @@
         selectedDirection = 'outside';
         applyDirectionToggleStyles();
     });
-    document.getElementById('rpDirEngine').addEventListener('click', function () {
-        selectedDirection = 'engineStart';
-        applyDirectionToggleStyles();
+
+    // ========== ENGINE WATCH (optional add-on) ==========
+    function applyEngineWatchUI() {
+        var enabled = !!document.getElementById('rpEngineWatchEnabled').checked;
+        forceStyle(document.getElementById('rpEngineZoneRow'), { 'display': enabled ? '' : 'none' });
+        forceStyle(document.getElementById('rpEngineWatchNoteRow'), { 'display': enabled ? '' : 'none' });
+    }
+    document.getElementById('rpEngineWatchEnabled').addEventListener('change', applyEngineWatchUI);
+
+    var rpEngineZoneSearchEl = document.getElementById('rpEngineZoneSearch');
+    var rpEngineZoneDropEl = document.getElementById('rpEngineZoneDropdown');
+    var rpEngineZoneSelEl = document.getElementById('rpEngineZoneSelected');
+
+    function showEngineZoneDropdown(q) {
+        var matches = cachedZones.filter(function (z) {
+            return !q || z.name.toLowerCase().indexOf(q) !== -1;
+        });
+        if (!matches.length) {
+            rpEngineZoneDropEl.innerHTML = '<div class="rpDropItem" style="color:#888;">No zones found</div>';
+        } else {
+            var html = '';
+            for (var i = 0; i < Math.min(matches.length, 50); i++) {
+                html += '<div class="rpDropItem" data-zone-id="' + matches[i].id + '" data-zone-name="' + escapeHtml(matches[i].name) + '">' + escapeHtml(matches[i].name) + '</div>';
+            }
+            rpEngineZoneDropEl.innerHTML = html;
+        }
+        forceStyle(rpEngineZoneDropEl, { 'display': 'block' });
+        styleDropdownItems(rpEngineZoneDropEl);
+    }
+    rpEngineZoneSearchEl.addEventListener('input', function () { showEngineZoneDropdown(this.value.toLowerCase()); });
+    rpEngineZoneSearchEl.addEventListener('focus', function () { showEngineZoneDropdown(this.value.toLowerCase()); });
+    rpEngineZoneDropEl.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        var item = e.target.closest('.rpDropItem');
+        if (item && item.dataset.zoneId) {
+            selectEngineZone(item.dataset.zoneId, item.dataset.zoneName || '');
+        }
+    });
+    document.addEventListener('mousedown', function (e) {
+        if (!e.target.closest('#rpEngineZoneSearchWrap')) forceStyle(rpEngineZoneDropEl, { 'display': 'none' });
+    });
+    function selectEngineZone(id, name) {
+        document.getElementById('rpEngineZoneId').value = id;
+        rpEngineZoneSearchEl.value = '';
+        rpEngineZoneSelEl.textContent = name + ' ×';
+        forceStyle(rpEngineZoneSelEl, { 'display': 'inline-block' });
+        forceStyle(rpEngineZoneDropEl, { 'display': 'none' });
+    }
+    rpEngineZoneSelEl.addEventListener('click', function () {
+        document.getElementById('rpEngineZoneId').value = '';
+        rpEngineZoneSelEl.textContent = '';
+        forceStyle(rpEngineZoneSelEl, { 'display': 'none' });
     });
 
     // ========== TRACK BY TOGGLE ==========
@@ -1469,12 +1653,15 @@
 
             var _dirTip = r.direction === 'outside'
                 ? 'Should have left the zone'
-                : (r.direction === 'engineStart' ? 'Engine should start while inside the zone' : 'Should be at the zone');
+                : 'Should be at the zone';
+            var _engineWatchInline = (r.engineWatch && r.engineZoneName)
+                ? ' <span class="rpEngineWatchInline" title="Engine watch enabled — engine ON/OFF for this zone is shown on the progress card">+ engine: ' + escapeHtml(r.engineZoneName) + '</span>'
+                : '';
             html += '<tr>' +
                 '<td class="rptd">' + escapeHtml(r.name) + '</td>' +
                 '<td class="rptd">' + escapeHtml(r.zoneName || '') + '</td>' +
                 '<td class="rptd"><span class="rpDirBadge ' + dirBadgeClass(r.direction) + '" title="' + _dirTip + '">' +
-                    directionFriendlyLabel(r.direction) + '</span></td>' +
+                    directionFriendlyLabel(r.direction) + '</span>' + _engineWatchInline + '</td>' +
                 '<td class="rptd">' + formatWindow(r.startTime, r.endTime) +
                     (routeHasTarget(r) ? ' <span class="rpTargetInline" title="Target window">· target ' + formatTargetRange(r) + '</span>' : '') +
                     '</td>' +
@@ -1538,11 +1725,13 @@
                 'font-weight': '600', 'background': '#d1ecf1', 'color': '#0c5460'
             });
         }
-        var dirEng = document.querySelectorAll('.rpDirEng');
-        for (var i = 0; i < dirEng.length; i++) {
-            forceStyle(dirEng[i], {
-                'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px',
-                'font-weight': '600', 'background': '#fff3cd', 'color': '#856404'
+        var engineWatchInline = document.querySelectorAll('.rpEngineWatchInline');
+        for (var i = 0; i < engineWatchInline.length; i++) {
+            forceStyle(engineWatchInline[i], {
+                'display': 'inline-block', 'margin-left': '4px',
+                'padding': '2px 8px', 'border-radius': '10px',
+                'background': '#fff3cd', 'color': '#856404',
+                'font-size': '11px', 'font-weight': '600'
             });
         }
     }
@@ -1595,6 +1784,17 @@
         }
         if (!activeDays.length) { showStatus('routeStatus', 'Please select at least one active day.', 'error'); return; }
 
+        var engineWatchEnabled = !!document.getElementById('rpEngineWatchEnabled').checked;
+        var engineZoneId = document.getElementById('rpEngineZoneId').value;
+        var engineZoneName = '';
+        if (engineWatchEnabled) {
+            if (!engineZoneId) { showStatus('routeStatus', 'Please select an Engine Zone or disable Engine Watch.', 'error'); return; }
+            var engZone = cachedZones.find(function (z) { return z.id === engineZoneId; });
+            engineZoneName = engZone ? engZone.name : '';
+        } else {
+            engineZoneId = '';
+        }
+
         var routeData = {
             name: name, direction: selectedDirection,
             trackBy: selectedTrackBy,
@@ -1605,6 +1805,9 @@
             vehicleIds: selectedTrackBy === 'vehicle' ? vehicleIds : [],
             driverIds: selectedTrackBy === 'driver' ? driverIds : [],
             activeDays: activeDays,
+            engineWatch: engineWatchEnabled,
+            engineZoneId: engineZoneId,
+            engineZoneName: engineZoneName,
             _uid: editingRouteId || generateUid()
         };
 
@@ -1679,9 +1882,18 @@
         document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || '';
         document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
         syncTargetTimeBounds();
-        selectedDirection = r.direction || 'inside';
+        selectedDirection = (r.direction === 'inside' || r.direction === 'outside') ? r.direction : 'inside';
         selectedTrackBy = r.trackBy || 'vehicle';
         setTrackByUI(selectedTrackBy);
+        document.getElementById('rpEngineWatchEnabled').checked = !!r.engineWatch;
+        if (r.engineWatch && r.engineZoneId) {
+            selectEngineZone(r.engineZoneId, r.engineZoneName || '');
+        } else {
+            document.getElementById('rpEngineZoneId').value = '';
+            rpEngineZoneSelEl.textContent = '';
+            forceStyle(rpEngineZoneSelEl, { 'display': 'none' });
+        }
+        applyEngineWatchUI();
 
         selectedVehicles = {};
         if (r.vehicleIds) { for (var i = 0; i < r.vehicleIds.length; i++) selectedVehicles[r.vehicleIds[i]] = true; }
@@ -1720,9 +1932,18 @@
         document.getElementById('rpTargetTimeEnd').value = r.targetTimeEnd || '';
         document.getElementById('rpGraceMin').value = (r.graceMin != null ? r.graceMin : 0);
         syncTargetTimeBounds();
-        selectedDirection = r.direction || 'inside';
+        selectedDirection = (r.direction === 'inside' || r.direction === 'outside') ? r.direction : 'inside';
         selectedTrackBy = r.trackBy || 'vehicle';
         setTrackByUI(selectedTrackBy);
+        document.getElementById('rpEngineWatchEnabled').checked = !!r.engineWatch;
+        if (r.engineWatch && r.engineZoneId) {
+            selectEngineZone(r.engineZoneId, r.engineZoneName || '');
+        } else {
+            document.getElementById('rpEngineZoneId').value = '';
+            rpEngineZoneSelEl.textContent = '';
+            forceStyle(rpEngineZoneSelEl, { 'display': 'none' });
+        }
+        applyEngineWatchUI();
 
         selectedVehicles = {};
         if (r.vehicleIds) {
@@ -1786,6 +2007,13 @@
         for (var i = 0; i < dayChecks.length; i++) {
             dayChecks[i].checked = true;
         }
+        // Reset engine watch
+        document.getElementById('rpEngineWatchEnabled').checked = false;
+        document.getElementById('rpEngineZoneId').value = '';
+        document.getElementById('rpEngineZoneSearch').value = '';
+        rpEngineZoneSelEl.textContent = '';
+        forceStyle(rpEngineZoneSelEl, { 'display': 'none' });
+        applyEngineWatchUI();
         document.getElementById('rpFormTitle').textContent = 'Create New Route';
         document.getElementById('rpBtnSaveRoute').textContent = 'Save Route';
         applyDirectionToggleStyles();
@@ -2044,6 +2272,23 @@
         }
     }
 
+    // Chip-toggle progress refresh is deferred two animation frames so the
+    // chip's own active/inactive paint lands first; otherwise the heavy
+    // synchronous slice inside renderProgress blocks the paint and the
+    // user sees the click "stick" until the rerender finishes. Also
+    // coalesces rapid multi-clicks into a single renderProgress call.
+    var _chipRefreshPending = false;
+    function scheduleProgressRefreshAfterChipChange() {
+        if (_chipRefreshPending) return;
+        _chipRefreshPending = true;
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                _chipRefreshPending = false;
+                renderProgress();
+            });
+        });
+    }
+
     document.getElementById('rpRouteChips').addEventListener('click', function (e) {
         var chip = e.target.closest('.rpRouteChip');
         if (!chip) return;
@@ -2052,21 +2297,21 @@
         else selectedRouteChips[uid] = true;
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     document.getElementById('rpChipSelectAll').addEventListener('click', function () {
         for (var i = 0; i < savedRoutes.length; i++) selectedRouteChips[savedRoutes[i]._uid] = true;
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     document.getElementById('rpChipDeselectAll').addEventListener('click', function () {
         selectedRouteChips = {};
         saveChipPref();
         renderRouteChips();
-        renderProgress();
+        scheduleProgressRefreshAfterChipChange();
     });
 
     var DAY_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -2139,30 +2384,16 @@
     });
 
     var lastProgressHash = '';
-    var autoRefreshCountdown = 5;
-    var countdownInterval = null;
 
     function startAutoRefresh() {
         stopAutoRefresh();
         autoRefreshActive = true;
         styleAutoRefreshBtn();
         renderProgress();
-        autoRefreshCountdown = 5;
 
-        // Countdown ticker every second
-        countdownInterval = setInterval(function () {
-            autoRefreshCountdown--;
-            var statusEl = document.getElementById('rpAutoRefreshStatus');
-            if (autoRefreshCountdown > 0) {
-                statusEl.textContent = 'Live - refreshing in ' + autoRefreshCountdown + 's';
-                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#28a745' });
-            } else {
-                statusEl.textContent = 'Live - updating...';
-                forceStyle(statusEl, { 'font-size': '12px', 'font-weight': '600', 'color': '#e67e22' });
-            }
-        }, 1000);
-
-        // Data refresh every 5 seconds
+        // Data refresh every 5 seconds. Visual countdown is the CSS
+        // progress-bar animation set up in styleAutoRefreshBtn(); no
+        // per-second JS ticker needed.
         autoRefreshInterval = setInterval(async function () {
             var now = new Date();
             if (now.getHours() >= 20) {
@@ -2173,7 +2404,6 @@
             try {
                 await refreshProgressInline();
             } catch (e) { /* skip failed refresh */ }
-            autoRefreshCountdown = 5;
         }, 5000);
     }
 
@@ -2231,6 +2461,20 @@
         } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
         if (runId !== _refreshInlineRunId) return;
 
+        // Engine-watch ignition state — only when a route is using it AND
+        // we're rendering today. Per-device Get StatusData (with
+        // diagnosticSearch) for engine-watch routes' devices only;
+        // subsequent ticks fetch only the delta since the last successful
+        // poll for that device, and the per-device throttle inside
+        // pollEngineState skips devices polled within IGNITION_POLL_THROTTLE_MS.
+        if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
+            var engineDeviceIds = collectEngineWatchDeviceIds(savedRoutes, trips);
+            if (engineDeviceIds.length) {
+                await pollEngineState(engineDeviceIds);
+                if (runId !== _refreshInlineRunId) return;
+            }
+        }
+
         // Update each vehicle row inline
         // Unique vehicle/driver tracking across all routes so the Total
         // Vehicles card isn't inflated when the same entity is assigned to
@@ -2243,11 +2487,16 @@
         for (var ri = 0; ri < savedRoutes.length; ri++) {
             var r = savedRoutes[ri];
             var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+            var engineWatchOn = !!r.engineWatch && !!r.engineZoneId;
+            var engineZone = engineWatchOn ? cachedZones.find(function (z) { return z.id === r.engineZoneId; }) : null;
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
             var rCompleted = 0, rTotal = 0, rLate = 0;
             var rArrivedNames = [];
             var rNotArrivedNames = [];
+            var rEngineOnNames = [];
+            var rEngineOffNames = [];
+            var rEngineUnknownNames = [];
             var elapsedMin = 0;
             if (isToday && currentMinutes >= startMin) {
                 elapsedMin = Math.min(currentMinutes - startMin, endMin - startMin);
@@ -2293,10 +2542,8 @@
                 var lastStopLat = presence.lastLat;
                 var lastStopLng = presence.lastLng;
                 var isCurrentlyInZone = presence.isCurrentlyInZone;
-                var everInZone = presence.everInZone;
 
                 var pastWindow = isToday ? currentMinutes > endMin : true;
-                var beforeWindow = isToday && currentMinutes < startMin;
 
                 // Find the row by data attribute and update inline
                 var row = document.querySelector('[data-row-uid="' + r._uid + '-' + aId + '"]');
@@ -2331,9 +2578,31 @@
                 // Compute new status via the shared helper, then update counts.
                 var _st = computeRowStatus(r, presence, isToday, currentMinutes, startMin, endMin);
                 var vStatus = _st.vStatus, vStatusClass = _st.vStatusClass, statusTip = _st.statusTip, goodDir = _st.goodDir;
-                if (_st.kind === 'good') { completedCount++; rCompleted++; rArrivedNames.push(aLookup[aId] || aId); }
-                else if (_st.kind === 'bad') { missedCount++; rNotArrivedNames.push(aLookup[aId] || aId); }
+                var aName = aLookup[aId] || aId;
+                if (_st.kind === 'good') { completedCount++; rCompleted++; rArrivedNames.push(aName); }
+                else if (_st.kind === 'bad') { missedCount++; rNotArrivedNames.push(aName); }
                 else notStartedCount++;
+                // Engine watch is a live signal — only meaningful for today's
+                // rows whose route window hasn't ended yet (after the window
+                // ends, presence.lastLat is the position at window-end, not
+                // now, so the location filter would be wrong) and that
+                // haven't yet hit their primary event.
+                if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
+                    // Pre-window views have no in-window presence data; fall
+                    // back to the latest log overall so we can still tell
+                    // whether the bus is currently sitting at the depot.
+                    var _engPos = (presence.lastLat != null)
+                        ? { lat: presence.lastLat, lng: presence.lastLng, ms: presence.lastLogMs }
+                        : findLatestLogPosition(mergedLogs);
+                    var _engState = computeEngineWatchState(
+                        rowDeviceIds,
+                        _engPos.lat, _engPos.lng, _engPos.ms,
+                        engineZone && engineZone.points
+                    );
+                    if (_engState === 'on') rEngineOnNames.push(aName);
+                    else if (_engState === 'off') rEngineOffNames.push(aName);
+                    else rEngineUnknownNames.push(aName);
+                }
                 // A row counts as a "problem" for the filter when it's late vs target,
                 // overdue, no-show, or not arrived / not departed after the window ended.
                 var _problem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
@@ -2353,7 +2622,7 @@
                     // (On target time / Late Nm / Early Nm from target) so the
                     // target deviation is visible without reading the dedicated
                     // vs Target cell.
-                    statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>' +
+                    statusCell.innerHTML = '<span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + statusBadgeIconSvg(vStatusClass) + '<span>' + vStatus + '</span></span>' +
                         statusSublineHtml(eventMs, r, dateStr, now.getTime(), pastWindow);
                     flashCellOnSigChange(statusCell, vStatus + '|' + _tickVKind);
                 }
@@ -2399,12 +2668,30 @@
                         : (presence.lastLogMs ? 'unk' : 'na');
                     flashCellOnSigChange(engineCell, _engSig);
                 }
+                // Just-arrived / just-departed flash: when eventMs flips from
+                // empty to a real value, paint the whole row green for ~1.5s
+                // so the user's eye is drawn to a fresh commit.
+                var prevEventMs = row.dataset.eventMs;
+                if (eventMs && !prevEventMs) {
+                    row.style.animation = 'rpRowJustArrived 1.5s ease-out';
+                    setTimeout((function (rr) { return function () {
+                        if (rr && rr.style) rr.style.animation = '';
+                    }; })(row), 1700);
+                }
                 row.dataset.eventMs = eventMs || '';
                 row.dataset.lastLogMs = presence.lastLogMs || '';
                 row.dataset.lastSpeed = (typeof presence.lastSpeed === 'number') ? presence.lastSpeed : '';
                 row.dataset.isProblem = _problem ? '1' : '0';
             }
-            liveRouteCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames };
+            liveRouteCounts[r._uid] = {
+                completed: rCompleted, total: rTotal, late: rLate, direction: r.direction,
+                arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames,
+                engineWatch: engineWatchOn,
+                engineZoneName: engineZone ? engineZone.name : (r.engineZoneName || ''),
+                engineOnNames: rEngineOnNames,
+                engineOffNames: rEngineOffNames,
+                engineUnknownNames: rEngineUnknownNames
+            };
         }
 
         applyRouteProgressBadges(liveRouteCounts);
@@ -2466,7 +2753,6 @@
 
     function stopAutoRefresh() {
         if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
-        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
         autoRefreshActive = false;
         styleAutoRefreshBtn();
     }
@@ -2525,6 +2811,17 @@
             try {
                 logsByDevice = await fetchLogRecordsByDevice(allDeviceIds, logFromIso, logToIso);
             } catch (logErr) { logsByDevice = {}; showErrorBanner('Could not load GPS logs: ' + (logErr && logErr.message ? logErr.message : 'unknown error'), { autoDismissMs: 8000 }); }
+
+            // Engine-watch ignition feed — only fetched for today's view
+            // when at least one visible route has engineWatch enabled.
+            // Pass the route-relevant device set so we can scope the Get
+            // by deviceSearch (per Geotab's documented pattern).
+            if (isToday && anyRouteUsesEngineWatch(savedRoutes)) {
+                var engineDeviceIds = collectEngineWatchDeviceIds(savedRoutes, trips);
+                if (engineDeviceIds.length) {
+                    await pollEngineState(engineDeviceIds);
+                }
+            }
 
             // Sort routes by proximity to current time
             // Filter routes by active day
@@ -2594,6 +2891,8 @@
                 var startMin = routesWithScore[ri].startMin;
                 var endMin = routesWithScore[ri].endMin;
                 var zone = cachedZones.find(function (z) { return z.id === r.zoneId; });
+                var engineWatchOn = !!r.engineWatch && !!r.engineZoneId;
+                var engineZone = engineWatchOn ? cachedZones.find(function (z) { return z.id === r.engineZoneId; }) : null;
 
                 // Route time status label
                 var timeLabel = '';
@@ -2613,11 +2912,14 @@
                     var lenSuffix = targetLen > 0
                         ? ' <span class="rpTargetBadgeLen">(' + formatMinutesHM(targetLen) + ')</span>'
                         : '';
-                    var _targetWord = r.direction === 'outside' ? 'departure' : (r.direction === 'engineStart' ? 'engine-start' : 'arrival');
+                    var _targetWord = r.direction === 'outside' ? 'departure' : 'arrival';
                     targetBadge = '<span class="rpTargetBadge" title="Target ' + _targetWord + ' window">Target: ' + formatTargetRange(r) + lenSuffix + '</span>';
                 }
                 var progressBadgeHolder = '<span class="rpRouteProgressBadge" data-route-uid="' + r._uid + '"></span>';
-                var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">&#x1F4C8; Route Trend</span>';
+                var sparklineHolder = '<span class="rpSparklineBtn" data-route-uid="' + r._uid + '" role="button" tabindex="0" title="View 14 active-day on-time trend">' +
+                    '<span class="rpSparklineMini" data-route-uid="' + r._uid + '" aria-hidden="true"></span>' +
+                    '<span class="rpSparklineLabel">Trend</span>' +
+                    '</span>';
                 // Inline loading indicator per card — hidden by default; shown
                 // during every live-tick fetch via setRouteCardsLoading().
                 var loadingHolder = '<span class="rpRouteLoading" data-route-uid="' + r._uid + '" aria-live="polite">' +
@@ -2648,9 +2950,6 @@
                     elapsedMin = endMin - startMin;
                 }
 
-                // Engine-start routes are a point-in-time event; "Time at Zone" isn't
-                // meaningful so we reuse the "Time at Zone" semantics for both inside
-                // and engineStart and only flip to "Time Away" for outside.
                 var _timeCol = r.direction === 'outside' ? 'Time Away' : 'Time at Zone';
                 var timeColLabel = _timeCol + ' (' + formatMinutesHM(Math.round(elapsedMin)) + ' elapsed)';
                 var isDriverRoute = r.trackBy === 'driver';
@@ -2660,9 +2959,7 @@
                 var eventColLabel = eventColHeaderForDirection(r.direction);
                 var eventColTip = r.direction === 'outside'
                     ? 'When the vehicle left the zone (relative to now)'
-                    : (r.direction === 'engineStart'
-                        ? 'When the engine first started while inside the zone (relative to now)'
-                        : 'When the vehicle first entered the zone (relative to now)');
+                    : 'When the vehicle first entered the zone (relative to now)';
                 var targetColTip = routeHasTarget(r)
                     ? 'Minutes early or late vs target window ' + formatTargetRange(r)
                     : 'No target window set for this route';
@@ -2699,6 +2996,9 @@
                 var rCompleted = 0, rTotal = 0, rLate = 0;
                 var rArrivedNames = [];
                 var rNotArrivedNames = [];
+                var rEngineOnNames = [];
+                var rEngineOffNames = [];
+                var rEngineUnknownNames = [];
                 if (!assignedIds.length) {
                     html += '<tr><td colspan="11" style="padding:10px;color:#888;text-align:center;">No ' + (isDriverRoute ? 'drivers' : 'vehicles') + ' assigned</td></tr>';
                 } else {
@@ -2758,7 +3058,6 @@
                         var lastStopLat = presence.lastLat;
                         var lastStopLng = presence.lastLng;
                         var isCurrentlyInZone = presence.isCurrentlyInZone;
-                        var everInZone = presence.everInZone;
 
                         // For "outside" routes, the metric is time AWAY from zone
                         if (r.direction === 'outside') {
@@ -2767,7 +3066,6 @@
                         }
 
                         var pastWindow = isToday ? currentMinutes > endMin : true;
-                        var beforeWindow = isToday && currentMinutes < startMin;
 
                         // Shared status helper keeps full render and live tick in sync.
                         var _st = computeRowStatus(r, presence, isToday, currentMinutes, startMin, endMin);
@@ -2776,6 +3074,25 @@
                         if (_st.kind === 'good') { completedCount++; rCompleted++; sortOrder = 1; rArrivedNames.push(aName); }
                         else if (_st.kind === 'bad') { missedCount++; sortOrder = 0; rNotArrivedNames.push(aName); }
                         else { notStartedCount++; sortOrder = 2; }
+                        // Engine watch is a live signal — only meaningful for
+                        // today's rows whose route window hasn't ended yet
+                        // (after the window ends, presence.lastLat is the
+                        // position at window-end, not now, so the location
+                        // filter would be wrong) and that haven't yet hit
+                        // their primary event.
+                        if (engineWatchOn && _st.kind !== 'good' && isToday && currentMinutes <= endMin) {
+                            var _engPos2 = (presence.lastLat != null)
+                                ? { lat: presence.lastLat, lng: presence.lastLng, ms: presence.lastLogMs }
+                                : findLatestLogPosition(mergedLogs);
+                            var _engState2 = computeEngineWatchState(
+                                rowDeviceIds,
+                                _engPos2.lat, _engPos2.lng, _engPos2.ms,
+                                engineZone && engineZone.points
+                            );
+                            if (_engState2 === 'on') rEngineOnNames.push(aName);
+                            else if (_engState2 === 'off') rEngineOffNames.push(aName);
+                            else rEngineUnknownNames.push(aName);
+                        }
                         // A row counts as a "problem" for the filter when it's late vs target,
                         // overdue, no-show, or not arrived / not departed after the window ended.
                         var _isProblem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
@@ -2799,7 +3116,7 @@
                         // target deviation is visible without reading vs Target.
                         var _vKind = varianceKind(eventMs, r, dateStr, now.getTime(), pastWindow);
                         var _statusSub = statusSublineHtml(eventMs, r, dateStr, now.getTime(), pastWindow);
-                        var statusCell = '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + vStatus + '</span>' + _statusSub + '</td>';
+                        var statusCell = '<td class="rptd rpStatusCell"><span class="rpStatusBadge ' + vStatusClass + '" title="' + statusTip + '">' + statusBadgeIconSvg(vStatusClass) + '<span>' + vStatus + '</span></span>' + _statusSub + '</td>';
                         var varianceCellContent = _vKind === 'onTime' ? '' : formatTargetVariance(eventMs, r, dateStr, now.getTime(), pastWindow);
                         var varianceCell = '<td class="rptd rpVarianceCell">' + varianceCellContent + '</td>';
                         var historyCell = '<td class="rptd rpHistoryCell">' + histBtn + '</td>';
@@ -2830,7 +3147,15 @@
                     vehRows.sort(function (a, b) { return a.sortOrder - b.sortOrder; });
                     for (var vr = 0; vr < vehRows.length; vr++) html += vehRows[vr].html;
                 }
-                routeProgressCounts[r._uid] = { completed: rCompleted, total: rTotal, late: rLate, direction: r.direction, arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames };
+                routeProgressCounts[r._uid] = {
+                    completed: rCompleted, total: rTotal, late: rLate, direction: r.direction,
+                    arrivedNames: rArrivedNames, notArrivedNames: rNotArrivedNames,
+                    engineWatch: engineWatchOn,
+                    engineZoneName: engineZone ? engineZone.name : (r.engineZoneName || ''),
+                    engineOnNames: rEngineOnNames,
+                    engineOffNames: rEngineOffNames,
+                    engineUnknownNames: rEngineUnknownNames
+                };
                 html += '</tbody></table></div>';
             }
 
@@ -2841,6 +3166,26 @@
             // Paint any cached sparklines instantly, then kick off a compute to refresh.
             applySparklines(null);
             computeSparklines(dayFilteredRoutes, dateStr).then(function () { styleSparklines(); });
+            // Same for the per-row 14-day inline sparklines on every history
+            // button. Cache is keyed (routeUid, assignedId) and persists for
+            // the session, so subsequent renders only fetch newly-visible
+            // rows. Computation happens in background; rows paint as data
+            // arrives.
+            applyRowSparklines(null);
+            var _visibleRowsForSparkline = [];
+            for (var _vr = 0; _vr < dayFilteredRoutes.length; _vr++) {
+                var _vrt = dayFilteredRoutes[_vr];
+                var _vrIsDriver = _vrt.trackBy === 'driver';
+                var _vrIds = _vrIsDriver ? (_vrt.driverIds || []) : (_vrt.vehicleIds || []);
+                for (var _vri = 0; _vri < _vrIds.length; _vri++) {
+                    _visibleRowsForSparkline.push({
+                        route: _vrt,
+                        assignedId: _vrIds[_vri],
+                        entityType: _vrIsDriver ? 'driver' : 'vehicle'
+                    });
+                }
+            }
+            computeRowSparklines(_visibleRowsForSparkline, dateStr);
             applyAutoCollapse();
             updateLastUpdated();
             if (document.getElementById('rpChkCompareMode') && document.getElementById('rpChkCompareMode').checked) {
@@ -2856,7 +3201,27 @@
             var alertSvg = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.5" r="0.6" fill="currentColor"/></svg>';
             var clockSvg = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 15"/></svg>';
             var hourglassSvg = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3c0 4 5 6 5 9s-5 5-5 9"/><path d="M17 3c0 4-5 6-5 9s5 5 5 9"/></svg>';
-            var cardsHtml = '<div id="rpProgSummary">' +
+            // Live status strip — a single-row segmented bar above the
+            // summary cards. Each segment is proportional to its count, so
+            // a healthy fleet shows a mostly-green strip and a problem day
+            // shows the red and amber bands grow. Updated every render.
+            var stripTotal = completedCount + lateCount + missedCount + notStartedCount;
+            var stripHtml = '';
+            if (stripTotal > 0) {
+                var _stripSeg = function (count, color, label) {
+                    if (count <= 0) return '';
+                    var pct = (count / stripTotal) * 100;
+                    return '<div class="rpStripSeg" style="width:' + pct + '%;background:' + color + ';" ' +
+                        'title="' + count + ' ' + label + '"><span>' + count + '</span></div>';
+                };
+                stripHtml = '<div id="rpLiveStrip" title="Fleet snapshot — segments scale by count">' +
+                    _stripSeg(completedCount, 'linear-gradient(180deg,#34d399 0%,#10b981 100%)', 'on track') +
+                    _stripSeg(lateCount, 'linear-gradient(180deg,#fbbf24 0%,#f59e0b 100%)', 'late / overdue') +
+                    _stripSeg(missedCount, 'linear-gradient(180deg,#fb7185 0%,#dc2626 100%)', 'off track') +
+                    _stripSeg(notStartedCount, 'linear-gradient(180deg,#cbd5e1 0%,#94a3b8 100%)', 'waiting') +
+                    '</div>';
+            }
+            var cardsHtml = stripHtml + '<div id="rpProgSummary">' +
                 '<div class="rpSC rpSCBlue" title="Distinct vehicles and drivers assigned today (an entity on multiple routes counts once)">' +
                     '<div class="rpSCIcon" style="color:#0078d4;background:#e8f0fe;">' + busSvg + '</div>' +
                     '<div class="rpSCText"><div class="rpSV" style="color:#0078d4;">' + Object.keys(uniqueEntities).length + '</div><div class="rpSL">Total Vehicles</div></div>' +
@@ -2890,6 +3255,25 @@
     }
 
     function styleProgressCards() {
+        var stripEl = document.getElementById('rpLiveStrip');
+        if (stripEl) {
+            forceStyle(stripEl, {
+                'display': 'flex', 'width': '100%', 'height': '14px',
+                'border-radius': '8px', 'overflow': 'hidden',
+                'box-shadow': 'inset 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.04)',
+                'margin-bottom': '12px', 'background': '#f3f4f6'
+            });
+            var segs = stripEl.querySelectorAll('.rpStripSeg');
+            for (var s = 0; s < segs.length; s++) {
+                forceStyle(segs[s], {
+                    'display': 'flex', 'align-items': 'center', 'justify-content': 'center',
+                    'color': '#fff', 'font-size': '10px', 'font-weight': '800',
+                    'text-shadow': '0 1px 1px rgba(0,0,0,0.25)',
+                    'transition': 'width 360ms ease-in-out',
+                    'min-width': '6px'
+                });
+            }
+        }
         forceStyle(document.getElementById('rpProgSummary'), {
             'display': 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(180px, 1fr))',
             'gap': '14px', 'margin-bottom': '16px'
@@ -2934,24 +3318,50 @@
     function styleProgressContent() {
         applyButtonA11y();
         applyResponsiveStyles();
+        ensureLivePillKeyframes();
         var cards = document.querySelectorAll('.rpRouteCard');
         for (var i = 0; i < cards.length; i++) {
             var isActive = cards[i].classList.contains('rpRouteActive');
-            // Same border width on every card so inner table widths line up
-            // across cards. Active state uses color + glow, not extra width.
             forceStyle(cards[i], {
+                'position': 'relative',
                 'background': '#fff',
                 'border': '1px solid ' + (isActive ? '#28a745' : '#e0e0e0'),
                 'border-radius': '8px', 'margin-bottom': '16px', 'overflow': 'hidden',
                 'box-sizing': 'border-box',
-                'box-shadow': isActive ? '0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.25)' : '0 1px 4px rgba(0,0,0,0.05)'
+                'box-shadow': isActive ? '0 0 0 1px #28a745, 0 0 16px rgba(40,167,69,0.30)' : '0 1px 4px rgba(0,0,0,0.05)',
+                'animation': isActive ? 'rpActiveGlow 3s ease-in-out infinite' : 'none'
             });
+            // Inject (or remove) a scanline strip just under the head for
+            // active cards — signals "live data flowing" at a glance.
+            var existingScan = cards[i].querySelector(':scope > .rpScanline');
+            if (isActive) {
+                if (!existingScan) {
+                    var scan = document.createElement('div');
+                    scan.className = 'rpScanline';
+                    scan.setAttribute('aria-hidden', 'true');
+                    cards[i].insertBefore(scan, cards[i].firstChild);
+                    existingScan = scan;
+                }
+                forceStyle(existingScan, {
+                    'position': 'absolute', 'top': '0', 'left': '0', 'right': '0',
+                    'height': '2px', 'overflow': 'hidden', 'pointer-events': 'none'
+                });
+                existingScan.innerHTML = '<span style="display:block;height:100%;width:25%;' +
+                    'background:linear-gradient(90deg,rgba(40,167,69,0) 0%,rgba(40,167,69,0.85) 50%,rgba(40,167,69,0) 100%);' +
+                    'animation:rpScanline 2.4s linear infinite;"></span>';
+            } else if (existingScan) {
+                existingScan.parentNode.removeChild(existingScan);
+            }
         }
         var heads = document.querySelectorAll('.rpRouteCardHead');
         for (var i = 0; i < heads.length; i++) {
             var isActive = heads[i].parentElement && heads[i].parentElement.classList.contains('rpRouteActive');
             forceStyle(heads[i], {
-                'padding': '12px 16px', 'background': isActive ? '#d4edda' : '#f8f9fa', 'border-bottom': '1px solid #e0e0e0',
+                'padding': '12px 16px',
+                'background': isActive
+                    ? 'linear-gradient(135deg,#d4edda 0%,#f0fdf4 60%,#ffffff 100%)'
+                    : 'linear-gradient(180deg,#f8f9fa 0%,#f1f3f5 100%)',
+                'border-bottom': '1px solid #e0e0e0',
                 'display': 'flex', 'align-items': 'center', 'gap': '10px', 'flex-wrap': 'wrap'
             });
         }
@@ -3062,15 +3472,27 @@
         var past = document.querySelectorAll('.rpTimePast');
         for (var i = 0; i < past.length; i++) forceStyle(past[i], { 'padding': '4px 12px', 'border-radius': '14px', 'font-size': '14px', 'font-weight': '600', 'background': '#e6f4ea', 'color': '#1e7e34' });
 
-        // Status badges
-        var st = document.querySelectorAll('.rpStCompleted');
-        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#d4edda', 'color': '#155724' });
-        st = document.querySelectorAll('.rpStProgress');
-        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#fff3cd', 'color': '#856404' });
-        st = document.querySelectorAll('.rpStNotStarted');
-        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f0f0f0', 'color': '#888' });
-        st = document.querySelectorAll('.rpStMissed');
-        for (var i = 0; i < st.length; i++) forceStyle(st[i], { 'padding': '3px 10px', 'border-radius': '12px', 'font-size': '12px', 'font-weight': '600', 'background': '#f8d7da', 'color': '#721c24' });
+        // Status badges — pill-shaped with an inline icon, soft shadow.
+        var basePill = {
+            'display': 'inline-flex', 'align-items': 'center', 'gap': '5px',
+            'padding': '3px 11px 3px 9px', 'border-radius': '999px',
+            'font-size': '12px', 'font-weight': '700',
+            'box-shadow': '0 1px 2px rgba(15,23,42,0.06)',
+            'border': '1px solid transparent'
+        };
+        function applyBadgeStyle(sel, bg, color, border) {
+            var nodes = document.querySelectorAll(sel);
+            for (var ii = 0; ii < nodes.length; ii++) {
+                forceStyle(nodes[ii], basePill);
+                forceStyle(nodes[ii], { 'background': bg, 'color': color, 'border-color': border });
+            }
+        }
+        applyBadgeStyle('.rpStCompleted', 'linear-gradient(135deg,#d4edda 0%,#a7f3d0 100%)', '#0f5132', '#86efac');
+        applyBadgeStyle('.rpStProgress',  'linear-gradient(135deg,#fff3cd 0%,#fde68a 100%)', '#92400e', '#fbbf24');
+        applyBadgeStyle('.rpStNotStarted','linear-gradient(135deg,#f3f4f6 0%,#e5e7eb 100%)', '#6b7280', '#d1d5db');
+        applyBadgeStyle('.rpStMissed',    'linear-gradient(135deg,#fee2e2 0%,#fecaca 100%)', '#991b1b', '#fca5a5');
+        var icons = document.querySelectorAll('.rpStatusBadgeIcon');
+        for (var iii = 0; iii < icons.length; iii++) forceStyle(icons[iii], { 'flex-shrink': '0' });
 
         // Live status badges
         var liveIn = document.querySelectorAll('.rpLiveIn');
@@ -3283,14 +3705,9 @@
                         // and GPS wobbles don't silently count. Outside falls back to
                         // "was in-zone and is now out" for sparse-log cases.
                         var passedThrough = (r.direction === 'inside' && !!presenceR.arrivedAtMs) ||
-                                            (r.direction === 'outside' && (!!presenceR.departedAtMs || (presenceR.everInZone && !presenceR.isCurrentlyInZone))) ||
-                                            (r.direction === 'engineStart' && !!presenceR.engineStartedAtMs);
+                                            (r.direction === 'outside' && (!!presenceR.departedAtMs || presenceShowsSustainedDeparture(presenceR)));
                         var status;
-                        if (r.direction === 'engineStart') {
-                            // Engine-start routes are a point-in-time event — completed if
-                            // the engine did start in the zone within the window.
-                            status = presenceR.engineStartedAtMs ? 'Completed' : 'Missed';
-                        } else if (pct >= 80) status = 'Completed';
+                        if (pct >= 80) status = 'Completed';
                         else if (zoneMinutes > 0 || passedThrough) status = 'Incomplete';
                         else status = 'Missed';
 
@@ -3773,11 +4190,9 @@
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
     }
 
-    // Direction → presence field name. 'engineStart' stores the first trip.start
-    // timestamp whose startPoint fell inside the zone during the window.
+    // Direction → presence field name.
     function eventFieldForDirection(direction) {
         if (direction === 'outside') return 'departedAtMs';
-        if (direction === 'engineStart') return 'engineStartedAtMs';
         return 'arrivedAtMs';
     }
     function getRouteEventMs(presence, direction) {
@@ -3787,37 +4202,31 @@
     // Past-tense verb shown on cards, status labels, and the timeline.
     function eventVerbForDirection(direction) {
         if (direction === 'outside') return 'Departed';
-        if (direction === 'engineStart') return 'Started';
         return 'Arrived';
     }
     // Status labels for a route row given whether it's achieved its goal.
     function routeStatusLabel(direction, goodDir) {
         if (direction === 'outside') return goodDir ? 'Departed' : 'Not Departed';
-        if (direction === 'engineStart') return goodDir ? 'Started' : 'Not Started';
         return goodDir ? 'Arrived' : 'Not Arrived';
     }
     // Long-form label for route cards / routes table.
     function directionFriendlyLabel(direction) {
         if (direction === 'outside') return 'Departed from Location';
-        if (direction === 'engineStart') return 'Engine Started in Zone';
         return 'Arrived at Location';
     }
     // Column header for the event-time column in the Progress table.
     function eventColHeaderForDirection(direction) {
         if (direction === 'outside') return 'Departed At';
-        if (direction === 'engineStart') return 'Started At';
         return 'Arrived At';
     }
     // Badge CSS class for the routes table.
     function dirBadgeClass(direction) {
         if (direction === 'outside') return 'rpDirOut';
-        if (direction === 'engineStart') return 'rpDirEng';
         return 'rpDirIn';
     }
     // Verb used on the summary "2/3 arrived, 1 late" badge.
     function progressBadgeVerb(direction) {
         if (direction === 'outside') return 'departed';
-        if (direction === 'engineStart') return 'started';
         return 'arrived';
     }
 
@@ -3921,29 +4330,32 @@
     // TTL-cached for fixed ranges.
     var _liveLogCache = {}; // key "deviceId|dateStr" -> { logs: [], lastFetchToMs: Number }
     // Sticky per-row event cache. Once computePresenceFromLogs +
-    // augmentPresenceWithTrips commit an arrivedAtMs / departedAtMs /
-    // engineStartedAtMs for a given row on a given day, we remember it here
-    // and merge it back into every subsequent live-tick computation for the
-    // same row. That way a bus that "Departed at 4:49" doesn't flicker back
-    // to "Not Departed" just because it re-entered the zone for 10 seconds
-    // later, or because the next tick's log delta happened to not catch the
-    // crossing. Keyed by "dateStr|routeUid|assignedId" so a date change
-    // naturally isolates yesterday's events from today's. renderProgress()
-    // wipes this for the current date when the route hash changes.
-    var _stickyEvents = {}; // { [key]: { arrivedAtMs, departedAtMs, engineStartedAtMs } }
+    // augmentPresenceWithTrips commit an arrivedAtMs / departedAtMs for a
+    // given row on a given day, we remember it here and merge it back into
+    // every subsequent live-tick computation for the same row. That way a
+    // bus that "Departed at 4:49" doesn't flicker back to "Not Departed"
+    // just because it re-entered the zone for 10 seconds later, or because
+    // the next tick's log delta happened to not catch the crossing. Keyed
+    // by "dateStr|routeUid|assignedId" so a date change naturally isolates
+    // yesterday's events from today's. renderProgress() wipes this for the
+    // current date when the route hash changes.
+    var _stickyEvents = {}; // { [key]: { arrivedAtMs, departedAtMs } }
     function _stickyKey(dateStr, routeUid, aId) { return dateStr + '|' + routeUid + '|' + aId; }
     function applyStickyEvents(presence, dateStr, routeUid, aId) {
         if (!presence || !dateStr || !routeUid || !aId) return;
         var k = _stickyKey(dateStr, routeUid, aId);
         var prev = _stickyEvents[k] || {};
-        // Remember any newly-committed event timestamp.
+        // Capture the first time we see arrivedAtMs / departedAtMs and lock
+        // to it. Subsequent recomputations (overlap-adjustment shift,
+        // trip-augmentation evidence catching up, sparser-log delta) might
+        // land on a slightly different timestamp — but the user has
+        // already seen "Arrived 8:45" and we don't want that number
+        // jumping around. The "X min ago" elapsed text still advances
+        // naturally because it's recomputed from the locked timestamp.
         if (presence.arrivedAtMs && !prev.arrivedAtMs) prev.arrivedAtMs = presence.arrivedAtMs;
         if (presence.departedAtMs && !prev.departedAtMs) prev.departedAtMs = presence.departedAtMs;
-        if (presence.engineStartedAtMs && !prev.engineStartedAtMs) prev.engineStartedAtMs = presence.engineStartedAtMs;
-        // Restore any previously-seen event that this tick's computation lost.
-        if (!presence.arrivedAtMs && prev.arrivedAtMs) presence.arrivedAtMs = prev.arrivedAtMs;
-        if (!presence.departedAtMs && prev.departedAtMs) presence.departedAtMs = prev.departedAtMs;
-        if (!presence.engineStartedAtMs && prev.engineStartedAtMs) presence.engineStartedAtMs = prev.engineStartedAtMs;
+        if (prev.arrivedAtMs) presence.arrivedAtMs = prev.arrivedAtMs;
+        if (prev.departedAtMs) presence.departedAtMs = prev.departedAtMs;
         _stickyEvents[k] = prev;
     }
     function resetStickyEvents() { _stickyEvents = {}; }
@@ -4132,31 +4544,14 @@
     // (bar chart + trend line), the dark-green label in the middle, and a red
     // chevron on the right — matching the mock-up the user provided.
     function historyBtnHtml(routeUid, assignedId, entityType) {
-        // Bar-chart-with-trend-line icon. Drawn at 32x32 viewBox so the tile
-        // edges stay clean; CSS sizes the wrapper tile itself.
-        var iconSvg = '<svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">' +
-                // L-shaped axis
-                '<path d="M6 4 L6 27 L29 27" stroke="#1e7e34" stroke-width="2.2" stroke-linecap="round" fill="none"/>' +
-                // Bars: green -> green -> orange -> red (increasing height)
-                '<rect x="9" y="19" width="3.4" height="7" rx="0.5" fill="#2ecc71"/>' +
-                '<rect x="14" y="16" width="3.4" height="10" rx="0.5" fill="#27ae60"/>' +
-                '<rect x="19" y="13" width="3.4" height="13" rx="0.5" fill="#e67e22"/>' +
-                '<rect x="24" y="10" width="3.4" height="16" rx="0.5" fill="#dc3545"/>' +
-                // Trend line with dots
-                '<polyline points="10 18 15.5 14 20.5 11 26 5" stroke="#1e7e34" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
-                '<circle cx="10" cy="18" r="1.3" fill="#1e7e34"/>' +
-                '<circle cx="15.5" cy="14" r="1.3" fill="#1e7e34"/>' +
-                '<circle cx="20.5" cy="11" r="1.3" fill="#1e7e34"/>' +
-                // Arrowhead at the end of the trend line
-                '<path d="M22 5 L26 5 L26 9" stroke="#1e7e34" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
-            '</svg>';
+        var rowKey = routeUid + '|' + assignedId;
         var chevronSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc3545" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
                 '<polyline points="9 6 15 12 9 18"/>' +
             '</svg>';
         return '<span class="rpRowTlBtn" role="button" tabindex="0" title="Show 14-day arrival/departure trend for this row" ' +
             'data-route-uid="' + routeUid + '" data-assigned-id="' + assignedId + '" ' +
             'data-entity-type="' + entityType + '">' +
-                '<span class="rpRowTlBtnIcon">' + iconSvg + '</span>' +
+                '<span class="rpRowSparklineMini" data-row-key="' + rowKey + '" aria-hidden="true"></span>' +
                 '<span class="rpRowTlBtnText">14 Day Trend</span>' +
                 '<span class="rpRowTlBtnChevron">' + chevronSvg + '</span>' +
             '</span>';
@@ -4260,21 +4655,46 @@
         return badge + ageNote;
     }
 
+    // True if the bus was inside the zone at some point AND is now
+    // sustainably outside — i.e. the most recent log is outside AND
+    // it's been at least 30s since the last log that put it inside.
+    // Used as the "Departed" fallback for outside routes when
+    // departedAtMs wasn't committed (sparse logs).
+    //
+    // We require lastInZoneMs (set by log-based detection only) — i.e.
+    // an actual in-window log that placed the bus inside the polygon.
+    // Trip-augmentation also sets everInZone but doesn't update
+    // lastInZoneMs; without this gate, a bus parked overnight (trip
+    // says in-zone, no in-window logs) plus a single GPS wobble "out"
+    // log would fire a false Departed.
+    function presenceShowsSustainedDeparture(presence) {
+        if (!presence || !presence.everInZone || presence.isCurrentlyInZone) return false;
+        if (presence.lastInZoneMs == null || presence.lastLogMs == null) return false;
+        return (presence.lastLogMs - presence.lastInZoneMs) >= 30000;
+    }
+
     function computePresenceFromLogs(logs, zonePoints, windowFromMs, windowToMs) {
-        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null, engineStartedAtMs: null };
+        var out = { hasData: false, everInZone: false, zoneMinutes: 0, isCurrentlyInZone: false, lastLat: null, lastLng: null, lastSpeed: null, lastLogMs: null, arrivedAtMs: null, departedAtMs: null, lastInZoneMs: null };
         if (!logs || !logs.length || !zonePoints || !zonePoints.length) return out;
         // Sort ascending by time (defensive)
         var sorted = logs.slice().sort(function (a, b) { return new Date(a.dateTime) - new Date(b.dateTime); });
         var zoneSec = 0;
         var prevMs = null, prevIn = false, haveSeenIn = false, haveSeenOut = false;
-        // Dwell thresholds: bus must linger ~30s to count as truly arrived
-        // (otherwise a drive-through registers) or truly departed (otherwise
-        // a one-ping GPS wobble at the zone edge locks in a bogus time).
+        // Dwell thresholds.
+        //   Departure: bus must stay continuously OUT for 30s — rejects a
+        //   one-ping GPS wobble at the zone edge.
+        //   Arrival:   bus must stay continuously IN for 60s (moving or
+        //   stopped). For school zones with large polygons, the bus often
+        //   crosses the boundary and then drives a parking-lot loop for
+        //   several minutes before parking; the timestamp the user wants
+        //   is the boundary cross, not the eventual park. 60s is enough
+        //   to reject drive-throughs (typically <60s end-to-end through
+        //   a property) without waiting for the bus to come to rest.
         var MIN_OUT_DWELL_MS = 30000;
-        var MIN_STOP_DWELL_MS = 30000;
-        var STOP_SPEED_KPH = 3; // same threshold used by the Engine "Stopped" badge
+        var MIN_IN_ZONE_DWELL_MS = 60000;
         var pendingDepartMs = null;   // first out-log after being in-zone; commit once it persists 30s
-        var stopStartMs = null;       // first in-zone log where the bus was stopped; commit arrival once it persists 30s
+        var inZoneStartMs = null;     // first in-zone log after seeing outside; commit arrival once it persists 60s
+        var sustainedOutMs = null;    // first out-log of current out-streak; haveSeenOut flips only when this persists 30s (rejects a single GPS wobble at the zone edge)
         // Captures the zone state at / just before route start (windowFromMs)
         // via the last pre-window log as a proxy. Used by the departure gate
         // as "was the bus inside the zone when the route opened" — a bus
@@ -4296,32 +4716,44 @@
             if (t > windowToMs) continue;
             out.hasData = true;
             var inZ = pointInPolygon(lg.latitude, lg.longitude, zonePoints);
-            var spd = (typeof lg.speed === 'number') ? lg.speed : null;
             if (firstInZ === null) firstInZ = (preWindowInZ !== null) ? preWindowInZ : inZ;
+            // If the bus was outside the zone in the last log just before the
+            // route window opened, that's strong evidence the bus came in
+            // from outside — flip haveSeenOut on the very first iteration.
+            if (!haveSeenOut && preWindowInZ === false) haveSeenOut = true;
             if (inZ) {
                 out.everInZone = true;
+                out.lastInZoneMs = t;
                 haveSeenIn = true;
                 pendingDepartMs = null; // they came back, so any tentative departure is void
-                var stopped = (spd === null) || spd <= STOP_SPEED_KPH;
-                if (stopped) {
-                    if (stopStartMs === null) stopStartMs = t;
-                    // Arrival: we must have seen the bus OUTSIDE the zone at
-                    // some point during the window (so it actually drove in)
-                    // AND it has now stayed stopped inside for >= 30s. A bus
-                    // parked at school all day with no out-observation never
-                    // "arrives"; a bus that was inside at route start, left,
-                    // and came back does — the mid-window out-observation
-                    // counts.
-                    if (haveSeenOut && out.arrivedAtMs === null && (t - stopStartMs) >= MIN_STOP_DWELL_MS) {
-                        out.arrivedAtMs = stopStartMs;
+                sustainedOutMs = null;  // the out-streak is broken — start over next time
+                // Arrival: bus must have been observed OUTSIDE the zone (with a
+                // sustained 30s out-of-zone observation, not a single wobble
+                // ping) at some point during the window (so it actually drove
+                // in — a bus parked at school all morning never "arrives") AND
+                // has now been continuously inside the zone for >= 60s.
+                // The 60s gate rejects drive-throughs without requiring
+                // the bus to come to a full stop, which lets us commit
+                // the boundary-crossing time as the arrival even when the
+                // bus does a long parking-lot loop before parking.
+                if (haveSeenOut) {
+                    if (inZoneStartMs === null) inZoneStartMs = t;
+                    if (out.arrivedAtMs === null && (t - inZoneStartMs) >= MIN_IN_ZONE_DWELL_MS) {
+                        out.arrivedAtMs = inZoneStartMs;
                     }
-                } else {
-                    stopStartMs = null; // still moving — not parked yet
                 }
             } else {
-                haveSeenOut = true;
+                inZoneStartMs = null; // bus left — any pending in-zone dwell is void
+                // haveSeenOut flips only after the bus has been continuously
+                // outside for MIN_OUT_DWELL_MS — one wobble ping at the zone
+                // boundary doesn't count. Without this, a parked bus whose
+                // GPS jitters across the polygon edge for one log and then
+                // settles back inside would falsely qualify a subsequent
+                // 60s in-zone period as a fresh "arrival" (matters most on
+                // the recomputed window of an overlapping later route).
+                if (sustainedOutMs === null) sustainedOutMs = t;
+                if (!haveSeenOut && (t - sustainedOutMs) >= MIN_OUT_DWELL_MS) haveSeenOut = true;
                 if (haveSeenIn || firstInZ === true) {
-                    stopStartMs = null;
                     if (pendingDepartMs === null) pendingDepartMs = t;
                     // Departure counts as soon as the bus has been observed
                     // IN the zone at any point during the window (or was in
@@ -4342,7 +4774,7 @@
             prevMs = t; prevIn = inZ;
             out.lastLat = lg.latitude;
             out.lastLng = lg.longitude;
-            out.lastSpeed = spd;
+            out.lastSpeed = (typeof lg.speed === 'number') ? lg.speed : null;
             out.lastLogMs = t;
             out.isCurrentlyInZone = inZ;
         }
@@ -4383,84 +4815,16 @@
         return Object.keys(set);
     }
 
-    // Augment GPS-based presence with Trip stop/start points. Catches cases where raw
-    // LogRecords are sparse, unavailable, or when the vehicle is parked at the zone from
-    // a prior trip (stop before windowFrom, nextTripStart after windowFrom).
+    // Trip data is no longer consulted for arrival/departure events — those
+    // come exclusively from the raw LogRecord stream in
+    // computePresenceFromLogs. Trips were a noisy signal (engine cycles in
+    // place produced false arrivals/departures) and the log-based detector
+    // is accurate enough on the GO devices we run against.
     //
-    // Because a vehicle can have many drivers and a driver can use many vehicles, in
-    // driver mode we require BOTH trip.driver.id === driverIdFilter AND
-    // trip.device.id ∈ deviceIdSet, so presence is attributed to the correct driver.
-    // In vehicle mode driverIdFilter is null and only the device match is required.
-    function augmentPresenceWithTrips(presence, trips, driverIdFilter, deviceIdSet, zonePoints, windowFromMs, windowToMs) {
-        if (!trips || !trips.length || !zonePoints || !zonePoints.length) return presence;
-        for (var i = 0; i < trips.length; i++) {
-            var tr = trips[i];
-            if (!tr.device || !tr.device.id || !deviceIdSet[tr.device.id]) continue;
-            if (driverIdFilter && (!tr.driver || tr.driver.id !== driverIdFilter)) continue;
-
-            // Trip stop point: vehicle is parked there from tr.stop until tr.nextTripStart (or ∞)
-            if (tr.stopPoint && typeof tr.stopPoint.x === 'number' && typeof tr.stopPoint.y === 'number') {
-                var stopMs = tr.stop ? new Date(tr.stop).getTime() : null;
-                var nextStartMs = tr.nextTripStart ? new Date(tr.nextTripStart).getTime() : Infinity;
-                if (stopMs !== null && stopMs <= windowToMs && nextStartMs >= windowFromMs) {
-                    if (pointInPolygon(tr.stopPoint.y, tr.stopPoint.x, zonePoints)) {
-                        presence.hasData = true;
-                        presence.everInZone = true;
-                        if (!isFinite(nextStartMs)) presence.isCurrentlyInZone = true;
-                        if (presence.lastLat === null) { presence.lastLat = tr.stopPoint.y; presence.lastLng = tr.stopPoint.x; }
-                        // Arrival: only record if the stop itself landed INSIDE
-                        // the window — meaning the vehicle actively drove in and
-                        // parked during the window. If stopMs is before
-                        // windowFromMs, the bus was already parked there from
-                        // earlier and never 'arrived' during this window, so we
-                        // skip setting arrivedAtMs (matches the haveSeenOut
-                        // gate on the log-based path).
-                        if (stopMs >= windowFromMs && stopMs <= windowToMs) {
-                            if (presence.arrivedAtMs === null || stopMs < presence.arrivedAtMs) {
-                                presence.arrivedAtMs = stopMs;
-                            }
-                        }
-                        // Departure: only fill if the log-based path didn't
-                        // already set one. nextTripStart is Geotab's next
-                        // engine-on time — a bus can idle in the zone after
-                        // the engine comes on (e.g. warming up after kids
-                        // board), so this is often BEFORE the physical
-                        // boundary crossing the GPS logs show. The log-based
-                        // detection in computePresenceFromLogs is the source
-                        // of truth; we only use this as a fallback when logs
-                        // were too sparse to catch the crossing.
-                        if (isFinite(nextStartMs) && nextStartMs >= windowFromMs && nextStartMs <= windowToMs) {
-                            if (presence.departedAtMs === null) {
-                                presence.departedAtMs = nextStartMs;
-                            }
-                        }
-                    }
-                }
-            }
-            // Trip start point: vehicle was there at the moment the trip began, then drove off.
-            // We deliberately don't set arrivedAtMs here — we don't actually know when the
-            // bus arrived, only that it was parked when the engine started. Guessing
-            // windowFromMs produced misleading early arrivals. departedAtMs is only filled
-            // as a fallback (engine-on is not the same as physically leaving the zone —
-            // buses can idle inside the zone for minutes after the key is turned). The
-            // log-based crossing time is authoritative; we only fill when logs missed it.
-            // engineStartedAtMs is a real observation and keeps its "earliest wins" logic.
-            if (tr.startPoint && typeof tr.startPoint.x === 'number' && typeof tr.startPoint.y === 'number') {
-                var startMs2 = tr.start ? new Date(tr.start).getTime() : null;
-                if (startMs2 !== null && startMs2 >= windowFromMs && startMs2 <= windowToMs) {
-                    if (pointInPolygon(tr.startPoint.y, tr.startPoint.x, zonePoints)) {
-                        presence.hasData = true;
-                        presence.everInZone = true;
-                        if (presence.departedAtMs === null) {
-                            presence.departedAtMs = startMs2;
-                        }
-                        if (presence.engineStartedAtMs === null || startMs2 < presence.engineStartedAtMs) {
-                            presence.engineStartedAtMs = startMs2;
-                        }
-                    }
-                }
-            }
-        }
+    // The function is kept as a no-op stub so its existing call sites
+    // continue to compile; it can be removed entirely on a future cleanup
+    // pass.
+    function augmentPresenceWithTrips(presence /*, trips, driverIdFilter, deviceIdSet, zonePoints, windowFromMs, windowToMs */) {
         return presence;
     }
 
@@ -4468,6 +4832,223 @@
         var s = {};
         for (var i = 0; i < (ids || []).length; i++) s[ids[i]] = true;
         return s;
+    }
+
+    // Latest known position from a (possibly unsorted) log list, regardless
+    // of any window. Used by engine-watch for pre-window views (the route
+    // hasn't started yet so presence has no in-window data, but the device
+    // is still pinging GPS in the meantime).
+    function findLatestLogPosition(logs) {
+        var lat = null, lng = null, ms = null;
+        if (!logs) return { lat: null, lng: null, ms: null };
+        for (var i = 0; i < logs.length; i++) {
+            var lg = logs[i];
+            if (typeof lg.latitude !== 'number' || typeof lg.longitude !== 'number') continue;
+            var t = lg.dateTime ? new Date(lg.dateTime).getTime() : 0;
+            if (ms === null || t > ms) { lat = lg.latitude; lng = lg.longitude; ms = t; }
+        }
+        return { lat: lat, lng: lng, ms: ms };
+    }
+
+    // Optional engine-watch indicator. We pull DiagnosticIgnitionId
+    // StatusData per-device (using deviceSearch + diagnosticSearch +
+    // a fromDate/toDate window) — Geotab's documented pattern for "ignition
+    // status for a vehicle over a time range". First call per device pulls
+    // the last 24h so a row whose ignition was set hours ago shows the
+    // right state immediately; subsequent ticks fetch only the delta since
+    // the last successful poll. We keep a cumulative per-device map so a
+    // record committed hours ago is still remembered even though it won't
+    // appear in later delta windows.
+    // Per-device engine state from DiagnosticIgnitionId — { on: bool,
+    // asOfMs: number } per device.
+    var _engineByDevice = {};
+    // Per-device last successful poll-window upper bound (ms). Used both
+    // for throttling (skip a device whose last poll is < throttle ago) and
+    // for delta windows (next fetch starts at last - overlap). Absence
+    // means "needs the 24h bootstrap fetch."
+    var _engineLastPollMsByDevice = {};
+    var _engineInflight = null;
+    var IGNITION_BOOTSTRAP_HOURS = 24;
+    var IGNITION_POLL_THROTTLE_MS = 25 * 1000;
+    // Per-row freshness gate. We trust "ON" only when either the ignition
+    // record itself is recent OR the device has pinged GPS recently — older
+    // than this and the device might just be silent, so a stale "ON" record
+    // gets degraded to Unknown rather than a green badge we can't verify.
+    // Stale "OFF" stays OFF: a vehicle that's been parked for a day is, in
+    // fact, off.
+    var ENGINE_FRESHNESS_MS = 30 * 60 * 1000;
+    // 60s overlap on each delta poll absorbs Geotab's documented log
+    // back-dating window so we never miss a transition between ticks.
+    var IGNITION_DELTA_OVERLAP_MS = 60 * 1000;
+    var IGNITION_DIAG_ID_IGN = 'DiagnosticIgnitionId';
+
+    function resetIgnitionFeed() {
+        _engineByDevice = {};
+        _engineLastPollMsByDevice = {};
+        _engineInflight = null;
+    }
+
+    function _mergeEngineRecord(map, r) {
+        if (!r || !r.device || !r.device.id) return;
+        var t = r.dateTime ? new Date(r.dateTime).getTime() : 0;
+        var prev = map[r.device.id];
+        if (prev && t <= prev.asOfMs) return;
+        map[r.device.id] = {
+            on: typeof r.data === 'number' ? r.data > 0 : !!r.data,
+            asOfMs: t
+        };
+    }
+
+    function _getEngineEntry(deviceId) {
+        return _engineByDevice[deviceId] || null;
+    }
+
+    // StatusData query for one device's ignition over a window. Matches
+    // Geotab's documented form for "ignition status for a vehicle over a
+    // time range" — narrowing by deviceSearch is the canonical pattern
+    // and works reliably across databases regardless of broader scoping.
+    function _buildIgnitionQuery(deviceId, fromIso, toIso) {
+        return {
+            typeName: 'StatusData',
+            search: {
+                deviceSearch: { id: deviceId },
+                diagnosticSearch: { id: IGNITION_DIAG_ID_IGN },
+                fromDate: fromIso,
+                toDate: toIso
+            },
+            resultsLimit: 50000
+        };
+    }
+
+    // Fetch ignition for the given (device, fromMs) jobs. We pass per-job
+    // windows so a never-polled device gets its 24h bootstrap in the same
+    // multiCall as already-polled devices' deltas. Per-call failures are
+    // tolerated — a missing diagnostic on one device doesn't sink others.
+    async function _fetchIgnitionForJobs(jobs, toMs) {
+        if (!jobs || !jobs.length) return;
+        var toIso = new Date(toMs).toISOString();
+        var calls = [];
+        for (var i = 0; i < jobs.length; i++) {
+            var fromIso = new Date(jobs[i].fromMs).toISOString();
+            calls.push(['Get', _buildIgnitionQuery(jobs[i].deviceId, fromIso, toIso)]);
+        }
+        var results;
+        try {
+            results = await apiMultiCall(calls);
+        } catch (e) {
+            // Whole multiCall failed (rare — usually transport-level).
+            // Fall back per-call so one bad call doesn't sink the rest.
+            var settled = await Promise.allSettled(calls.map(function (c) { return apiCall(c[0], c[1]); }));
+            results = settled.map(function (s) { return s.status === 'fulfilled' ? s.value : []; });
+        }
+        for (var j = 0; j < results.length; j++) {
+            var recs = results[j] || [];
+            for (var k = 0; k < recs.length; k++) _mergeEngineRecord(_engineByDevice, recs[k]);
+        }
+        for (var d = 0; d < jobs.length; d++) _engineLastPollMsByDevice[jobs[d].deviceId] = toMs;
+    }
+
+    // Poll engine state for the given devices. Per-device throttle: each
+    // device gets its own staleness check, so a newly-added device (route
+    // edit, driver swap) gets its 24h bootstrap on the very next call
+    // without waiting for a fleet-wide cooldown. Devices polled within
+    // IGNITION_POLL_THROTTLE_MS are skipped this round.
+    async function pollEngineState(deviceIds) {
+        if (_engineInflight) return _engineInflight;
+        if (!deviceIds || !deviceIds.length) return _engineByDevice;
+        var nowMs = Date.now();
+        var jobs = [];
+        for (var i = 0; i < deviceIds.length; i++) {
+            var id = deviceIds[i];
+            var last = _engineLastPollMsByDevice[id] || 0;
+            if (!last) {
+                // First poll for this device — bootstrap with 24h history.
+                jobs.push({ deviceId: id, fromMs: nowMs - IGNITION_BOOTSTRAP_HOURS * 60 * 60 * 1000 });
+            } else if (nowMs - last >= IGNITION_POLL_THROTTLE_MS) {
+                // Stale — fetch a delta from last poll (with backdating overlap).
+                jobs.push({ deviceId: id, fromMs: last - IGNITION_DELTA_OVERLAP_MS });
+            }
+            // Else: device polled recently — skip this round.
+        }
+        if (!jobs.length) return _engineByDevice;
+        var run = (async function () {
+            try {
+                await _fetchIgnitionForJobs(jobs, nowMs);
+            } catch (err) {
+                showErrorBanner('Engine-watch failed: ' +
+                    (err && err.message ? err.message : 'unknown error'),
+                    { autoDismissMs: 8000 });
+            }
+            return _engineByDevice;
+        })().finally(function () {
+            if (_engineInflight === run) _engineInflight = null;
+        });
+        _engineInflight = run;
+        return run;
+    }
+
+    function anyRouteUsesEngineWatch(routes) {
+        if (!routes) return false;
+        for (var i = 0; i < routes.length; i++) {
+            if (routes[i] && routes[i].engineWatch && routes[i].engineZoneId) return true;
+        }
+        return false;
+    }
+
+    // Devices that belong to routes with engine-watch enabled. We only fetch
+    // ignition StatusData for these so a fleet using engine-watch on one or
+    // two routes doesn't pay for ignition reads on every device.
+    function collectEngineWatchDeviceIds(routes, trips) {
+        var watchRoutes = (routes || []).filter(function (r) {
+            return r && r.engineWatch && r.engineZoneId;
+        });
+        if (!watchRoutes.length) return [];
+        return collectRouteDeviceIds(watchRoutes, trips);
+    }
+
+    // Returns 'on' | 'off' | 'unknown' for an engine-watch row.
+    //   'on'      = ignition is currently on AND the vehicle's last known
+    //               position is inside the engine zone polygon AND either
+    //               the ignition record or the GPS feed is fresh (so we can
+    //               defend the green badge).
+    //   'off'     = ignition known to be off, OR ignition on but vehicle is
+    //               outside the engine zone (already left / not at depot).
+    //   'unknown' = no ignition data, no GPS yet, missing zone polygon,
+    //               or the ON claim is too stale to verify.
+    // Driver-mode rows pass the full set of devices the driver might be on;
+    // vehicle-mode rows pass a single-element array.
+    function computeEngineWatchState(deviceIds, lastLat, lastLng, lastLogMs, engineZonePoints) {
+        if (!deviceIds || !deviceIds.length) return 'unknown';
+        var sawData = false;
+        var anyOn = false;
+        var newestAsOfMs = 0;
+        for (var i = 0; i < deviceIds.length; i++) {
+            var entry = _getEngineEntry(deviceIds[i]);
+            if (!entry) continue;
+            sawData = true;
+            if (entry.on) anyOn = true;
+            if (entry.asOfMs > newestAsOfMs) newestAsOfMs = entry.asOfMs;
+        }
+        if (!sawData) return 'unknown';
+        // Stale OFF stays OFF — a parked vehicle legitimately goes quiet,
+        // and the user is correctly told "not ready".
+        if (!anyOn) return 'off';
+        // ON requires fresh corroboration: either the ignition record itself
+        // is recent, or the device is pinging GPS recently. Without either,
+        // the device may simply have lost contact while the engine state
+        // was last reported on — degrade to Unknown.
+        var nowMs = Date.now();
+        var ignitionFresh = (nowMs - newestAsOfMs) < ENGINE_FRESHNESS_MS;
+        var gpsFresh = lastLogMs != null && (nowMs - lastLogMs) < ENGINE_FRESHNESS_MS;
+        if (!ignitionFresh && !gpsFresh) return 'unknown';
+        // Engine on and fresh — does the location agree?
+        if (lastLat == null || lastLng == null) return 'unknown';
+        // Engine zone is required when engine watch is enabled. If its
+        // polygon is missing (zone deleted or stripped from cache), we
+        // can't resolve "at the depot" vs "elsewhere" — say so honestly
+        // rather than reporting a green ON we can't actually verify.
+        if (!engineZonePoints || !engineZonePoints.length) return 'unknown';
+        return pointInPolygon(lastLat, lastLng, engineZonePoints) ? 'on' : 'off';
     }
 
     // Find the closest route for the same driver/vehicle that sits right before
@@ -4506,6 +5087,93 @@
         return best;
     }
 
+    // Find earlier-starting same-direction routes for the same entity whose
+    // window overlaps the current route's window. Sorted earliest-first.
+    // Used to enforce "the first arrival/departure in the overlap region
+    // belongs to the earlier route — the later route only records its own
+    // event after a reverse transition." Without this, two overlapping
+    // routes for the same driver both claim the same arrival/departure.
+    function findOverlappingPriorRoutes(currentRoute, assignedId, routesList, dateStr) {
+        if (!currentRoute || !assignedId || !routesList) return [];
+        var dayOfWeek = new Date(dateStr + 'T12:00:00').getDay();
+        var assignedField = currentRoute.trackBy === 'driver' ? 'driverIds' : 'vehicleIds';
+        var curStart = timeToMinutes(currentRoute.startTime);
+        var matches = [];
+        for (var i = 0; i < routesList.length; i++) {
+            var r = routesList[i];
+            if (!r || r._uid === currentRoute._uid) continue;
+            if (r.direction !== currentRoute.direction) continue;
+            if (r.trackBy !== currentRoute.trackBy) continue;
+            var ids = r[assignedField] || [];
+            if (ids.indexOf(assignedId) === -1) continue;
+            var days = r.activeDays || [0,1,2,3,4,5];
+            if (days.indexOf(dayOfWeek) === -1) continue;
+            var rStart = timeToMinutes(r.startTime);
+            var rEnd = timeToMinutes(r.endTime);
+            if (rEnd <= curStart) continue;
+            // r is "prior" if it strictly starts earlier, OR starts at the
+            // exact same minute but has a smaller _uid. _uid encodes
+            // creation time (generateUid uses Date.now), so lex order
+            // matches creation order — older route wins the tiebreak.
+            var isPrior = (rStart < curStart) ||
+                (rStart === curStart && r._uid && currentRoute._uid && r._uid < currentRoute._uid);
+            if (isPrior) matches.push(r);
+        }
+        matches.sort(function (a, b) {
+            var d = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+            if (d !== 0) return d;
+            return (a._uid || '').localeCompare(b._uid || '');
+        });
+        return matches;
+    }
+
+    // Returns the post-overlap-adjustment event time (ms) for a given route
+    // and assigned id, or null if no event survives. Used by both the public
+    // adjustPresenceForAdjacentRoutes function and recursively by itself so
+    // chains of 3+ overlapping routes (A overlaps B overlaps C) resolve
+    // correctly — without the recursion C would use B's *raw* event time
+    // (which equals A's, since B alone would still see the same first
+    // arrival), causing C's cutoff to be one slot too early.
+    // The cache (keyed by routeUid|aId) prevents redundant recomputation
+    // and protects against accidental cycles. depth caps the recursion.
+    function _adjustedEventForOverlap(route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs, cache, depth) {
+        if (depth > 8) return null;
+        var key = (route._uid || '') + '|' + aId;
+        if (cache && (key in cache)) return cache[key];
+        if (cache) cache[key] = null; // tentative, prevents cycles
+        var dayMs = new Date(dateStr + 'T00:00:00').getTime();
+        var startMs = dayMs + timeToMinutes(route.startTime) * 60000;
+        var endMs = dayMs + timeToMinutes(route.endTime) * 60000;
+        if (isToday && nowMs) endMs = Math.min(endMs, nowMs);
+        if (endMs <= startMs) return null;
+        var isOutside = route.direction === 'outside';
+        var eventField = isOutside ? 'departedAtMs' : 'arrivedAtMs';
+        var devSet = deviceIdSetFromList(rowDeviceIds);
+        var driverFilter = (route.trackBy === 'driver') ? aId : null;
+
+        // Recursively get the latest adjusted event among prior overlaps —
+        // each prior may itself have priors, so chains resolve top-down.
+        var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
+        var maxPriorEventMs = 0;
+        for (var op = 0; op < overlappingPriors.length; op++) {
+            var priorEvent = _adjustedEventForOverlap(
+                overlappingPriors[op], aId, mergedLogs, trips, rowDeviceIds,
+                zonePoints, dateStr, isToday, nowMs, cache, depth + 1
+            );
+            if (priorEvent && priorEvent > maxPriorEventMs) maxPriorEventMs = priorEvent;
+        }
+        var winFromMs = (maxPriorEventMs > 0) ? Math.max(startMs, maxPriorEventMs + 1) : startMs;
+        if (winFromMs >= endMs) {
+            if (cache) cache[key] = null;
+            return null;
+        }
+        var pres = computePresenceFromLogs(mergedLogs, zonePoints, winFromMs, endMs);
+        augmentPresenceWithTrips(pres, trips, driverFilter, devSet, zonePoints, winFromMs, endMs);
+        var ev = pres[eventField] || null;
+        if (cache) cache[key] = ev;
+        return ev;
+    }
+
     // Re-attribute late arrivals/departures between two adjacent routes for the
     // same driver (driver-mode) or vehicle (vehicle-mode). Without this, a
     // driver late out of Route A (7:30-8:30) arriving at 8:45 gets credited to
@@ -4522,9 +5190,6 @@
     // Mutates presence.arrivedAtMs (inside) or presence.departedAtMs (outside).
     function adjustPresenceForAdjacentRoutes(presence, route, aId, mergedLogs, trips, rowDeviceIds, zonePoints, dateStr, isToday, nowMs) {
         if (!zonePoints || !zonePoints.length) return;
-        // Engine-start routes mark the beginning of a route and may overlap other
-        // routes — they're treated independently and never re-attribute events.
-        if (route.direction === 'engineStart') return;
         var dayMs = new Date(dateStr + 'T00:00:00').getTime();
         var routeEndMs = dayMs + timeToMinutes(route.endTime) * 60000;
         var isDriverMode = route.trackBy === 'driver';
@@ -4561,6 +5226,55 @@
                 }
             }
             if (priorOwns) presence[eventField] = null;
+        }
+
+        // (c) Overlapping prior routes — same entity, same direction, started
+        // before us, window extends into ours. The earliest committed event
+        // belongs to the earlier route; ours must come AFTER that event AND
+        // after a reverse transition. We enforce this by re-running our
+        // detection from just past the latest *adjusted* prior event time —
+        // computePresenceFromLogs's own dwell rules then require the bus to
+        // leave-and-return (inside) or return-and-leave (outside) before an
+        // event will commit. Uses _adjustedEventForOverlap which recurses
+        // through chains of overlaps so 3+ layered routes resolve correctly.
+        // Runs AFTER (a) so any later event we find here can't be wiped by
+        // the contiguous-prior tail-capture logic above.
+        var overlappingPriors = findOverlappingPriorRoutes(route, aId, savedRoutes, dateStr);
+        if (overlappingPriors.length) {
+            var overlapCache = {};
+            var maxPriorEventMs = 0;
+            for (var op = 0; op < overlappingPriors.length; op++) {
+                var priorEv = _adjustedEventForOverlap(
+                    overlappingPriors[op], aId, mergedLogs, trips, rowDeviceIds,
+                    zonePoints, dateStr, isToday, nowMs, overlapCache, 0
+                );
+                if (priorEv && priorEv > maxPriorEventMs) maxPriorEventMs = priorEv;
+            }
+            if (maxPriorEventMs > 0) {
+                var ourStartMs = dayMs + timeToMinutes(route.startTime) * 60000;
+                var newFromMs = Math.max(ourStartMs, maxPriorEventMs + 1);
+                var newToMs = routeEndMs;
+                if (isToday && nowMs) newToMs = Math.min(newToMs, nowMs);
+                if (newFromMs < newToMs) {
+                    var adjusted = computePresenceFromLogs(mergedLogs, zonePoints, newFromMs, newToMs);
+                    augmentPresenceWithTrips(adjusted, trips, driverFilter, devSet, zonePoints, newFromMs, newToMs);
+                    presence[eventField] = adjusted[eventField] || null;
+                    if (!isOutside) {
+                        if (adjusted.everInZone) presence.everInZone = true;
+                    } else {
+                        // Reset the everInZone fallback for outside routes —
+                        // see comment in goodDir check; without this the
+                        // status would still read "Departed" from the
+                        // pre-overlap window even after we cleared
+                        // departedAtMs.
+                        presence.everInZone = adjusted.everInZone;
+                        presence.isCurrentlyInZone = adjusted.isCurrentlyInZone;
+                    }
+                } else {
+                    presence[eventField] = null;
+                    if (isOutside) presence.everInZone = false;
+                }
+            }
         }
 
         // (b) We have no own-window event; check if a late event slipped into the next route.
@@ -4769,11 +5483,17 @@
             targetLabelHtml = '<span class="rpEtaBarTargetLabel" style="left:' + targetCenterPct + '%">' +
                 'Target ' + formatTargetRange(route) + '</span>';
         }
+        var nowMarker = '';
+        var nowVisible = nowMs > windowFromMs && nowMs < windowToMs;
+        if (nowVisible) {
+            nowMarker = '<div class="rpEtaBarNow" style="left:' + elapsedPct + '%" title="Now"></div>';
+        }
         return '<div class="rpEtaBarWrap" data-route-uid="' + route._uid + '" ' +
                 'data-start-ms="' + windowFromMs + '" data-end-ms="' + windowToMs + '">' +
                 '<div class="rpEtaBarTrack">' +
                     '<div class="rpEtaBarFill" style="width:' + elapsedPct + '%"></div>' +
                     targetMarker +
+                    nowMarker +
                 '</div>' +
                 '<div class="rpEtaBarLabels">' +
                     '<span>' + formatTime12(route.startTime) + '</span>' +
@@ -4798,6 +5518,22 @@
             else { pct = ((nowMs - s) / (e - s)) * 100; status = Math.round(pct) + '% elapsed'; }
             var fill = w.querySelector('.rpEtaBarFill');
             if (fill) fill.style.setProperty('width', pct + '%', 'important');
+            // Now-marker tracks elapsed pct; hidden outside the active window.
+            var nowEl = w.querySelector('.rpEtaBarNow');
+            var nowVisible = nowMs > s && nowMs < e;
+            if (nowVisible) {
+                if (!nowEl) {
+                    nowEl = document.createElement('div');
+                    nowEl.className = 'rpEtaBarNow';
+                    nowEl.title = 'Now';
+                    var trackEl = w.querySelector('.rpEtaBarTrack');
+                    if (trackEl) trackEl.appendChild(nowEl);
+                }
+                if (nowEl) nowEl.style.setProperty('left', pct + '%', 'important');
+                styleEtaNowMarker(nowEl);
+            } else if (nowEl) {
+                nowEl.parentNode.removeChild(nowEl);
+            }
             var st = w.querySelector('.rpEtaBarStatus');
             if (st) {
                 st.textContent = status;
@@ -4812,6 +5548,20 @@
                 st.style.setProperty('right', ended ? '70px' : '16px', 'important');
             }
         }
+    }
+
+    function styleEtaNowMarker(el) {
+        if (!el) return;
+        ensureLivePillKeyframes();
+        forceStyle(el, {
+            'position': 'absolute', 'top': '50%',
+            'width': '10px', 'height': '10px', 'border-radius': '50%',
+            'background': '#0078d4', 'border': '2px solid #fff',
+            'transform': 'translate(-50%, -50%)',
+            'transition': 'left 0.4s ease',
+            'z-index': '3', 'pointer-events': 'none',
+            'animation': 'rpEtaNowPulse 1.6s ease-out infinite'
+        });
     }
 
     function styleEtaBars() {
@@ -4847,6 +5597,10 @@
                 'box-sizing': 'border-box', 'z-index': '2'
             });
         }
+        // Now-marker — small pulsing blue dot that crawls from start to end
+        // as the route window elapses. Hidden when the window is not active.
+        var nows = document.querySelectorAll('.rpEtaBarNow');
+        for (var n = 0; n < nows.length; n++) styleEtaNowMarker(nows[n]);
         var lbls = document.querySelectorAll('.rpEtaBarLabels');
         for (var i = 0; i < lbls.length; i++) {
             forceStyle(lbls[i], {
@@ -4879,6 +5633,29 @@
         }
     }
 
+    // Engine-watch icons — a power button (universally read as ignition state).
+    // ON: filled green, with a small ⚡ accent. OFF: muted with a slash.
+    function engineOnIconSvg() {
+        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 3v9"/>' +
+            '<path d="M6.4 7.6a8 8 0 1 0 11.2 0"/>' +
+            '</svg>';
+    }
+    function engineOffIconSvg() {
+        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 3v9"/>' +
+            '<path d="M6.4 7.6a8 8 0 1 0 11.2 0"/>' +
+            '<path d="M5 5l14 14" stroke-width="2.4"/>' +
+            '</svg>';
+    }
+    function engineUnknownIconSvg() {
+        return '<svg class="rpEngineIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<circle cx="12" cy="12" r="9"/>' +
+            '<path d="M9.5 9.2a2.6 2.6 0 1 1 3.4 2.5c-.7.3-1.1.7-1.1 1.4v0.6"/>' +
+            '<circle cx="11.9" cy="16.5" r="0.7" fill="currentColor"/>' +
+            '</svg>';
+    }
+
     // Fill in each route card's progress badge placeholder using a counts map.
     // counts: { [routeUid]: { completed, total, direction } }
     function applyRouteProgressBadges(counts) {
@@ -4888,7 +5665,16 @@
             var uid = nodes[i].dataset.routeUid;
             var c = counts[uid];
             if (!c) { nodes[i].innerHTML = ''; continue; }
+            var prevCompleted = parseInt(nodes[i].dataset.prevCompleted || '-1', 10);
             nodes[i].innerHTML = formatRouteProgressBadge(c.completed, c.total, c.direction, c.late || 0);
+            nodes[i].dataset.prevCompleted = String(c.completed);
+            // Animate the count up when it just incremented (e.g. another
+            // bus arrived). Pull the "N/M" digit, swap it to old value,
+            // then tick it up to the new value over ~500ms. Only fires on
+            // increase so collapses or reloads don't replay.
+            if (prevCompleted >= 0 && c.completed > prevCompleted) {
+                _rollProgressBadgeNumber(nodes[i], prevCompleted, c.completed);
+            }
         }
         // Mark cards as "all good" for the "late arrivals/departures only" filter.
         // A card is "all good" only when everyone has arrived/departed AND none are late vs target.
@@ -4927,6 +5713,43 @@
                 html += '<div class="rpNotArrivedLine"><span class="rpNotArrivedLabel">Not ' + verb + ':</span> ' +
                     '<span class="rpNotArrivedNames">' + escapeHtml(notNames.join(', ')) + '</span></div>';
             }
+            // Optional engine-watch breakdown: only meaningful for the
+            // not-yet-arrived/departed crowd, so we just show their split.
+            // ON listed first so "about to go" is the eye's first stop;
+            // Unavailable last because it's the lowest-signal bucket.
+            // We also require at least one row with a confirmed ON or OFF
+            // before rendering — when ignition data isn't flowing at all,
+            // an "Engine: 0 on · 0 off · N unavailable" line is just noise.
+            if (c.engineWatch) {
+                var onN = c.engineOnNames || [];
+                var offN = c.engineOffNames || [];
+                var unkN = c.engineUnknownNames || [];
+                if (onN.length || offN.length) {
+                    var zoneSuffix = c.engineZoneName
+                        ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
+                        : '';
+                    var countParts = onN.length + ' on · ' + offN.length + ' off';
+                    if (unkN.length) countParts += ' · ' + unkN.length + ' unavailable';
+                    var totalSuffix = ' <span class="rpEngineCountChip">' + countParts + '</span>';
+                    var engineParts = '';
+                    if (onN.length) {
+                        engineParts += '<span class="rpEnginePill rpEngineOnPill" title="Ignition is on AND vehicle is currently inside the engine zone — about to go">' +
+                            engineOnIconSvg() + '<span class="rpEngineWord">ON</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
+                            escapeHtml(onN.join(', ')) + '</span></span>';
+                    }
+                    if (offN.length) {
+                        engineParts += '<span class="rpEnginePill rpEngineOffPill" title="Ignition is off, or vehicle is not currently inside the engine zone">' +
+                            engineOffIconSvg() + '<span class="rpEngineWord">OFF</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
+                            escapeHtml(offN.join(', ')) + '</span></span>';
+                    }
+                    if (unkN.length) {
+                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition data reported by the device, or no recent GPS — engine state cannot be determined">' +
+                            engineUnknownIconSvg() + '<span class="rpEngineWord">UNAVAILABLE</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
+                            escapeHtml(unkN.join(', ')) + '</span></span>';
+                    }
+                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="ON = ignition on at the engine zone (about to go). OFF = ignition off OR vehicle not at the zone. Unavailable = no ignition or position data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
+                }
+            }
             rows[i].innerHTML = html;
         }
         var allRows = document.querySelectorAll('.rpRouteArrivedRow');
@@ -4956,6 +5779,96 @@
         for (var nm = 0; nm < notNamesEls.length; nm++) {
             forceStyle(notNamesEls[nm], { 'font-weight': '600', 'color': '#8b1e2a' });
         }
+        // Engine-watch line styling
+        var engLines = document.querySelectorAll('.rpEngineWatchLine');
+        for (var el = 0; el < engLines.length; el++) {
+            forceStyle(engLines[el], { 'margin': '4px 0 2px', 'display': 'flex', 'flex-wrap': 'wrap', 'align-items': 'center', 'gap': '6px' });
+        }
+        var engLabels = document.querySelectorAll('.rpEngineWatchLabel');
+        for (var elb = 0; elb < engLabels.length; elb++) {
+            forceStyle(engLabels[elb], { 'font-weight': '700', 'color': '#374151', 'margin-right': '2px' });
+        }
+        var engZones = document.querySelectorAll('.rpEngineWatchZone');
+        for (var ez = 0; ez < engZones.length; ez++) {
+            forceStyle(engZones[ez], { 'font-weight': '500', 'color': '#6b7280', 'font-size': '12px' });
+        }
+        var engPills = document.querySelectorAll('.rpEnginePill');
+        for (var ep = 0; ep < engPills.length; ep++) {
+            forceStyle(engPills[ep], {
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                'padding': '3px 10px', 'border-radius': '999px',
+                'font-size': '12px', 'font-weight': '600',
+                'border': '1px solid'
+            });
+        }
+        var engOnPills = document.querySelectorAll('.rpEngineOnPill');
+        for (var eo = 0; eo < engOnPills.length; eo++) {
+            // Pulse cadence scales with how many vehicles are about to go.
+            // 1 → relaxed 2.6s; 2-3 → 1.8s; 4+ → 1.2s. Communicates urgency
+            // without becoming distracting.
+            var pillEl = engOnPills[eo];
+            var namesText = (pillEl.querySelector('.rpEngineNamesText') || {}).textContent || '';
+            var nameCount = namesText ? namesText.split(',').length : 1;
+            var pulseSec = nameCount >= 4 ? 1.2 : (nameCount >= 2 ? 1.8 : 2.6);
+            forceStyle(pillEl, {
+                'background': 'linear-gradient(135deg,#d1fae5 0%,#a7f3d0 100%)',
+                'color': '#065f46', 'border-color': '#34d399',
+                'box-shadow': '0 0 0 0 rgba(52,211,153,0.5)',
+                'animation': 'rpEnginePulse ' + pulseSec + 's ease-in-out infinite'
+            });
+        }
+        var engCountChips = document.querySelectorAll('.rpEngineCountChip');
+        for (var ec = 0; ec < engCountChips.length; ec++) {
+            forceStyle(engCountChips[ec], {
+                'display': 'inline-block', 'margin-left': '4px',
+                'padding': '1px 8px', 'border-radius': '999px',
+                'background': '#f3f4f6', 'color': '#374151',
+                'font-size': '11px', 'font-weight': '600'
+            });
+        }
+        var engOffPills = document.querySelectorAll('.rpEngineOffPill');
+        for (var ef = 0; ef < engOffPills.length; ef++) {
+            forceStyle(engOffPills[ef], {
+                'background': '#f3f4f6', 'color': '#6b7280', 'border-color': '#d1d5db'
+            });
+        }
+        var engUnkPills = document.querySelectorAll('.rpEngineUnknownPill');
+        for (var eu = 0; eu < engUnkPills.length; eu++) {
+            forceStyle(engUnkPills[eu], {
+                'background': '#fff7ed', 'color': '#9a3412',
+                'border-color': '#fed7aa', 'border-style': 'dashed'
+            });
+        }
+        var engWords = document.querySelectorAll('.rpEngineWord');
+        for (var ew = 0; ew < engWords.length; ew++) {
+            forceStyle(engWords[ew], { 'letter-spacing': '0.5px', 'font-size': '11px' });
+        }
+        var engSlashes = document.querySelectorAll('.rpEngineSlash');
+        for (var es = 0; es < engSlashes.length; es++) {
+            forceStyle(engSlashes[es], { 'opacity': '0.55', 'margin': '0 2px' });
+        }
+        var engNamesEls = document.querySelectorAll('.rpEngineNamesText');
+        for (var en = 0; en < engNamesEls.length; en++) {
+            forceStyle(engNamesEls[en], { 'font-weight': '600' });
+        }
+        var engIcons = document.querySelectorAll('.rpEngineIcon');
+        for (var ei = 0; ei < engIcons.length; ei++) {
+            forceStyle(engIcons[ei], { 'flex-shrink': '0' });
+        }
+        ensureEnginePulseKeyframes();
+    }
+
+    // Inject the keyframe animation used by the engine-ON pill once.
+    var _enginePulseInjected = false;
+    function ensureEnginePulseKeyframes() {
+        if (_enginePulseInjected) return;
+        var style = document.createElement('style');
+        style.textContent = '@keyframes rpEnginePulse { ' +
+            '0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.45); } ' +
+            '70% { box-shadow: 0 0 0 5px rgba(52,211,153,0); } ' +
+            '100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); } }';
+        document.head.appendChild(style);
+        _enginePulseInjected = true;
     }
 
     // ========== COMPARE LAST 7 DAYS (ROLLING AVERAGE) ==========
@@ -5688,11 +6601,204 @@
             '</svg>';
     }
 
+    // Per-row 14-day sparkline cache. Keyed by "routeUid|assignedId".
+    // Values: [{ dateStr, rate }, ...] where rate is 1 if on-time, 0 if
+    // off-target, null if no-show / inactive day. Paints into every row's
+    // history button via applyRowSparklines.
+    var _rowSparklineCache = {};
+    var _rowSparklineRunId = 0;
+    var _rowSparklineInflight = {}; // key -> bool
+
+    async function computeRowSparklines(rows, baseDateStr) {
+        if (!rows || !rows.length) return;
+        var runId = ++_rowSparklineRunId;
+        var hasTargetCache = {};
+        for (var i = 0; i < rows.length; i++) {
+            if (runId !== _rowSparklineRunId) return;
+            var r = rows[i];
+            if (!r || !r.route || !r.assignedId) continue;
+            var key = r.route._uid + '|' + r.assignedId;
+            if (_rowSparklineCache[key] || _rowSparklineInflight[key]) continue;
+            _rowSparklineInflight[key] = true;
+            try {
+                var data = await computeRowTimelineData(r.route, r.assignedId, r.entityType, baseDateStr);
+                if (runId !== _rowSparklineRunId) return;
+                if (!(r.route._uid in hasTargetCache)) hasTargetCache[r.route._uid] = routeHasTarget(r.route);
+                var hasTarget = hasTargetCache[r.route._uid];
+                var tb = hasTarget ? routeTargetBounds(r.route) : null;
+                var graceMs = hasTarget ? Math.max(0, parseInt(r.route.graceMin, 10) || 0) * 60000 : 0;
+                var values = [];
+                for (var d = 0; d < data.length; d++) {
+                    var entry = data[d];
+                    if (entry.inactive || !entry.eventMs) {
+                        values.push({ dateStr: entry.dateStr, rate: null });
+                        continue;
+                    }
+                    var rate = 1;
+                    if (hasTarget) {
+                        var dayMs = new Date(entry.dateStr + 'T00:00:00').getTime();
+                        var tsMs = dayMs + timeToMinutes(tb.start) * 60000;
+                        var teMs = dayMs + timeToMinutes(tb.end) * 60000;
+                        rate = (entry.eventMs >= tsMs - graceMs && entry.eventMs <= teMs + graceMs) ? 1 : 0;
+                    }
+                    values.push({ dateStr: entry.dateStr, rate: rate });
+                }
+                _rowSparklineCache[key] = values;
+                var changed = {}; changed[key] = true;
+                applyRowSparklines(changed);
+            } catch (e) {
+                // Swallow — one row's failure shouldn't poison the rest.
+            } finally {
+                _rowSparklineInflight[key] = false;
+            }
+        }
+    }
+
+    function applyRowSparklines(changedSet) {
+        var minis = document.querySelectorAll('#rpProgressContent .rpRowSparklineMini');
+        for (var i = 0; i < minis.length; i++) {
+            var key = minis[i].dataset.rowKey;
+            if (changedSet && !changedSet[key]) {
+                if (minis[i].innerHTML) continue;
+            }
+            minis[i].innerHTML = renderInlineSparklineSvg(_rowSparklineCache[key] || []);
+        }
+        styleRowSparklines();
+    }
+
+    function styleRowSparklines() {
+        var minis = document.querySelectorAll('.rpRowSparklineMini');
+        for (var i = 0; i < minis.length; i++) {
+            // Full appearance applied here so first paint is consistent —
+            // the styleRowTlButtons interval re-applies the same shape
+            // every 2s for any rows added after; both code paths now agree
+            // on the same property set.
+            forceStyle(minis[i], {
+                'display': 'inline-flex', 'align-items': 'center', 'flex-shrink': '0',
+                'padding': '2px 4px', 'border-radius': '6px',
+                'background': 'linear-gradient(180deg,#ffffff 0%,#f8fafc 100%)',
+                'border': '1px solid #d0d7de',
+                'box-shadow': '0 1px 2px rgba(15,23,42,0.04)'
+            });
+        }
+    }
+
     // When compute finishes, re-render the popup if it's still open for a computed route.
     function applySparklines(routeUidSet) {
         if (_sparklineOpenUid && routeUidSet && routeUidSet[_sparklineOpenUid]) {
             openSparklinePopup(_sparklineOpenUid);
         }
+        // Paint an inline mini-sparkline into every visible holder whose
+        // data is cached. Cheap — one tiny SVG per route, redrawn only
+        // when the route's data changes (or first paint, when routeUidSet
+        // is null).
+        var minis = document.querySelectorAll('#rpProgressContent .rpSparklineMini');
+        for (var i = 0; i < minis.length; i++) {
+            var uid = minis[i].dataset.routeUid;
+            if (routeUidSet && !routeUidSet[uid]) {
+                if (minis[i].innerHTML) continue;
+            }
+            minis[i].innerHTML = renderInlineSparklineSvg(_sparklineCache[uid] || []);
+        }
+    }
+
+    // Compact 60x14 SVG sparkline of a route's last-N on-time rates.
+    // Empty placeholder when no data yet (light dotted track).
+    // Placeholder shown while real-data sparkline is still loading. Muted
+    // mini line-chart icon (axis hint + baseline ticks + upward trend
+    // line + dots) so the user can tell the row will grow a real graph
+    // once data arrives. Two layered animations:
+    //   1. The trend line "draws itself" left-to-right via stroke-dashoffset,
+    //      then resets — subtle "graph is being plotted" hint.
+    //   2. The trailing dot pulses gently to draw the eye to the leading
+    //      edge of the draw.
+    // Same 60x14 footprint as the rendered sparkline so layout doesn't
+    // shift on swap.
+    function _renderInlineSparklineLoadingSvg(w, h) {
+        ensureSparklineLoadingKeyframes();
+        var ax = 'stroke="#cbd5e1" stroke-width="0.8" stroke-linecap="round"';
+        var dot = 'fill="#94a3b8"';
+        // Length of the polyline used for the stroke-dasharray animation;
+        // a hair longer than the actual path so dashoffset wraps cleanly.
+        var pathLen = 70;
+        return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" ' +
+            'style="display:block;">' +
+            // tiny axis hint
+            '<line x1="2" y1="' + (h - 1.5) + '" x2="' + (w - 2) + '" y2="' + (h - 1.5) + '" ' + ax + '/>' +
+            // 4 short baseline ticks (suggests "bars are coming")
+            '<line x1="10" y1="' + (h - 1.5) + '" x2="10" y2="' + (h - 4) + '" ' + ax + '/>' +
+            '<line x1="22" y1="' + (h - 1.5) + '" x2="22" y2="' + (h - 5) + '" ' + ax + '/>' +
+            '<line x1="34" y1="' + (h - 1.5) + '" x2="34" y2="' + (h - 6) + '" ' + ax + '/>' +
+            '<line x1="46" y1="' + (h - 1.5) + '" x2="46" y2="' + (h - 7.5) + '" ' + ax + '/>' +
+            // upward trend line — animated draw
+            '<polyline class="rpSparklineLoadingLine" points="6,11 18,8.5 30,7 42,5 54,3.5" ' +
+                'fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" ' +
+                'stroke-dasharray="' + pathLen + '" stroke-dashoffset="' + pathLen + '"/>' +
+            // Static dots
+            '<circle cx="6"  cy="11"  r="1.1" ' + dot + '/>' +
+            '<circle cx="18" cy="8.5" r="1.1" ' + dot + '/>' +
+            '<circle cx="30" cy="7"   r="1.1" ' + dot + '/>' +
+            '<circle cx="42" cy="5"   r="1.1" ' + dot + '/>' +
+            // Leading-edge dot pulses subtly
+            '<circle class="rpSparklineLoadingHead" cx="54" cy="3.5" r="1.4" ' + dot + '/>' +
+            '</svg>';
+    }
+
+    // Inject keyframes for the loading-state sparkline once.
+    var _sparklineLoadingCssInjected = false;
+    function ensureSparklineLoadingKeyframes() {
+        if (_sparklineLoadingCssInjected) return;
+        var style = document.createElement('style');
+        style.textContent =
+            '@keyframes rpSparklineDraw { ' +
+                '0% { stroke-dashoffset: 70; opacity: 0.45; } ' +
+                '60% { stroke-dashoffset: 0; opacity: 0.9; } ' +
+                '90% { stroke-dashoffset: 0; opacity: 0.9; } ' +
+                '100% { stroke-dashoffset: 0; opacity: 0.45; }' +
+            '} ' +
+            '@keyframes rpSparklineHead { ' +
+                '0% { transform: scale(1); opacity: 0.55; } ' +
+                '50% { transform: scale(1.5); opacity: 1; } ' +
+                '100% { transform: scale(1); opacity: 0.55; }' +
+            '} ' +
+            '.rpSparklineLoadingLine { animation: rpSparklineDraw 2.2s ease-out infinite; } ' +
+            '.rpSparklineLoadingHead { animation: rpSparklineHead 2.2s ease-in-out infinite; transform-origin: 54px 3.5px; transform-box: fill-box; }';
+        document.head.appendChild(style);
+        _sparklineLoadingCssInjected = true;
+    }
+
+    function renderInlineSparklineSvg(values) {
+        var w = 60, h = 14, pad = 1;
+        if (!values || !values.length) return _renderInlineSparklineLoadingSvg(w, h);
+        var rates = [];
+        for (var i = 0; i < values.length; i++) {
+            var v = values[i];
+            rates.push((v && v.rate != null) ? v.rate : null);
+        }
+        var span = w - 2 * pad;
+        var n = rates.length;
+        var stepX = n > 1 ? span / (n - 1) : 0;
+        var pts = [];
+        for (var j = 0; j < n; j++) {
+            if (rates[j] == null) continue;
+            var x = pad + j * stepX;
+            var y = pad + (1 - rates[j]) * (h - 2 * pad);
+            pts.push([x, y]);
+        }
+        if (!pts.length) return _renderInlineSparklineLoadingSvg(w, h);
+        var lastRate = rates[rates.length - 1];
+        var lineColor = lastRate == null ? '#94a3b8' : (lastRate >= 0.85 ? '#10b981' : (lastRate >= 0.5 ? '#f59e0b' : '#ef4444'));
+        var areaColor = lastRate == null ? 'rgba(148,163,184,0.18)' : (lastRate >= 0.85 ? 'rgba(16,185,129,0.18)' : (lastRate >= 0.5 ? 'rgba(245,158,11,0.18)' : 'rgba(239,68,68,0.18)'));
+        var poly = pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
+        var area = poly + ' ' + (pts[pts.length - 1][0]).toFixed(1) + ',' + (h - pad).toFixed(1) +
+                   ' ' + pts[0][0].toFixed(1) + ',' + (h - pad).toFixed(1);
+        var lastDot = '<circle cx="' + pts[pts.length - 1][0].toFixed(1) + '" cy="' + pts[pts.length - 1][1].toFixed(1) +
+            '" r="1.6" fill="' + lineColor + '"/>';
+        return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" style="display:block;">' +
+            '<polygon points="' + area + '" fill="' + areaColor + '" stroke="none"/>' +
+            '<polyline points="' + poly + '" fill="none" stroke="' + lineColor + '" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>' +
+            lastDot +
+            '</svg>';
     }
 
     // Open the trend popup for a given route.
@@ -6125,7 +7231,7 @@
             '<span style="display:inline-flex;align-items:center;gap:6px;">' +
                 '<span style="display:inline-block;width:14px;height:2px;background:#0078d4;"></span>' +
                 '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0078d4;border:1.5px solid #fff;margin-left:-4px;box-shadow:0 0 0 1px #0078d4;"></span>' +
-                ' Actual ' + (route.direction === 'outside' ? 'departure' : (route.direction === 'engineStart' ? 'engine start' : 'arrival')) +
+                ' Actual ' + (route.direction === 'outside' ? 'departure' : 'arrival') +
             '</span>' +
             '<span style="display:inline-flex;align-items:center;gap:6px;">' +
                 '<span style="color:#dc3545;font-weight:700;">\u2715</span>No event' +
@@ -6182,17 +7288,14 @@
                     'box-shadow': 'none'
                 });
             }
-            var iconTiles = document.querySelectorAll('.rpRowTlBtnIcon');
-            for (var it = 0; it < iconTiles.length; it++) {
-                forceStyle(iconTiles[it], {
-                    'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
-                    'width': '30px', 'height': '30px',
-                    // Gradient border (green -> red) around the graph tile itself.
-                    'background': 'linear-gradient(#e8f5ed,#e8f5ed) padding-box,linear-gradient(135deg,#1e7e34 0%,#dc3545 100%) border-box',
-                    'border': '2px solid transparent',
-                    'border-radius': '8px',
-                    'flex-shrink': '0',
-                    'box-shadow': '0 1px 3px rgba(0,0,0,0.08)'
+            var rowMinis = document.querySelectorAll('.rpRowSparklineMini');
+            for (var rm = 0; rm < rowMinis.length; rm++) {
+                forceStyle(rowMinis[rm], {
+                    'display': 'inline-flex', 'align-items': 'center', 'flex-shrink': '0',
+                    'padding': '2px 4px', 'border-radius': '6px',
+                    'background': 'linear-gradient(180deg,#ffffff 0%,#f8fafc 100%)',
+                    'border': '1px solid #d0d7de',
+                    'box-shadow': '0 1px 2px rgba(15,23,42,0.04)'
                 });
             }
             var chevronSpans = document.querySelectorAll('.rpRowTlBtnChevron');
@@ -6311,8 +7414,7 @@
                     // and GPS wobbles don't silently count. Outside falls back to
                     // "was in-zone and is now out" for sparse-log cases.
                     var passed = (r.direction === 'inside' && !!presence.arrivedAtMs) ||
-                                 (r.direction === 'outside' && (!!presence.departedAtMs || (presence.everInZone && !presence.isCurrentlyInZone))) ||
-                                 (r.direction === 'engineStart' && !!presence.engineStartedAtMs);
+                                 (r.direction === 'outside' && (!!presence.departedAtMs || presenceShowsSustainedDeparture(presence)));
                     var good;
                     if (routeHasTarget(r)) {
                         if (!evMs) { good = false; }
@@ -6350,13 +7452,63 @@
         var btns = document.querySelectorAll('.rpSparklineBtn');
         for (var i = 0; i < btns.length; i++) {
             forceStyle(btns[i], {
-                'display': 'inline-flex', 'align-items': 'center', 'gap': '4px',
-                'padding': '4px 10px', 'border-radius': '14px',
-                'background': '#fff', 'border': '1px solid #d0d0d0',
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                'padding': '3px 10px 3px 6px', 'border-radius': '14px',
+                'background': 'linear-gradient(180deg,#ffffff 0%,#f8fafc 100%)',
+                'border': '1px solid #d0d7de',
                 'color': '#0078d4', 'font-size': '12px', 'font-weight': '600',
-                'cursor': 'pointer', 'user-select': 'none'
+                'cursor': 'pointer', 'user-select': 'none',
+                'box-shadow': '0 1px 2px rgba(15,23,42,0.04)'
             });
         }
+        var minis = document.querySelectorAll('.rpSparklineMini');
+        for (var j = 0; j < minis.length; j++) {
+            forceStyle(minis[j], { 'display': 'inline-flex', 'align-items': 'center', 'flex-shrink': '0' });
+        }
+        var labels = document.querySelectorAll('.rpSparklineLabel');
+        for (var k = 0; k < labels.length; k++) {
+            forceStyle(labels[k], { 'font-size': '11px', 'letter-spacing': '0.3px' });
+        }
+    }
+
+    // Roll the "N/M" count in a route-progress badge from `from` to `to`.
+    // We don't replace innerHTML during the animation — we surgically swap
+    // only the leading digit-text node so the surrounding "/M arrived" and
+    // "(N late)" markup stays put. After the rollup, the next tick's
+    // applyRouteProgressBadges will overwrite innerHTML with the final
+    // value (which equals `to`), so any drift is self-correcting.
+    function _rollProgressBadgeNumber(node, from, to) {
+        var span = node.querySelector('.rpRouteProgressCount');
+        if (!span) return;
+        var firstText = null;
+        for (var i = 0; i < span.childNodes.length; i++) {
+            if (span.childNodes[i].nodeType === 3) { firstText = span.childNodes[i]; break; }
+        }
+        if (!firstText) return;
+        var suffix = firstText.nodeValue.replace(/^\d+/, '');
+        var startTs = (typeof performance !== 'undefined' && performance.now)
+            ? performance.now() : Date.now();
+        var durationMs = 500;
+        var prevColor = span.style.color;
+        span.style.transition = 'transform 200ms ease, color 200ms ease';
+        span.style.transform = 'scale(1.08)';
+        span.style.color = '#0f5132';
+        function step() {
+            var nowTs = (typeof performance !== 'undefined' && performance.now)
+                ? performance.now() : Date.now();
+            var p = Math.min(1, (nowTs - startTs) / durationMs);
+            var eased = 1 - Math.pow(1 - p, 3);
+            var v = Math.round(from + (to - from) * eased);
+            firstText.nodeValue = v + suffix;
+            if (p < 1) {
+                requestAnimationFrame(step);
+            } else {
+                firstText.nodeValue = to + suffix;
+                span.style.transform = 'scale(1)';
+                setTimeout(function () { span.style.color = prevColor; }, 250);
+            }
+        }
+        requestAnimationFrame(step);
     }
 
     // Badge HTML for per-route completion like "3/5 arrived".
@@ -6438,20 +7590,15 @@
         // routes we also accept "was observed in-zone and is now out" as a
         // fallback when logs were too sparse to record a transition.
         var goodDir = (route.direction === 'inside' && !!presence.arrivedAtMs) ||
-                      (route.direction === 'outside' && (!!presence.departedAtMs || (everInZone && !isCurrentlyInZone))) ||
-                      (route.direction === 'engineStart' && !!presence.engineStartedAtMs);
+                      (route.direction === 'outside' && (!!presence.departedAtMs || presenceShowsSustainedDeparture(presence)));
         var vStatus = routeStatusLabel(route.direction, goodDir);
         var statusTip;
         if (route.direction === 'inside') {
             statusTip = goodDir
                 ? (isCurrentlyInZone ? 'Currently at the zone' : 'Passed through / visited the zone')
                 : 'Has not arrived at the zone yet';
-        } else if (route.direction === 'outside') {
-            statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
         } else {
-            statusTip = goodDir
-                ? 'Engine started inside the zone during this window'
-                : 'Engine has not started inside the zone yet';
+            statusTip = goodDir ? 'Has departed from the zone' : 'Still at the zone but should have departed';
         }
         return {
             vStatus: vStatus,
@@ -6598,9 +7745,7 @@
         }
         if (nowMs && nowMs > targetEndMs + grace) {
             var overdueMin = Math.round((nowMs - targetEndMs) / 60000);
-            var verb = route.direction === 'outside'
-                ? 'no departure yet'
-                : (route.direction === 'engineStart' ? 'no engine start yet' : 'no arrival yet');
+            var verb = route.direction === 'outside' ? 'no departure yet' : 'no arrival yet';
             return '<span style="color:#dc3545;font-weight:600;">Late: ' + formatMinutesHM(overdueMin) + '</span>' +
                 ' <span style="color:#888;font-weight:400;font-size:11px;">' + verb + ' · ' + vsRouteEnd(nowMs) + '</span>';
         }
@@ -6666,7 +7811,7 @@
         _notifiedKeys[key] = true;
         _saveNotifiedKeys();
         var title = kind === 'noshow' ? 'No-show: ' + entityName : 'Late: ' + entityName;
-        var _bodyKind = route.direction === 'outside' ? 'departure' : (route.direction === 'engineStart' ? 'engine start' : 'arrival');
+        var _bodyKind = route.direction === 'outside' ? 'departure' : 'arrival';
         var body = route.name + ' \u2014 ' + _bodyKind + ' at ' + (route.zoneName || 'zone');
         try {
             var n = new Notification(title, { body: body, tag: key, icon: undefined });

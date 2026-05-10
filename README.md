@@ -47,10 +47,12 @@ Note that the bus doesn't have to be outside *at route start*. A bus that starts
 ### Rule 2 — Bus drove into the zone during the window
 We need at least one in-zone GPS log following an out-of-zone log during the window — i.e., we have to see the actual crossing inward.
 
-### Rule 3 — Bus stopped for at least 30 seconds
-Driving through the parking lot without stopping is not an arrival. The bus must be inside the zone AND moving at 3 km/h or less for a continuous 30-second stretch. This is the same speed threshold that powers the Engine "Stopped" badge. If the bus speeds up mid-stop, the clock resets.
+### Rule 3 — Bus stayed inside the zone for at least 60 seconds
+A drive-through (delivery truck cutting across the school parking lot) is not an arrival. The bus must be **inside the zone continuously for 60 seconds** — moving or stopped, doesn't matter. If it leaves the zone before the 60-second mark, the clock resets.
 
-When all three hold, **Arrived At** is set to the moment the bus first became stopped in the zone (the start of the 30-second dwell), not the moment the 30 seconds expired.
+The 60-second gate (instead of "stopped for 30 seconds") is what makes **Arrived At** reflect the moment the bus actually entered the school zone, not the moment it eventually parked. Schools with large grounds and long parking-lot loops would otherwise show arrivals 5–20 minutes after the bus actually got there.
+
+When all three hold, **Arrived At** is set to the moment the bus first crossed into the zone (the start of the 60-second in-zone dwell), not the moment the 60 seconds expired.
 
 ---
 
@@ -85,6 +87,28 @@ Once **Arrived At** or **Departed At** has been committed for a given row on a g
 - Bus parks again, nothing changes.
 
 Same rule for Departures. This prevents a confusing flicker where a row bounces between Departed and Not Departed as the bus moves around the zone edge. Switching the date picker or clicking **Refresh** re-evaluates from scratch (sticky memory is wiped when the page does a full render).
+
+---
+
+## 4c. Overlapping routes for the same driver — only one claims the arrival/departure
+
+Two routes assigned to the same driver (or vehicle) can overlap in time. When they do, a single arrival or departure is **only credited to one of them — the route that started earlier**. The later-starting route only gets its own event after a real reverse transition (a sustained ≥30 s out-of-zone observation followed by another arrival).
+
+Example. Driver assigned to:
+
+- **Route A** 7:30–8:30
+- **Route B** 7:45–8:45
+
+Driver arrives once at **7:55**.
+
+- Route A → **Arrived 7:55** ✓
+- Route B → **Not Arrived** (the same single arrival isn't double-counted)
+
+If the driver later leaves the zone for ≥30 s and re-arrives during B's window, that second arrival is credited to Route B.
+
+The same rule mirrors for departure-tracking routes: the first sustained departure goes to the earlier route; the later route only commits its own departure after the bus comes back into the zone and leaves again.
+
+This is why you may see a row read "Not Arrived" / No-show on a later overlapping route even though the bus is at school — the driver did the job, but the arrival belongs to the earlier route. To diagnose at a glance, look at the earlier route's row: it'll show the actual arrival time.
 
 ---
 
