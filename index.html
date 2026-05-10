@@ -2384,9 +2384,19 @@
     });
 
     var lastProgressHash = '';
+    var _liveTickFailStreak = 0;
 
     function startAutoRefresh() {
         stopAutoRefresh();
+        // Honour the post-8 PM cutoff at startup too — otherwise a tab
+        // opened after 8 PM with autoRefresh=true in localStorage would
+        // run one full refresh cycle before the interval-internal check
+        // fires and stops it.
+        if (new Date().getHours() >= 20) {
+            autoRefreshActive = false;
+            styleAutoRefreshBtn();
+            return;
+        }
         autoRefreshActive = true;
         styleAutoRefreshBtn();
         renderProgress();
@@ -2394,6 +2404,9 @@
         // Data refresh every 5 seconds. Visual countdown is the CSS
         // progress-bar animation set up in styleAutoRefreshBtn(); no
         // per-second JS ticker needed.
+        // Track consecutive tick failures so a Geotab outage surfaces
+        // visibly instead of going silent.
+        _liveTickFailStreak = 0;
         autoRefreshInterval = setInterval(async function () {
             var now = new Date();
             if (now.getHours() >= 20) {
@@ -2403,7 +2416,17 @@
             }
             try {
                 await refreshProgressInline();
-            } catch (e) { /* skip failed refresh */ }
+                _liveTickFailStreak = 0;
+            } catch (e) {
+                _liveTickFailStreak++;
+                // After 3 back-to-back failures (~15s of dead air), tell the
+                // user. We only fire the banner once per outage; resetting
+                // the streak above re-arms it for the next one.
+                if (_liveTickFailStreak === 3) {
+                    var msg = (e && e.message) ? e.message : 'unknown error';
+                    showErrorBanner('Live refresh has failed 3 times in a row (' + msg + '). Data on screen may be stale.', { autoDismissMs: 10000 });
+                }
+            }
         }, 5000);
     }
 
@@ -3121,10 +3144,9 @@
                         var varianceCell = '<td class="rptd rpVarianceCell">' + varianceCellContent + '</td>';
                         var historyCell = '<td class="rptd rpHistoryCell">' + histBtn + '</td>';
 
-                        var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
                                 '<td class="rptd rpNameCell"><span>' + escapeHtml(aName) + '</span></td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpLocationCell">' +
@@ -6337,34 +6359,9 @@
         setAll('.rpRouteProgressEmpty', { 'background': '#f0f0f0', 'color': '#888' });
     }
 
-    // ========== LIVE ROW CHANGE FLASH ==========
-    function computeRowSig(vStatus, eventMs, zoneMinRounded, isIn, targetStr, graceMin) {
-        return [vStatus || '', eventMs || 0, zoneMinRounded, isIn ? 1 : 0, targetStr || '', graceMin || 0].join('|');
-    }
-
-    function flashRow(row) {
-        if (!row) return;
-        row.style.setProperty('transition', 'none', 'important');
-        row.style.setProperty('background-color', '#fff3b0', 'important');
-        // Force a reflow so the browser registers the starting color
-        void row.offsetWidth;
-        row.style.setProperty('transition', 'background-color 2s ease-out', 'important');
-        row.style.setProperty('background-color', 'transparent', 'important');
-        setTimeout(function () {
-            row.style.removeProperty('background-color');
-            row.style.removeProperty('transition');
-        }, 2100);
-    }
-
-    function flashRowOnChange(row, newSig) {
-        if (!row) return;
-        var prev = row.dataset.sig;
-        if (prev !== undefined && prev !== newSig) flashRow(row);
-        row.dataset.sig = newSig;
-    }
-
-    // Flash a single cell. Same animation as flashRow but scoped so a single
-    // changed value doesn't paint the whole row yellow.
+    // ========== LIVE CELL CHANGE FLASH ==========
+    // Flash a single cell. Scoped so a single changed value doesn't paint
+    // the whole row yellow.
     function flashCell(cell) {
         if (!cell) return;
         cell.style.setProperty('transition', 'none', 'important');
