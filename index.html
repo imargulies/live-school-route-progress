@@ -4801,6 +4801,38 @@
             out.isCurrentlyInZone = inZ;
         }
         out.zoneMinutes = zoneSec / 60;
+
+        // Fallback: arrival rule above can miss a real crossing when the
+        // GPS gap covers the boundary moment (the bus pings outside, then
+        // inside several minutes later, so the 60s continuous-dwell never
+        // accumulates) or when the device only starts reporting after the
+        // bus is already in the zone. If by the end of the window we have:
+        //   - no arrival event yet, AND
+        //   - the bus is currently inside the zone, AND
+        //   - >= 1 min of accumulated Time at Zone, AND
+        //   - the last log BEFORE the window opened explicitly showed the
+        //     bus OUTSIDE the zone (preWindowInZ === false)
+        // then we trust that as evidence the bus genuinely came in from
+        // outside and just slipped the dwell check. We stamp the arrival
+        // at the earliest in-window in-zone ping.
+        //
+        // The preWindowInZ === false check is what keeps a bus that was
+        // already parked at the zone from a prior route from being marked
+        // as "arrived" the moment the window opens. preWindowInZ === null
+        // (no pre-window data at all) also disqualifies — we don't guess.
+        if (out.arrivedAtMs === null && out.isCurrentlyInZone && out.zoneMinutes >= 1 && preWindowInZ === false) {
+            for (var k = 0; k < sorted.length; k++) {
+                var lk = sorted[k];
+                if (typeof lk.latitude !== 'number' || typeof lk.longitude !== 'number') continue;
+                var tk = new Date(lk.dateTime).getTime();
+                if (tk < windowFromMs || tk > windowToMs) continue;
+                if (pointInPolygon(lk.latitude, lk.longitude, zonePoints)) {
+                    out.arrivedAtMs = tk;
+                    break;
+                }
+            }
+        }
+
         return out;
     }
 
