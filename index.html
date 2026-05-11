@@ -841,28 +841,17 @@
         }
         var statusEl = document.getElementById('rpAutoRefreshStatus');
         if (autoRefreshActive) {
-            // Structured layout — LIVE pill + circular-ring countdown.
-            // The countdown ring drains 1 second per second via a CSS
-            // transition on stroke-dashoffset, with the inner number kept
-            // in sync. We render once here; the per-second ticker only
-            // updates the ring offset and the number, never the whole
-            // statusEl, so the LIVE pill never flickers.
-            var ringR = 8;
-            var ringC = (2 * Math.PI * ringR).toFixed(2);
+            // LIVE pill + horizontal progress bar. The bar fills 0 → 100%
+            // and shifts colour green → yellow → red over each 5-second
+            // refresh cycle via a single CSS keyframe animation, so no
+            // per-second JS ticker is needed and the pill never flickers.
             statusEl.innerHTML =
                 '<span class="rpLivePill" title="Auto-refresh on — data refreshing every 5s">' +
                     '<span class="rpLiveDot"></span>' +
                     '<span class="rpLiveLabel">LIVE</span>' +
                 '</span>' +
-                '<span class="rpLiveCountdown" title="Seconds until the next live refresh">' +
-                    '<svg class="rpLiveCountdownRing" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">' +
-                        '<circle cx="11" cy="11" r="' + ringR + '" fill="none" stroke="#e5e7eb" stroke-width="2"/>' +
-                        '<circle class="rpLiveCountdownRingFill" cx="11" cy="11" r="' + ringR + '" fill="none" ' +
-                            'stroke="#28a745" stroke-width="2" stroke-linecap="round" ' +
-                            'stroke-dasharray="' + ringC + '" stroke-dashoffset="0" ' +
-                            'transform="rotate(-90 11 11)"/>' +
-                    '</svg>' +
-                    '<span class="rpLiveCountdownNum">5</span>' +
+                '<span class="rpLiveBarTrack" title="Time until the next live refresh">' +
+                    '<span class="rpLiveBarFill"></span>' +
                 '</span>';
             forceStyle(statusEl, { 'display': 'inline-flex', 'align-items': 'center', 'gap': '10px' });
             ensureLivePillKeyframes();
@@ -882,25 +871,18 @@
                 'box-shadow': '0 0 0 0 rgba(255,255,255,0.85)',
                 'animation': 'rpLiveDotPulse 1.4s ease-out infinite'
             });
-            var cdWrap = statusEl.querySelector('.rpLiveCountdown');
-            if (cdWrap) forceStyle(cdWrap, {
-                'position': 'relative', 'display': 'inline-flex',
-                'align-items': 'center', 'justify-content': 'center',
-                'width': '22px', 'height': '22px'
+            var barTrack = statusEl.querySelector('.rpLiveBarTrack');
+            if (barTrack) forceStyle(barTrack, {
+                'position': 'relative', 'display': 'inline-block',
+                'width': '110px', 'height': '6px', 'border-radius': '3px',
+                'background': '#e5e7eb', 'overflow': 'hidden'
             });
-            var cdNum = statusEl.querySelector('.rpLiveCountdownNum');
-            if (cdNum) forceStyle(cdNum, {
-                'position': 'absolute', 'top': '0', 'left': '0',
-                'width': '100%', 'height': '100%',
-                'display': 'flex', 'align-items': 'center', 'justify-content': 'center',
-                'font-size': '11px', 'font-weight': '800', 'color': '#15803d',
-                'font-variant-numeric': 'tabular-nums'
+            var barFill = statusEl.querySelector('.rpLiveBarFill');
+            if (barFill) forceStyle(barFill, {
+                'display': 'block', 'height': '100%', 'width': '0%',
+                'border-radius': '3px', 'background': '#28a745',
+                'animation': 'rpLiveBarFill 5s linear infinite'
             });
-            var cdRingFill = statusEl.querySelector('.rpLiveCountdownRingFill');
-            if (cdRingFill) cdRingFill.style.setProperty('transition', 'stroke-dashoffset 0.95s linear, stroke 0.2s ease', 'important');
-            // Initialize the ring + number for whatever the current
-            // countdown value is, so we don't flash a stale "5" on click.
-            _updateLiveCountdown(typeof autoRefreshCountdown === 'number' ? autoRefreshCountdown : 5);
         } else {
             var now2 = new Date();
             if (now2.getHours() >= 20) {
@@ -912,32 +894,6 @@
         }
     }
 
-    // Update only the countdown number + ring drain — never touch the
-    // surrounding LIVE pill HTML. seconds=0 means "refreshing now" (ring
-    // empty, number replaced with a tiny spinner cue).
-    function _updateLiveCountdown(seconds) {
-        var statusEl = document.getElementById('rpAutoRefreshStatus');
-        if (!statusEl) return;
-        var ring = statusEl.querySelector('.rpLiveCountdownRingFill');
-        var num = statusEl.querySelector('.rpLiveCountdownNum');
-        if (!ring || !num) return;
-        var max = 5;
-        var s = Math.max(0, Math.min(max, seconds));
-        var r = parseFloat(ring.getAttribute('r')) || 8;
-        var c = 2 * Math.PI * r;
-        // dashoffset = c * (1 - s/max)  → s=5 ring full; s=0 ring empty.
-        var offset = c * (1 - (s / max));
-        ring.style.setProperty('stroke-dashoffset', offset.toFixed(2), 'important');
-        if (s <= 0) {
-            ring.style.setProperty('stroke', '#e67e22', 'important');
-            num.textContent = '…';
-            num.style.setProperty('color', '#9a3412', 'important');
-        } else {
-            ring.style.setProperty('stroke', '#28a745', 'important');
-            num.textContent = String(s);
-            num.style.setProperty('color', '#15803d', 'important');
-        }
-    }
 
     // Inline SVG icon for a status badge — small ✓/✕/⏱ glyph that goes
     // before the status label. Returns an empty string for kinds we don't
@@ -991,6 +947,14 @@
                 '0% { box-shadow: 0 0 0 0 rgba(0,120,212,0.55); } ' +
                 '70% { box-shadow: 0 0 0 7px rgba(0,120,212,0); } ' +
                 '100% { box-shadow: 0 0 0 0 rgba(0,120,212,0); }' +
+            '} ' +
+            // 5-second live-update countdown bar. Width fills 0 → 100%
+            // and the colour shifts green → yellow → red so the user can
+            // tell at a glance how soon the next refresh is firing.
+            '@keyframes rpLiveBarFill { ' +
+                '0%   { width: 0%;   background-color: #28a745; } ' +
+                '50%  { width: 50%;  background-color: #f1c40f; } ' +
+                '100% { width: 100%; background-color: #dc3545; }' +
             '}';
         document.head.appendChild(style);
         _livePillCssInjected = true;
@@ -2420,24 +2384,29 @@
     });
 
     var lastProgressHash = '';
-    var autoRefreshCountdown = 5;
-    var countdownInterval = null;
+    var _liveTickFailStreak = 0;
 
     function startAutoRefresh() {
         stopAutoRefresh();
+        // Honour the post-8 PM cutoff at startup too — otherwise a tab
+        // opened after 8 PM with autoRefresh=true in localStorage would
+        // run one full refresh cycle before the interval-internal check
+        // fires and stops it.
+        if (new Date().getHours() >= 20) {
+            autoRefreshActive = false;
+            styleAutoRefreshBtn();
+            return;
+        }
         autoRefreshActive = true;
         styleAutoRefreshBtn();
         renderProgress();
-        autoRefreshCountdown = 5;
 
-        // Countdown ticker every second — only mutates the ring + number,
-        // never the LIVE pill markup, so the pill keeps pulsing smoothly.
-        countdownInterval = setInterval(function () {
-            autoRefreshCountdown--;
-            _updateLiveCountdown(autoRefreshCountdown);
-        }, 1000);
-
-        // Data refresh every 5 seconds
+        // Data refresh every 5 seconds. Visual countdown is the CSS
+        // progress-bar animation set up in styleAutoRefreshBtn(); no
+        // per-second JS ticker needed.
+        // Track consecutive tick failures so a Geotab outage surfaces
+        // visibly instead of going silent.
+        _liveTickFailStreak = 0;
         autoRefreshInterval = setInterval(async function () {
             var now = new Date();
             if (now.getHours() >= 20) {
@@ -2447,8 +2416,17 @@
             }
             try {
                 await refreshProgressInline();
-            } catch (e) { /* skip failed refresh */ }
-            autoRefreshCountdown = 5;
+                _liveTickFailStreak = 0;
+            } catch (e) {
+                _liveTickFailStreak++;
+                // After 3 back-to-back failures (~15s of dead air), tell the
+                // user. We only fire the banner once per outage; resetting
+                // the streak above re-arms it for the next one.
+                if (_liveTickFailStreak === 3) {
+                    var msg = (e && e.message) ? e.message : 'unknown error';
+                    showErrorBanner('Live refresh has failed 3 times in a row (' + msg + '). Data on screen may be stale.', { autoDismissMs: 10000 });
+                }
+            }
         }, 5000);
     }
 
@@ -2798,7 +2776,6 @@
 
     function stopAutoRefresh() {
         if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
-        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
         autoRefreshActive = false;
         styleAutoRefreshBtn();
     }
@@ -3167,10 +3144,9 @@
                         var varianceCell = '<td class="rptd rpVarianceCell">' + varianceCellContent + '</td>';
                         var historyCell = '<td class="rptd rpHistoryCell">' + histBtn + '</td>';
 
-                        var initSig = computeRowSig(vStatus, eventMs, Math.round(zoneMinutes * 10), isCurrentlyInZone, (r.targetTimeStart || '') + '-' + (r.targetTimeEnd || ''), r.graceMin);
                         vehRows.push({
                             sortOrder: sortOrder,
-                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-sig="' + initSig + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
+                            html: '<tr data-row-uid="' + r._uid + '-' + aId + '" data-event-ms="' + (eventMs || '') + '" data-last-log-ms="' + (presence.lastLogMs || '') + '" data-last-speed="' + (typeof presence.lastSpeed === 'number' ? presence.lastSpeed : '') + '" data-is-problem="' + (_isProblem ? '1' : '0') + '">' +
                                 '<td class="rptd rpNameCell"><span>' + escapeHtml(aName) + '</span></td>' +
                                 '<td class="rptd rpCurVehCell">' + (isDriverRoute ? (currentVehicleName || '<span style="color:#aaa">-</span>') : '<span style="color:#ccc;">—</span>') + '</td>' +
                                 '<td class="rptd rpLocationCell">' +
@@ -6383,34 +6359,9 @@
         setAll('.rpRouteProgressEmpty', { 'background': '#f0f0f0', 'color': '#888' });
     }
 
-    // ========== LIVE ROW CHANGE FLASH ==========
-    function computeRowSig(vStatus, eventMs, zoneMinRounded, isIn, targetStr, graceMin) {
-        return [vStatus || '', eventMs || 0, zoneMinRounded, isIn ? 1 : 0, targetStr || '', graceMin || 0].join('|');
-    }
-
-    function flashRow(row) {
-        if (!row) return;
-        row.style.setProperty('transition', 'none', 'important');
-        row.style.setProperty('background-color', '#fff3b0', 'important');
-        // Force a reflow so the browser registers the starting color
-        void row.offsetWidth;
-        row.style.setProperty('transition', 'background-color 2s ease-out', 'important');
-        row.style.setProperty('background-color', 'transparent', 'important');
-        setTimeout(function () {
-            row.style.removeProperty('background-color');
-            row.style.removeProperty('transition');
-        }, 2100);
-    }
-
-    function flashRowOnChange(row, newSig) {
-        if (!row) return;
-        var prev = row.dataset.sig;
-        if (prev !== undefined && prev !== newSig) flashRow(row);
-        row.dataset.sig = newSig;
-    }
-
-    // Flash a single cell. Same animation as flashRow but scoped so a single
-    // changed value doesn't paint the whole row yellow.
+    // ========== LIVE CELL CHANGE FLASH ==========
+    // Flash a single cell. Scoped so a single changed value doesn't paint
+    // the whole row yellow.
     function flashCell(cell) {
         if (!cell) return;
         cell.style.setProperty('transition', 'none', 'important');
