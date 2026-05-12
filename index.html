@@ -488,13 +488,13 @@
             var input = pill.querySelector('input[type="checkbox"]');
             var on = !!(input && input.checked);
             // Active = filled blue pill with white text + leading check.
-            // Idle = white pill, light gray border, dark text.
-            // Single colour treatment in each state so the eye doesn't have
-            // to parse a checkbox inside a checkbox.
+            // Idle  = soft gray fill, darker border, dark text — strong
+            //         enough contrast to read clearly against the white
+            //         card and still obviously secondary to the active blue.
             forceStyle(pill, {
-                'background': on ? '#0078d4' : '#fff',
-                'border': '1px solid ' + (on ? '#0078d4' : '#d1d5db'),
-                'color': on ? '#fff' : '#374151',
+                'background': on ? '#0078d4' : '#f3f4f6',
+                'border': '1px solid ' + (on ? '#0078d4' : '#9ca3af'),
+                'color': on ? '#fff' : '#1f2937',
                 'font-size': '13px', 'font-weight': '600',
                 'box-shadow': on ? '0 1px 4px rgba(0,120,212,0.25)' : 'none'
             });
@@ -2544,12 +2544,23 @@
         var todayStr = formatDate(now);
         var selDateStr = document.getElementById('rpProgressDate').value;
         var isToday = selDateStr === todayStr;
+        // Day-of-week the user has selected. Routes whose activeDays
+        // doesn't include this day shouldn't appear in the chips picker
+        // at all — picking them wouldn't add a card to the page anyway
+        // because renderProgress already filters by activeDays.
+        var selectedDay = selDateStr
+            ? new Date(selDateStr + 'T12:00:00').getDay()
+            : now.getDay();
 
         var checkSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polyline points="5 12 10 17 19 7"/></svg>';
         var plusSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
         var html = '';
+        var visibleCount = 0;
         for (var i = 0; i < savedRoutes.length; i++) {
             var r = savedRoutes[i];
+            var rDays = r.activeDays || [0,1,2,3,4,5];
+            if (rDays.indexOf(selectedDay) === -1) continue;
+            visibleCount++;
             var active = selectedRouteChips[r._uid];
             var startMin = timeToMinutes(r.startTime);
             var endMin = timeToMinutes(r.endTime);
@@ -2563,6 +2574,10 @@
                 '</span>' +
                 (active ? '<span class="rpChipClose" aria-label="Remove from filter">&#x2715;</span>' : '') +
             '</span>';
+        }
+        if (!visibleCount) {
+            var dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][selectedDay];
+            html = '<span style="color:#888;font-size:13px;">No routes scheduled for ' + dayName + '</span>';
         }
         container.innerHTML = html;
         styleRouteChips();
@@ -2699,6 +2714,9 @@
     }
     document.getElementById('rpProgressDate').addEventListener('change', function () {
         updateDateLabel();
+        // Chips are filtered by the selected date's day-of-week, so refresh
+        // them whenever the date changes before rendering the routes view.
+        renderRouteChips();
         renderProgress();
     });
     (function () {
