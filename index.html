@@ -601,6 +601,131 @@
             else forceStyle(etaStatus[e], { 'position': 'absolute', 'top': '10px', 'right': '16px', 'display': 'inline', 'text-align': 'left', 'margin-top': '0' });
         }
         applyMobileProgressTableStyles(narrow);
+        applyMobileGeneralStyles(narrow);
+    }
+
+    // Round-2 mobile polish: things that aren't the inner progress table.
+    // Tabs scroll horizontally if they overflow; the route-card header
+    // stacks its info pill below the title; toolbar buttons grow to
+    // touch-friendly size; inputs get a 44px min-height; on very narrow
+    // (< 480) we also hide Time at Zone so the remaining columns breathe.
+    function applyMobileGeneralStyles(narrow) {
+        var phone = window.innerWidth < 480;
+
+        // Tabs bar: horizontal scroll if it overflows; larger tap area on touch.
+        var tabsEl = document.getElementById('rpTabs');
+        if (tabsEl) {
+            forceStyle(tabsEl, {
+                'overflow-x': narrow ? 'auto' : 'visible',
+                '-webkit-overflow-scrolling': 'touch',
+                'flex-wrap': 'nowrap',
+                'padding': narrow ? '8px 12px 0' : '10px 20px 0'
+            });
+        }
+        var tabBtns = document.querySelectorAll('#rpTabs [data-tab]');
+        for (var tb = 0; tb < tabBtns.length; tb++) {
+            forceStyle(tabBtns[tb], narrow
+                ? { 'padding': '12px 16px', 'font-size': '14px', 'white-space': 'nowrap', 'flex-shrink': '0' }
+                : { 'padding': '10px 16px', 'font-size': '14px', 'white-space': 'normal', 'flex-shrink': '1' }
+            );
+        }
+
+        // Outer cards: less padding on phone so the inner content has more room.
+        if (narrow) {
+            var cardIds = ['rpCard1', 'rpCard2', 'rpCard3', 'rpCard4'];
+            for (var ci = 0; ci < cardIds.length; ci++) {
+                var c = document.getElementById(cardIds[ci]);
+                if (c) forceStyle(c, { 'padding': phone ? '12px' : '16px' });
+            }
+        } else {
+            var cardIds2 = ['rpCard1', 'rpCard2', 'rpCard3', 'rpCard4'];
+            for (var cj = 0; cj < cardIds2.length; cj++) {
+                var c2 = document.getElementById(cardIds2[cj]);
+                if (c2) forceStyle(c2, { 'padding': '20px' });
+            }
+        }
+
+        // Page titles: smaller on phone so the tab and date bar aren't
+        // pushed half-way down the screen by a big heading.
+        var titleIds = ['rpTitle1', 'rpTitle2', 'rpTitle3', 'rpTitle4'];
+        for (var ti = 0; ti < titleIds.length; ti++) {
+            var tEl = document.getElementById(titleIds[ti]);
+            if (tEl) forceStyle(tEl, { 'font-size': phone ? '18px' : (narrow ? '20px' : '24px') });
+        }
+
+        // Route-card header: drop the info chip (window/target) below the
+        // title on phone instead of letting margin-left:auto push it right.
+        var infos = document.querySelectorAll('.rpRouteCardInfo');
+        for (var ii = 0; ii < infos.length; ii++) {
+            forceStyle(infos[ii], narrow
+                ? { 'margin-left': '0', 'margin-top': '4px', 'font-size': '13px',
+                    'flex-basis': '100%', 'text-align': 'left' }
+                : { 'margin-left': 'auto', 'margin-top': '0', 'font-size': '16px',
+                    'flex-basis': 'auto', 'text-align': 'left' }
+            );
+        }
+        var rcTitles = document.querySelectorAll('.rpRouteCardTitle');
+        for (var rt = 0; rt < rcTitles.length; rt++) {
+            forceStyle(rcTitles[rt], { 'font-size': phone ? '15px' : (narrow ? '16px' : '18px') });
+        }
+
+        // Auto-collapse radio row: bigger label hit area on phone.
+        var acLabels = document.querySelectorAll('#rpAutoCollapseWrap label');
+        for (var ac = 0; ac < acLabels.length; ac++) {
+            forceStyle(acLabels[ac], narrow
+                ? { 'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
+                    'min-height': '36px', 'padding': '4px 8px', 'font-size': '13px' }
+                : { 'display': 'inline', 'align-items': 'initial', 'gap': '0',
+                    'min-height': '0', 'padding': '0', 'font-size': '13px' }
+            );
+        }
+
+        // Refresh / Stop Live / Go Live: wider tap area and full-width on phone
+        // so the user doesn't have to aim a finger at a 90px button.
+        var liveBtns = ['rpBtnRefresh', 'rpBtnAutoRefresh'];
+        for (var bi = 0; bi < liveBtns.length; bi++) {
+            var b = document.getElementById(liveBtns[bi]);
+            if (!b) continue;
+            forceStyle(b, narrow
+                ? { 'min-height': '44px', 'padding': '10px 16px', 'font-size': '14px',
+                    'width': phone ? '100%' : 'auto', 'text-align': 'center', 'box-sizing': 'border-box' }
+                : { 'min-height': '0', 'padding': '8px 20px', 'font-size': '13px',
+                    'width': 'auto', 'text-align': 'left', 'box-sizing': 'border-box' }
+            );
+        }
+
+        // Date / From / To inputs: 44px min height on touch.
+        var touchInputs = document.querySelectorAll('#rpProgressDateBtn, #rpProgressTimeFrom, #rpProgressTimeTo, #rpReportFrom, #rpReportTo');
+        for (var inp = 0; inp < touchInputs.length; inp++) {
+            forceStyle(touchInputs[inp], narrow
+                ? { 'min-height': '44px', 'font-size': '14px', 'padding': '10px 12px' }
+                : { 'min-height': '0', 'font-size': '13px', 'padding': '8px 12px' }
+            );
+        }
+
+        // On phones (< 480) also hide Time at Zone so the remaining
+        // columns aren't squeezed. CurVeh + Dist already hide < 720.
+        var timeCols = document.querySelectorAll('#rpProgressContent col.rpColTime');
+        for (var tc = 0; tc < timeCols.length; tc++) {
+            forceStyle(timeCols[tc], { 'visibility': phone ? 'collapse' : 'visible' });
+        }
+        var timeCells = document.querySelectorAll('#rpProgressContent .rpTimeCell');
+        for (var tcc = 0; tcc < timeCells.length; tcc++) {
+            forceStyle(timeCells[tcc], { 'display': phone ? 'none' : 'table-cell' });
+        }
+        // Sync the Time column's <th> too (no class on the header).
+        var pTables = document.querySelectorAll('#rpProgressContent .rpProgressTable');
+        for (var pt = 0; pt < pTables.length; pt++) {
+            var pCols = pTables[pt].querySelectorAll('colgroup > col');
+            var pHead = pTables[pt].querySelector('thead > tr');
+            if (!pHead) continue;
+            var pThs = pHead.children;
+            for (var pk = 0; pk < pCols.length && pk < pThs.length; pk++) {
+                if (pCols[pk].className.indexOf('rpColTime') !== -1) {
+                    forceStyle(pThs[pk], { 'display': phone ? 'none' : 'table-cell' });
+                }
+            }
+        }
     }
 
     // Phone-friendly tweaks for the per-route progress table.
