@@ -1111,7 +1111,7 @@
                 'display': 'inline-block', 'width': '8px', 'height': '8px',
                 'border-radius': '50%', 'background': '#fff',
                 'box-shadow': '0 0 0 0 rgba(255,255,255,0.85)',
-                'animation': 'rpLiveDotPulse 1.4s ease-out infinite'
+                'animation': 'rpLiveDotPulse 1.6s ease-in-out infinite'
             });
             var barTrack = statusEl.querySelector('.rpLiveBarTrack');
             if (barTrack) forceStyle(barTrack, {
@@ -1163,10 +1163,13 @@
         if (_livePillCssInjected) return;
         var style = document.createElement('style');
         style.textContent =
+            // LIVE dot: a clear in-and-out breath. Scales from 0.6 up to
+            // 1.25 and back, fades opacity 0.5 → 1 → 0.5 alongside, and
+            // still throws the soft ring outward so it reads at a glance.
             '@keyframes rpLiveDotPulse { ' +
-                '0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.9); transform: scale(1); } ' +
-                '70% { box-shadow: 0 0 0 8px rgba(255,255,255,0); transform: scale(1.05); } ' +
-                '100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); transform: scale(1); }' +
+                '0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.9); transform: scale(0.6); opacity: 0.5; } ' +
+                '50%  { box-shadow: 0 0 0 6px rgba(255,255,255,0.15); transform: scale(1.25); opacity: 1; } ' +
+                '100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); transform: scale(0.6); opacity: 0.5; }' +
             '} ' +
             '@keyframes rpActiveGlow { ' +
                 '0% { box-shadow: 0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.18); } ' +
