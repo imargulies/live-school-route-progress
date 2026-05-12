@@ -385,12 +385,10 @@
             var input = pill.querySelector('input[type="checkbox"]');
             forceStyle(pill, {
                 'display': 'inline-flex', 'align-items': 'center', 'gap': '8px',
-                // Bigger pill — both for hit-target on touch and so the
-                // three filter pills look like real buttons rather than
-                // tiny tick boxes.
-                'padding': '10px 18px', 'border-radius': '999px',
+                // Even bigger — pills now read as obvious tappable buttons.
+                'padding': '12px 20px', 'border-radius': '999px',
                 'cursor': 'pointer', 'user-select': 'none',
-                'transition': 'background 0.1s, border-color 0.1s, color 0.1s, box-shadow 0.1s',
+                'transition': 'background 0.08s, border-color 0.08s, color 0.08s, box-shadow 0.08s, transform 0.08s',
                 'position': 'relative', 'line-height': '1'
             });
             if (input) {
@@ -406,6 +404,25 @@
                     'clip': 'rect(0 0 0 0)', 'overflow': 'hidden',
                     'pointer-events': 'none'
                 });
+            }
+            // Bypass the change-event delay: a click listener flips the
+            // input's checked flag itself + repaints the pill on the SAME
+            // frame, then fires a synthetic 'change' so the existing
+            // downstream handlers still run. This makes the toggle feel
+            // instantly responsive even if the change handlers do heavy
+            // work (DOM filter pass, 7d compare fetch, etc.).
+            if (!pill.dataset._rpWired) {
+                pill.dataset._rpWired = '1';
+                pill.addEventListener('click', function (e) {
+                    var inp = this.querySelector('input[type="checkbox"]');
+                    if (!inp) return;
+                    // The label-default would also toggle the input,
+                    // resulting in a double-toggle. Cancel that.
+                    e.preventDefault();
+                    inp.checked = !inp.checked;
+                    refreshFilterPills();
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                }, true);
             }
         }
         refreshFilterPills();
@@ -496,12 +513,11 @@
             //         card and still obviously secondary to the active blue.
             forceStyle(pill, {
                 'background': on ? '#0078d4' : '#f3f4f6',
-                'border': '1px solid ' + (on ? '#0078d4' : '#9ca3af'),
+                'border': '2px solid ' + (on ? '#0078d4' : '#9ca3af'),
                 'color': on ? '#fff' : '#1f2937',
-                // Bigger label too so the pill reads as a proper button.
                 'font-size': '14px', 'font-weight': '600',
-                'padding': '10px 18px', 'line-height': '1',
-                'box-shadow': on ? '0 1px 4px rgba(0,120,212,0.25)' : 'none'
+                'padding': '12px 20px', 'line-height': '1',
+                'box-shadow': on ? '0 2px 6px rgba(0,120,212,0.28)' : 'none'
             });
             var existingMark = pill.querySelector('.rpFilterChkMark');
             if (on && !existingMark) {
