@@ -879,10 +879,14 @@
             });
             var barFill = statusEl.querySelector('.rpLiveBarFill');
             if (barFill) forceStyle(barFill, {
-                'display': 'block', 'height': '100%', 'width': '0%',
-                'border-radius': '3px', 'background': '#28a745',
+                'display': 'block', 'height': '100%',
+                'border-radius': '3px',
                 'animation': 'rpLiveBarFill 5s linear infinite'
             });
+            // Width + background are animation-controlled. Setting them via
+            // forceStyle (which uses !important) would beat the keyframe and
+            // freeze the bar at 0% / green forever — the very symptom this
+            // change fixes.
         } else {
             var now2 = new Date();
             if (now2.getHours() >= 20) {
@@ -5776,14 +5780,16 @@
             // an "Engine: 0 on · 0 off · N unavailable" line is just noise.
             if (c.engineWatch) {
                 var onN = c.engineOnNames || [];
-                var offN = c.engineOffNames || [];
-                var unkN = c.engineUnknownNames || [];
+                // "Unavailable" buses (no ignition data / no recent GPS) get
+                // folded into the OFF bucket — operationally the customer
+                // treats them the same as engine-off, and a separate pill
+                // for buses we have no data on was just noise.
+                var offN = (c.engineOffNames || []).concat(c.engineUnknownNames || []);
                 if (onN.length || offN.length) {
                     var zoneSuffix = c.engineZoneName
                         ? ' <span class="rpEngineWatchZone">@ ' + escapeHtml(c.engineZoneName) + '</span>'
                         : '';
                     var countParts = onN.length + ' on · ' + offN.length + ' off';
-                    if (unkN.length) countParts += ' · ' + unkN.length + ' unavailable';
                     var totalSuffix = ' <span class="rpEngineCountChip">' + countParts + '</span>';
                     var engineParts = '';
                     if (onN.length) {
@@ -5792,16 +5798,11 @@
                             escapeHtml(onN.join(', ')) + '</span></span>';
                     }
                     if (offN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineOffPill" title="Ignition is off, or vehicle is not currently inside the engine zone">' +
+                        engineParts += '<span class="rpEnginePill rpEngineOffPill" title="Ignition is off, vehicle is not at the engine zone, or no recent ignition/GPS data — all treated as OFF">' +
                             engineOffIconSvg() + '<span class="rpEngineWord">OFF</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
                             escapeHtml(offN.join(', ')) + '</span></span>';
                     }
-                    if (unkN.length) {
-                        engineParts += '<span class="rpEnginePill rpEngineUnknownPill" title="No ignition data reported by the device, or no recent GPS — engine state cannot be determined">' +
-                            engineUnknownIconSvg() + '<span class="rpEngineWord">UNAVAILABLE</span><span class="rpEngineSlash">·</span><span class="rpEngineNamesText">' +
-                            escapeHtml(unkN.join(', ')) + '</span></span>';
-                    }
-                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="ON = ignition on at the engine zone (about to go). OFF = ignition off OR vehicle not at the zone. Unavailable = no ignition or position data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
+                    html += '<div class="rpEngineWatchLine"><span class="rpEngineWatchLabel" title="ON = ignition on at the engine zone (about to go). OFF = ignition off, not at the zone, or no recent ignition/GPS data.">Engine' + zoneSuffix + totalSuffix + ':</span> ' + engineParts + '</div>';
                 }
             }
             rows[i].innerHTML = html;
