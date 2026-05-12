@@ -703,17 +703,25 @@
             );
         }
 
-        // On phones (< 480) also hide Time at Zone so the remaining
-        // columns aren't squeezed. CurVeh + Dist already hide < 720.
-        var timeCols = document.querySelectorAll('#rpProgressContent col.rpColTime');
-        for (var tc = 0; tc < timeCols.length; tc++) {
-            forceStyle(timeCols[tc], { 'visibility': phone ? 'collapse' : 'visible' });
+        // On phones (< 480) also hide Time at Zone AND History so the
+        // remaining columns aren't squeezed. CurVeh + Dist already hide
+        // < 720. The 14-day trend chart in each route's card header is
+        // still reachable, so dropping the History pill column is safe.
+        var phoneHide = [
+            { col: 'rpColTime', cell: 'rpTimeCell' },
+            { col: 'rpColHistory', cell: 'rpHistoryCell' }
+        ];
+        for (var ph = 0; ph < phoneHide.length; ph++) {
+            var phCols = document.querySelectorAll('#rpProgressContent col.' + phoneHide[ph].col);
+            for (var pc = 0; pc < phCols.length; pc++) {
+                forceStyle(phCols[pc], { 'visibility': phone ? 'collapse' : 'visible' });
+            }
+            var phCells = document.querySelectorAll('#rpProgressContent .' + phoneHide[ph].cell);
+            for (var pcc = 0; pcc < phCells.length; pcc++) {
+                forceStyle(phCells[pcc], { 'display': phone ? 'none' : 'table-cell' });
+            }
         }
-        var timeCells = document.querySelectorAll('#rpProgressContent .rpTimeCell');
-        for (var tcc = 0; tcc < timeCells.length; tcc++) {
-            forceStyle(timeCells[tcc], { 'display': phone ? 'none' : 'table-cell' });
-        }
-        // Sync the Time column's <th> too (no class on the header).
+        // Sync the matching <th> cells (no class on the header) by index.
         var pTables = document.querySelectorAll('#rpProgressContent .rpProgressTable');
         for (var pt = 0; pt < pTables.length; pt++) {
             var pCols = pTables[pt].querySelectorAll('colgroup > col');
@@ -721,8 +729,11 @@
             if (!pHead) continue;
             var pThs = pHead.children;
             for (var pk = 0; pk < pCols.length && pk < pThs.length; pk++) {
-                if (pCols[pk].className.indexOf('rpColTime') !== -1) {
-                    forceStyle(pThs[pk], { 'display': phone ? 'none' : 'table-cell' });
+                var cls = pCols[pk].className;
+                var hide = phone && (cls.indexOf('rpColTime') !== -1 || cls.indexOf('rpColHistory') !== -1);
+                if (hide) forceStyle(pThs[pk], { 'display': 'none' });
+                else if (cls.indexOf('rpColTime') !== -1 || cls.indexOf('rpColHistory') !== -1) {
+                    forceStyle(pThs[pk], { 'display': 'table-cell' });
                 }
             }
         }
@@ -1100,24 +1111,19 @@
                 'display': 'inline-block', 'width': '8px', 'height': '8px',
                 'border-radius': '50%', 'background': '#fff',
                 'box-shadow': '0 0 0 0 rgba(255,255,255,0.85)',
-                'animation': 'rpLiveDotPulse 1.4s ease-out infinite'
+                'animation': 'rpLiveDotPulse 1.6s ease-in-out infinite'
             });
             var barTrack = statusEl.querySelector('.rpLiveBarTrack');
             if (barTrack) forceStyle(barTrack, {
                 'position': 'relative', 'display': 'inline-block',
-                'width': '110px', 'height': '6px', 'border-radius': '3px',
+                'width': window.innerWidth < 480 ? '80px' : '110px',
+                'height': '6px', 'border-radius': '3px',
                 'background': '#e5e7eb', 'overflow': 'hidden'
             });
-            var barFill = statusEl.querySelector('.rpLiveBarFill');
-            if (barFill) forceStyle(barFill, {
-                'display': 'block', 'height': '100%',
-                'border-radius': '3px',
-                'animation': 'rpLiveBarFill 5s linear infinite'
-            });
-            // Width + background are animation-controlled. Setting them via
-            // forceStyle (which uses !important) would beat the keyframe and
-            // freeze the bar at 0% / green forever — the very symptom this
-            // change fixes.
+            // The .rpLiveBarFill class (declared in ensureLivePillKeyframes
+            // above) owns display/width/height/transform/animation as CSS
+            // rather than inline forceStyle, so cascade quirks can't freeze
+            // the bar at 0% again.
         } else {
             var now2 = new Date();
             if (now2.getHours() >= 20) {
@@ -1157,10 +1163,13 @@
         if (_livePillCssInjected) return;
         var style = document.createElement('style');
         style.textContent =
+            // LIVE dot: a clear in-and-out breath. Scales from 0.6 up to
+            // 1.25 and back, fades opacity 0.5 → 1 → 0.5 alongside, and
+            // still throws the soft ring outward so it reads at a glance.
             '@keyframes rpLiveDotPulse { ' +
-                '0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.9); transform: scale(1); } ' +
-                '70% { box-shadow: 0 0 0 8px rgba(255,255,255,0); transform: scale(1.05); } ' +
-                '100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); transform: scale(1); }' +
+                '0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.9); transform: scale(0.6); opacity: 0.5; } ' +
+                '50%  { box-shadow: 0 0 0 6px rgba(255,255,255,0.15); transform: scale(1.25); opacity: 1; } ' +
+                '100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); transform: scale(0.6); opacity: 0.5; }' +
             '} ' +
             '@keyframes rpActiveGlow { ' +
                 '0% { box-shadow: 0 0 0 1px #28a745, 0 0 8px rgba(40,167,69,0.18); } ' +
@@ -1186,10 +1195,30 @@
             // 5-second live-update countdown bar. Width fills 0 → 100%
             // and the colour shifts green → yellow → red so the user can
             // tell at a glance how soon the next refresh is firing.
+            // Uses transform: scaleX so the animation is GPU-accelerated and
+            // doesn't depend on width-interpolation cascade quirks.
             '@keyframes rpLiveBarFill { ' +
-                '0%   { width: 0%;   background-color: #28a745; } ' +
-                '50%  { width: 50%;  background-color: #f1c40f; } ' +
-                '100% { width: 100%; background-color: #dc3545; }' +
+                '0%   { transform: scaleX(0);   background-color: #28a745; } ' +
+                '50%  { transform: scaleX(0.5); background-color: #f1c40f; } ' +
+                '100% { transform: scaleX(1);   background-color: #dc3545; }' +
+            '} ' +
+            // Define the fill element's structural styles and animation as a
+            // CSS class rather than inline forceStyle. Geotab's framework
+            // sometimes wins inline-style battles in unexpected ways; a stylesheet
+            // rule with !important is much harder to accidentally override.
+            // transform-origin:left so scaleX grows from the left edge, and
+            // backface-visibility:hidden + will-change nudge the GPU to keep
+            // the layer cached between frames.
+            '.rpLiveBarFill { ' +
+                'display: block !important; ' +
+                'width: 100% !important; ' +
+                'height: 100% !important; ' +
+                'border-radius: 3px !important; ' +
+                'transform: scaleX(0); ' +
+                'transform-origin: left center !important; ' +
+                'backface-visibility: hidden; ' +
+                'will-change: transform, background-color; ' +
+                'animation: rpLiveBarFill 5s linear infinite !important;' +
             '}';
         document.head.appendChild(style);
         _livePillCssInjected = true;
