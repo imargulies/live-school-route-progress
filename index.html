@@ -384,20 +384,24 @@
             var pill = pills[fp];
             var input = pill.querySelector('input[type="checkbox"]');
             forceStyle(pill, {
-                'display': 'inline-flex', 'align-items': 'center', 'gap': '8px',
+                'display': 'inline-flex', 'align-items': 'center', 'gap': '6px',
                 'padding': '8px 14px', 'border-radius': '999px',
                 'cursor': 'pointer', 'user-select': 'none',
-                'transition': 'background 0.15s, border-color 0.15s, color 0.15s',
+                'transition': 'background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s',
                 'position': 'relative'
             });
             if (input) {
+                // The native checkbox is hidden visually but kept in the DOM
+                // for screen readers and form state. The pill itself is the
+                // on/off indicator — clean single-tone fill when active,
+                // outlined when idle. Stops the dual-blue (light pill +
+                // darker checkbox inside) clash that read as cluttered.
                 forceStyle(input, {
-                    'appearance': 'none', '-webkit-appearance': 'none',
-                    'width': '18px', 'height': '18px', 'border-radius': '5px',
-                    'border': '2px solid #cbd5e1', 'background': '#fff',
-                    'margin': '0', 'cursor': 'pointer', 'flex-shrink': '0',
-                    'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
-                    'position': 'relative'
+                    'position': 'absolute', 'opacity': '0',
+                    'width': '1px', 'height': '1px',
+                    'margin': '-1px', 'padding': '0', 'border': '0',
+                    'clip': 'rect(0 0 0 0)', 'overflow': 'hidden',
+                    'pointer-events': 'none'
                 });
             }
         }
@@ -483,35 +487,35 @@
             var pill = pills[fp];
             var input = pill.querySelector('input[type="checkbox"]');
             var on = !!(input && input.checked);
+            // Active = filled blue pill with white text + leading check.
+            // Idle = white pill, light gray border, dark text.
+            // Single colour treatment in each state so the eye doesn't have
+            // to parse a checkbox inside a checkbox.
             forceStyle(pill, {
-                'background': on ? '#eaf2ff' : '#fff',
-                'border': '1px solid ' + (on ? '#93c5fd' : '#e5e7eb'),
-                'color': on ? '#1d4ed8' : '#374151',
+                'background': on ? '#0078d4' : '#fff',
+                'border': '1px solid ' + (on ? '#0078d4' : '#d1d5db'),
+                'color': on ? '#fff' : '#374151',
                 'font-size': '13px', 'font-weight': '600',
-                'box-shadow': on ? '0 1px 2px rgba(29,78,216,0.12)' : 'none'
+                'box-shadow': on ? '0 1px 4px rgba(0,120,212,0.25)' : 'none'
             });
-            if (input) {
-                forceStyle(input, {
-                    'background': on ? '#0078d4' : '#fff',
-                    'border-color': on ? '#0078d4' : '#cbd5e1'
-                });
-                var existingMark = pill.querySelector('.rpFilterChkMark');
-                if (on && !existingMark) {
-                    var mk = document.createElement('span');
-                    mk.className = 'rpFilterChkMark';
-                    mk.textContent = '✓';
-                    input.parentNode.insertBefore(mk, input.nextSibling);
-                }
-                if (!on && existingMark) existingMark.parentNode.removeChild(existingMark);
+            var existingMark = pill.querySelector('.rpFilterChkMark');
+            if (on && !existingMark) {
+                var mk = document.createElement('span');
+                mk.className = 'rpFilterChkMark';
+                mk.textContent = '✓';
+                pill.insertBefore(mk, pill.firstChild);
             }
+            if (!on && existingMark) existingMark.parentNode.removeChild(existingMark);
         }
         var marks = document.querySelectorAll('#rpFiltersRow .rpFilterChkMark');
         for (var mi = 0; mi < marks.length; mi++) {
             forceStyle(marks[mi], {
-                'position': 'absolute', 'left': '16px', 'top': '50%',
-                'transform': 'translateY(-50%)',
-                'color': '#fff', 'font-size': '11px', 'font-weight': '900',
-                'pointer-events': 'none', 'line-height': '1'
+                'display': 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
+                'width': '16px', 'height': '16px', 'border-radius': '50%',
+                'background': 'rgba(255,255,255,0.18)', 'color': '#fff',
+                'font-size': '11px', 'font-weight': '900',
+                'pointer-events': 'none', 'line-height': '1',
+                'flex-shrink': '0'
             });
         }
     }
@@ -1117,7 +1121,9 @@
             if (barTrack) forceStyle(barTrack, {
                 'position': 'relative', 'display': 'inline-block',
                 'width': window.innerWidth < 480 ? '80px' : '110px',
-                'height': '6px', 'border-radius': '3px',
+                // Height bumped 6px → 15px (2.5x) for visibility; corner
+                // radius scaled to match so the bar still reads as a pill.
+                'height': '15px', 'border-radius': '8px',
                 'background': '#e5e7eb', 'overflow': 'hidden'
             });
             // The .rpLiveBarFill class (declared in ensureLivePillKeyframes
@@ -1213,7 +1219,7 @@
                 'display: block !important; ' +
                 'width: 100% !important; ' +
                 'height: 100% !important; ' +
-                'border-radius: 3px !important; ' +
+                'border-radius: 8px !important; ' +
                 'transform: scaleX(0); ' +
                 'transform-origin: left center !important; ' +
                 'backface-visibility: hidden; ' +
