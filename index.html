@@ -600,6 +600,112 @@
             if (narrow) forceStyle(etaStatus[e], { 'position': 'static', 'display': 'block', 'text-align': 'right', 'margin-top': '4px' });
             else forceStyle(etaStatus[e], { 'position': 'absolute', 'top': '10px', 'right': '16px', 'display': 'inline', 'text-align': 'left', 'margin-top': '0' });
         }
+        applyMobileProgressTableStyles(narrow);
+    }
+
+    // Phone-friendly tweaks for the per-route progress table.
+    // Eleven columns at a 360px phone width compresses to ~30px each and
+    // wraps driver names into one letter per line. Instead we:
+    //   - hide two low-value columns (Current Vehicle is always "—" in
+    //     vehicle-track mode; Distance is a small extra),
+    //   - drop table-layout:fixed and set a min-width so the remaining
+    //     columns size to content and the wrapper's overflow-x scrolls,
+    //   - pin the driver-name column to the left so it stays in view
+    //     while the user pans the rest of the row.
+    function applyMobileProgressTableStyles(narrow) {
+        var phone = window.innerWidth < 480;
+        var hideOnNarrow = [
+            { col: 'rpColCurVeh', cell: 'rpCurVehCell' },
+            { col: 'rpColDist', cell: 'rpDistCell' }
+        ];
+        for (var h = 0; h < hideOnNarrow.length; h++) {
+            var colEls = document.querySelectorAll('#rpProgressContent col.' + hideOnNarrow[h].col);
+            for (var ci = 0; ci < colEls.length; ci++) {
+                forceStyle(colEls[ci], { 'visibility': narrow ? 'collapse' : 'visible' });
+            }
+            // visibility:collapse on <col> hides the column in most browsers,
+            // but Safari has historically been spotty about it, so we also
+            // hard-hide the data cells + matching header cell.
+            var cells = document.querySelectorAll('#rpProgressContent .' + hideOnNarrow[h].cell);
+            for (var cj = 0; cj < cells.length; cj++) {
+                forceStyle(cells[cj], { 'display': narrow ? 'none' : 'table-cell' });
+            }
+        }
+        // Map the cell-class hides to the matching <th> as well. Headers
+        // don't have rp*Cell classes — we infer by column index relative to
+        // the colgroup. Cheap enough to do per-render.
+        var tables = document.querySelectorAll('#rpProgressContent .rpProgressTable');
+        for (var ti = 0; ti < tables.length; ti++) {
+            var cols = tables[ti].querySelectorAll('colgroup > col');
+            var headTr = tables[ti].querySelector('thead > tr');
+            if (!headTr) continue;
+            var ths = headTr.children;
+            for (var k = 0; k < cols.length && k < ths.length; k++) {
+                var cls = cols[k].className;
+                var hide = narrow && (cls.indexOf('rpColCurVeh') !== -1 || cls.indexOf('rpColDist') !== -1);
+                forceStyle(ths[k], { 'display': hide ? 'none' : 'table-cell' });
+            }
+            forceStyle(tables[ti], narrow
+                ? { 'table-layout': 'auto', 'min-width': '720px', 'width': '100%' }
+                : { 'table-layout': 'fixed', 'min-width': '0', 'width': '100%' }
+            );
+        }
+        // Sticky driver-name column on narrow so it stays visible while the
+        // user horizontally scrolls the rest of the row. The background +
+        // box-shadow give it a clear edge against the panning content.
+        var nameCells = document.querySelectorAll('#rpProgressContent .rpProgressTable .rpNameCell');
+        for (var n = 0; n < nameCells.length; n++) {
+            if (narrow) {
+                forceStyle(nameCells[n], {
+                    'position': 'sticky', 'left': '0', 'z-index': '3',
+                    'background': '#fff',
+                    'box-shadow': '2px 0 4px -2px rgba(15,23,42,0.10)',
+                    'min-width': '110px', 'max-width': '140px',
+                    'text-align': 'left'
+                });
+            } else {
+                forceStyle(nameCells[n], {
+                    'position': 'static', 'left': 'auto', 'z-index': 'auto',
+                    'background': 'transparent', 'box-shadow': 'none',
+                    'min-width': '0', 'max-width': 'none', 'text-align': 'left'
+                });
+            }
+        }
+        // Bigger tap targets on touch-sized viewports.
+        var mapLinks = document.querySelectorAll('#rpProgressContent .rpMapLink');
+        for (var ml = 0; ml < mapLinks.length; ml++) {
+            forceStyle(mapLinks[ml], narrow
+                ? { 'min-height': '36px', 'padding': '8px 12px', 'font-size': '12px' }
+                : { 'min-height': '0', 'padding': '1px 6px', 'font-size': '11px' }
+            );
+        }
+        var historyBtns = document.querySelectorAll('#rpProgressContent .rpRowTlBtn');
+        for (var hb = 0; hb < historyBtns.length; hb++) {
+            forceStyle(historyBtns[hb], narrow
+                ? { 'min-height': '36px', 'padding': '8px 12px', 'font-size': '12px' }
+                : { 'min-height': '0', 'padding': '2px 8px', 'font-size': '11px' }
+            );
+        }
+        var chips = document.querySelectorAll('#rpRouteChips .rpRouteChip');
+        for (var ch = 0; ch < chips.length; ch++) {
+            forceStyle(chips[ch], narrow
+                ? { 'min-height': '40px', 'padding': '10px 14px', 'font-size': '13px' }
+                : { 'min-height': '0', 'padding': '6px 10px', 'font-size': '12px' }
+            );
+        }
+        var filterChks = document.querySelectorAll('#rpFiltersRow .rpFilterChk');
+        for (var fc = 0; fc < filterChks.length; fc++) {
+            forceStyle(filterChks[fc], narrow
+                ? { 'min-height': '40px', 'padding': '6px 10px' }
+                : { 'min-height': '0', 'padding': '0' }
+            );
+        }
+        // Phone-only: tighter horizontal padding on cells so the visible
+        // viewport shows a bit more before the user has to pan.
+        if (phone) {
+            var tds = document.querySelectorAll('#rpProgressContent .rptd, #rpProgressContent .rpProgressTable .rpth');
+            for (var td = 0; td < tds.length; td++) forceStyle(tds[td], { 'padding': '8px 6px' });
+        }
     }
 
     function styleFormElements() {
