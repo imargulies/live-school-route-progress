@@ -673,7 +673,12 @@
             forceStyle(rcTitles[rt], { 'font-size': phone ? '15px' : (narrow ? '16px' : '18px') });
         }
 
-        // Auto-collapse radio row: bigger label hit area on phone.
+        // Auto-collapse radio row: bigger label hit area on phone, AND
+        // shorter labels — "5 min after completion" eats too much room
+        // next to the radio dot at 360px viewports.
+        var acFull = { 'never': 'Never', '5': '5 min after completion',
+            '15': '15 min after completion', '60': '1 hr after completion' };
+        var acShort = { 'never': 'Never', '5': '5m', '15': '15m', '60': '1h' };
         var acLabels = document.querySelectorAll('#rpAutoCollapseWrap label');
         for (var ac = 0; ac < acLabels.length; ac++) {
             forceStyle(acLabels[ac], narrow
@@ -682,6 +687,27 @@
                 : { 'display': 'inline', 'align-items': 'initial', 'gap': '0',
                     'min-height': '0', 'padding': '0', 'font-size': '13px' }
             );
+            var inp = acLabels[ac].querySelector('input[name="rpAutoCollapse"]');
+            if (!inp) continue;
+            var key = inp.value;
+            // Keep our label text in a stable span we own; never re-create
+            // the input so radio state / focus stays intact across resizes.
+            var span = acLabels[ac].querySelector('.rpAcLabelText');
+            if (!span) {
+                span = document.createElement('span');
+                span.className = 'rpAcLabelText';
+                acLabels[ac].appendChild(span);
+                // Strip the original trailing text node (everything after
+                // the input) — the new span owns the visible label now.
+                var n = acLabels[ac].firstChild;
+                while (n) {
+                    var next = n.nextSibling;
+                    if (n !== inp && n !== span && n.nodeType === 3) acLabels[ac].removeChild(n);
+                    n = next;
+                }
+            }
+            var desired = (phone ? acShort : acFull)[key] || key;
+            if (span.textContent !== desired) span.textContent = desired;
         }
 
         // Refresh / Stop Live / Go Live: wider tap area and full-width on phone
@@ -705,6 +731,70 @@
                 ? { 'min-height': '44px', 'font-size': '14px', 'padding': '10px 12px' }
                 : { 'min-height': '0', 'font-size': '13px', 'padding': '8px 12px' }
             );
+        }
+
+        // Route card details: tighter spacing on phone so each card
+        // shows more drivers before the user has to scroll.
+        if (narrow) {
+            // Engine pills (ON · names, OFF · names) become full-width on
+            // phone — comma-separated name lists wrap naturally inside
+            // each pill rather than the whole pill bouncing to a new line.
+            var engPills2 = document.querySelectorAll('#rpProgressContent .rpEnginePill');
+            for (var ep2 = 0; ep2 < engPills2.length; ep2++) {
+                forceStyle(engPills2[ep2], {
+                    'display': 'flex', 'flex-basis': '100%', 'width': '100%',
+                    'box-sizing': 'border-box',
+                    'white-space': 'normal', 'align-items': 'flex-start'
+                });
+            }
+            // Arrived / Not arrived name lines shrink half a step and the
+            // labels wrap if a route has a lot of buses.
+            var arrLines = document.querySelectorAll('.rpArrivedLine, .rpNotArrivedLine');
+            for (var arl = 0; arl < arrLines.length; arl++) {
+                forceStyle(arrLines[arl], { 'font-size': phone ? '12px' : '13px', 'line-height': '1.45' });
+            }
+            // The big "Tracking ... : zone : window" info chip in each
+            // route-card header takes ~half the screen on phone. Soften
+            // it to a quieter sub-header.
+            var rcInfos = document.querySelectorAll('.rpRouteCardInfo');
+            for (var ri = 0; ri < rcInfos.length; ri++) {
+                forceStyle(rcInfos[ri], {
+                    'font-size': phone ? '12px' : '13px',
+                    'background': 'transparent', 'border': '0',
+                    'padding': '0', 'color': '#4b5563',
+                    'font-weight': '500'
+                });
+            }
+            // Status badge in the table column — keep the icon + text
+            // but trim padding so the column doesn't pinch at < 480.
+            var statusBadges = document.querySelectorAll('#rpProgressContent .rpStatusBadge');
+            for (var sb = 0; sb < statusBadges.length; sb++) {
+                forceStyle(statusBadges[sb], phone
+                    ? { 'padding': '3px 8px', 'font-size': '11px', 'gap': '3px' }
+                    : { 'padding': '3px 10px', 'font-size': '12px', 'gap': '4px' }
+                );
+            }
+        } else {
+            // Reset to desktop values when the window grows back.
+            var engPillsR = document.querySelectorAll('#rpProgressContent .rpEnginePill');
+            for (var er = 0; er < engPillsR.length; er++) {
+                forceStyle(engPillsR[er], {
+                    'display': 'inline-flex', 'flex-basis': 'auto', 'width': 'auto',
+                    'white-space': 'normal', 'align-items': 'center'
+                });
+            }
+            var arrLinesR = document.querySelectorAll('.rpArrivedLine, .rpNotArrivedLine');
+            for (var alr = 0; alr < arrLinesR.length; alr++) {
+                forceStyle(arrLinesR[alr], { 'font-size': '13px', 'line-height': '1.5' });
+            }
+            var rcInfosR = document.querySelectorAll('.rpRouteCardInfo');
+            for (var rir = 0; rir < rcInfosR.length; rir++) {
+                forceStyle(rcInfosR[rir], {
+                    'font-size': '16px', 'background': '#e8f4fd',
+                    'border': '1px solid #b8daff', 'padding': '4px 12px',
+                    'color': '#1a1a1a', 'font-weight': '600'
+                });
+            }
         }
 
         // On phones (< 480) also hide Time at Zone AND History so the
