@@ -189,10 +189,6 @@
             <span id="rpAutoRefreshStatus"></span>
         </div>
         <div id="rpFiltersRow">
-            <label id="rpChkNotifyLbl" class="rpFilterChk">
-                <input type="checkbox" id="rpChkNotify">
-                <span class="rpFilterChkText" title="Show a browser notification the first time a row becomes Late or No-show during the current day. One per row per day.">Notify on problems</span>
-            </label>
             <label id="rpChkProblemsOnlyLbl" class="rpFilterChk">
                 <input type="checkbox" id="rpChkProblemsOnly">
                 <span class="rpFilterChkText" title="Hide routes where every assigned vehicle/driver is on track. A route stays visible if any row is late vs target, overdue, not arrived/departed, or no-show.">Show only late arrivals/departures</span>
@@ -3080,14 +3076,6 @@
                 // overdue, no-show, or not arrived / not departed after the window ended.
                 var _problem = isRowProblem(eventMs, r, dateStr, now.getTime(), pastWindow, typeof goodDir === 'undefined' ? undefined : goodDir);
                 if (_problem) { rLate++; lateCount++; }
-                // Fire a browser notification once per (row, day, kind) when a row
-                // crosses into No-show or Late, if the user opted in.
-                if (_problem && isToday) {
-                    var notifKind;
-                    if (pastWindow && !eventMs) notifKind = 'noshow';
-                    else notifKind = 'late';
-                    maybeFireNotification(r, aLookup[aId] || aId, notifKind, dateStr);
-                }
 
                 var _tickVKind = varianceKind(eventMs, r, dateStr, now.getTime(), pastWindow);
                 if (statusCell) {
@@ -4015,18 +4003,32 @@
     document.getElementById('rpBtnGenReport').addEventListener('click', function () { generateReport(); });
     document.getElementById('rpReportSearch').addEventListener('input', function () {
         renderReportTable();
+        renderReportSummary();
     });
     document.getElementById('rpRoutesSearch').addEventListener('input', function () {
         renderRoutesTable();
+    });
+    // Live-filter the already-loaded report when any of the dropdowns
+    // changes. If reportData is empty the table just stays empty — no
+    // need to call out to Geotab again. Date inputs reset the
+    // "regenerate to refresh" hint but don't re-render until Generate
+    // is clicked, because date changes need a new fetch.
+    ['rpRouteFilter', 'rpVehicleFilter', 'rpDriverFilter'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', function () {
+            if (reportData && reportData.length) renderReportTable();
+            renderReportSummary();
+        });
     });
 
     async function generateReport() {
         var fromDate = document.getElementById('rpReportFrom').value;
         var toDate = document.getElementById('rpReportTo').value;
-        var routeFilterId = document.getElementById('rpRouteFilter').value;
-        var vehicleFilterId = document.getElementById('rpVehicleFilter').value;
-        var driverFilterId = document.getElementById('rpDriverFilter').value;
-
+        // Route / Vehicle / Driver dropdowns are no longer used to narrow
+        // the fetch — they're applied client-side in getFilteredReport()
+        // so the user can change them after generation and see the table
+        // re-filter instantly without re-clicking Generate.
         if (!fromDate || !toDate) { showStatus('reportStatus', 'Please select both From and To dates.', 'error'); return; }
 
         var btn = document.getElementById('rpBtnGenReport');
@@ -4045,7 +4047,6 @@
         try {
             await loadRoutes();
             var routes = savedRoutes;
-            if (routeFilterId) routes = routes.filter(function (r) { return r._uid === routeFilterId; });
 
             if (!routes.length) {
                 showStatus('reportStatus', 'No routes found.', 'info');
@@ -4098,8 +4099,6 @@
                     for (var vi = 0; vi < rAssignedIds.length; vi++) {
                         var aId = rAssignedIds[vi];
                         if (!rLookup[aId]) continue;
-                        if (!isDriverRoute && vehicleFilterId && aId !== vehicleFilterId) continue;
-                        if (isDriverRoute && driverFilterId && aId !== driverFilterId) continue;
 
                         var driverId = isDriverRoute ? aId : '';
                         var vehicleId = isDriverRoute ? '' : aId;
@@ -4168,9 +4167,6 @@
                             zoneMinutes = Math.max(0, windowLen - presenceR.zoneMinutes);
                         }
 
-                        if (!isDriverRoute && driverFilterId && driverId !== driverFilterId) continue;
-                        if (isDriverRoute && vehicleFilterId && vehicleId !== vehicleFilterId) continue;
-
                         zoneMinutes = Math.round(zoneMinutes * 10) / 10;
                         var pct = windowLen > 0 ? Math.round((zoneMinutes / windowLen) * 100) : 0;
                         // Both directions require committed timestamps so drive-throughs
@@ -4220,11 +4216,21 @@
         }
     }
 
-    function getFilteredReport() {
-        var filtered = reportData.slice(); // always copy
-        if (activeReportFilter === 'completed') filtered = filtered.filter(function (r) { return r.status === 'Completed'; });
-        else if (activeReportFilter === 'incomplete') filtered = filtered.filter(function (r) { return r.status === 'Incomplete'; });
-        else if (activeReportFilter === 'missed') filtered = filtered.filter(function (r) { return r.status === 'Missed'; });
+    // Apply Route / Vehicle / Driver dropdowns + the search box, but NOT
+    // the status (Completed/Incomplete/Missed) filter. Shared between the
+    // summary cards and the table so the counts on the cards always
+    // match what the table will show when a card is clicked.
+    function getDropdownFilteredReport() {
+        var filtered = reportData.slice();
+        var routeF = document.getElementById('rpRouteFilter');
+        var vehF = document.getElementById('rpVehicleFilter');
+        var drvF = document.getElementById('rpDriverFilter');
+        var routeId = routeF ? routeF.value : '';
+        var vehId = vehF ? vehF.value : '';
+        var drvId = drvF ? drvF.value : '';
+        if (routeId) filtered = filtered.filter(function (r) { return r.routeId === routeId; });
+        if (vehId)   filtered = filtered.filter(function (r) { return r.vehicleId === vehId; });
+        if (drvId)   filtered = filtered.filter(function (r) { return r.driverId === drvId; });
         var searchEl = document.getElementById('rpReportSearch');
         var q = searchEl ? String(searchEl.value || '').trim().toLowerCase() : '';
         if (q) {
@@ -4234,6 +4240,14 @@
                 return hay.indexOf(q) !== -1;
             });
         }
+        return filtered;
+    }
+
+    function getFilteredReport() {
+        var filtered = getDropdownFilteredReport();
+        if (activeReportFilter === 'completed') filtered = filtered.filter(function (r) { return r.status === 'Completed'; });
+        else if (activeReportFilter === 'incomplete') filtered = filtered.filter(function (r) { return r.status === 'Incomplete'; });
+        else if (activeReportFilter === 'missed') filtered = filtered.filter(function (r) { return r.status === 'Missed'; });
         if (_reportSort && _reportSort.col) filtered = sortReportData(filtered);
         return filtered;
     }
@@ -4316,10 +4330,17 @@
     function renderReportSummary() {
         var area = document.getElementById('rpReportSummary');
         if (!reportData.length) { area.innerHTML = ''; return; }
-        var total = reportData.length;
-        var comp = reportData.filter(function (r) { return r.status === 'Completed'; }).length;
-        var inc = reportData.filter(function (r) { return r.status === 'Incomplete'; }).length;
-        var miss = reportData.filter(function (r) { return r.status === 'Missed'; }).length;
+        // Count over the dropdown+search-filtered subset (NOT the status
+        // filter) so the bucket totals always equal what the table shows
+        // when the user clicks the matching card. Before this fix the
+        // summary read off raw reportData and could claim e.g. "10 Missed"
+        // while the table — already narrowed by a Vehicle filter — held
+        // zero Missed rows.
+        var scoped = getDropdownFilteredReport();
+        var total = scoped.length;
+        var comp = scoped.filter(function (r) { return r.status === 'Completed'; }).length;
+        var inc = scoped.filter(function (r) { return r.status === 'Incomplete'; }).length;
+        var miss = scoped.filter(function (r) { return r.status === 'Missed'; }).length;
         var pct = total > 0 ? Math.round((comp / total) * 100) : 0;
 
         area.innerHTML = '<div id="rpReportCards">' +
@@ -8251,80 +8272,6 @@
         for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
         return new TextDecoder().decode(bytes);
     }
-
-    // ========== BROWSER NOTIFICATIONS ==========
-    // Fires one notification per (route, assignedId, day, kind) when a row crosses into
-    // Late or No-show. User opts in via the "Notify on problems" checkbox.
-    // Persist fired-notification keys to localStorage so a page reload (or a
-    // full re-render) doesn't re-fire every outstanding Late/No-show alert.
-    // Keys include the dateStr; we prune entries for dates older than
-    // yesterday on load to keep storage bounded.
-    var _NOTIF_STORAGE_KEY = 'rpNotifiedKeys';
-    function _loadNotifiedKeys() {
-        try {
-            var raw = localStorage.getItem(_NOTIF_STORAGE_KEY);
-            if (!raw) return {};
-            var parsed = JSON.parse(raw);
-            if (!parsed || typeof parsed !== 'object') return {};
-            var today = formatDate(new Date());
-            var yest = new Date(); yest.setDate(yest.getDate() - 1);
-            var yestStr = formatDate(yest);
-            var pruned = {};
-            for (var k in parsed) {
-                if (!parsed.hasOwnProperty(k)) continue;
-                var parts = k.split('|'); // uid|name|dateStr|kind
-                var d = parts[2];
-                if (d === today || d === yestStr) pruned[k] = true;
-            }
-            return pruned;
-        } catch (e) { return {}; }
-    }
-    function _saveNotifiedKeys() {
-        try { localStorage.setItem(_NOTIF_STORAGE_KEY, JSON.stringify(_notifiedKeys)); } catch (e) {}
-    }
-    var _notifiedKeys = _loadNotifiedKeys();
-    function notificationsEnabled() {
-        var el = document.getElementById('rpChkNotify');
-        if (!el || !el.checked) return false;
-        if (typeof Notification === 'undefined') return false;
-        return Notification.permission === 'granted';
-    }
-    function maybeFireNotification(route, entityName, kind, dateStr) {
-        if (!notificationsEnabled()) return;
-        var key = route._uid + '|' + entityName + '|' + dateStr + '|' + kind;
-        if (_notifiedKeys[key]) return;
-        _notifiedKeys[key] = true;
-        _saveNotifiedKeys();
-        var title = kind === 'noshow' ? 'No-show: ' + entityName : 'Late: ' + entityName;
-        var _bodyKind = route.direction === 'outside' ? 'departure' : 'arrival';
-        var body = route.name + ' \u2014 ' + _bodyKind + ' at ' + (route.zoneName || 'zone');
-        try {
-            var n = new Notification(title, { body: body, tag: key, icon: undefined });
-            setTimeout(function () { try { n.close(); } catch (e) {} }, 10000);
-        } catch (e) {}
-    }
-    function resetNotificationsForDay() { _notifiedKeys = {}; _saveNotifiedKeys(); }
-    // When user toggles on the checkbox, request permission.
-    document.getElementById('rpChkNotify').addEventListener('change', function () {
-        refreshFilterPills();
-        if (!this.checked) return;
-        if (typeof Notification === 'undefined') {
-            showErrorBanner('This browser does not support notifications.', { autoDismissMs: 5000 });
-            this.checked = false;
-            refreshFilterPills();
-            return;
-        }
-        if (Notification.permission === 'granted') return;
-        if (Notification.permission === 'denied') {
-            showErrorBanner('Notifications are blocked for this site. Enable them in your browser\u2019s site settings.', { autoDismissMs: 7000 });
-            this.checked = false;
-            return;
-        }
-        var self = this;
-        Notification.requestPermission().then(function (perm) {
-            if (perm !== 'granted') self.checked = false;
-        });
-    });
 
     // ========== GLOBAL ERROR BANNER ==========
     // Shows a dismissable, sticky top-of-app banner when something fails.
